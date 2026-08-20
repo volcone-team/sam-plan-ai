@@ -1,0 +1,234 @@
+{
+  "questionnaire": {
+    "title": "SAM Flow AI Intake Questionnaire",
+    "description": "Welcome to SAM Flow AI. This questionnaire helps us understand your business and generates your personalized revenue plan.",
+    "questions": [
+      {
+        "id": "q1",
+        "number": 1,
+        "title": "Revenue Goal & Timeframe",
+        "description": "What revenue are you aiming for, and over what period?",
+        "type": "revenue-goal",
+        "fields": [
+          {
+            "name": "revenueGoal",
+            "label": "Revenue Goal",
+            "type": "currency",
+            "placeholder": "e.g., 750000",
+            "required": true,
+            "helpText": "Enter the revenue you want to reach"
+          },
+          {
+            "name": "timeframe",
+            "label": "Timeframe",
+            "type": "select",
+            "options": [
+              { "value": 3, "label": "3 months" },
+              { "value": 6, "label": "6 months" },
+              { "value": 12, "label": "12 months" }
+            ],
+            "required": true,
+            "helpText": "How long do you have?"
+          }
+        ]
+      },
+      {
+        "id": "q2",
+        "number": 2,
+        "title": "Products & Pricing",
+        "description": "What do you sell? List your main offerings with pricing.",
+        "type": "products",
+        "fields": [
+          {
+            "name": "products",
+            "label": "Your Products/Services",
+            "type": "product-list",
+            "required": true,
+            "helpText": "Add each product with price and whether it's one-time or recurring",
+            "productFields": [
+              { "name": "productName", "type": "text", "label": "Product Name", "placeholder": "e.g., 1:1 Coaching" },
+              { "name": "price", "type": "currency", "label": "Price", "placeholder": "e.g., 3000" },
+              { "name": "revenueType", "type": "select", "label": "Type", "options": [{ "value": "one-time", "label": "One-time" }, { "value": "recurring", "label": "Recurring (monthly)" }] },
+              { "name": "ticketTier", "type": "select", "label": "Tier", "options": [{ "value": "low", "label": "Low ($0-500)" }, { "value": "mid", "label": "Mid ($500-5K)" }, { "value": "high", "label": "High ($5K+)" }] }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "q3-q7",
+        "number": "3 & 7",
+        "title": "What's Worked & What Hasn't",
+        "description": "Tell us about your wins and your struggles. This helps us recommend the right initiatives.",
+        "type": "wins-and-struggles",
+        "fields": [
+          {
+            "name": "successfulInitiatives",
+            "label": "What has driven real results for you?",
+            "type": "checkbox-list",
+            "options": [
+              { "value": "webinar", "label": "Live Webinars or Online Events" },
+              { "value": "email", "label": "Email Campaigns" },
+              { "value": "linkedin", "label": "LinkedIn Outreach" },
+              { "value": "referral", "label": "Referrals & Partnerships" },
+              { "value": "challenge", "label": "Free Challenges or Lead Magnets" },
+              { "value": "vsl", "label": "Sales Pages or VSLs" },
+              { "value": "content", "label": "Content Marketing or SEO" },
+              { "value": "ads", "label": "Paid Ads (Facebook, Google, etc)" },
+              { "value": "other", "label": "Other" }
+            ],
+            "required": true,
+            "helpText": "Select everything that has worked for you"
+          },
+          {
+            "name": "failedInitiatives",
+            "label": "What has NOT worked or flopped?",
+            "type": "textarea",
+            "placeholder": "e.g., Cold calling has low conversion. Generic emails get high unsubscribe rates.",
+            "required": true,
+            "helpText": "This helps us avoid recommending approaches that won't work for you"
+          }
+        ]
+      },
+      {
+        "id": "q4",
+        "number": 4,
+        "title": "Ideal Customer",
+        "description": "Who are you trying to reach?",
+        "type": "audience",
+        "fields": [
+          {
+            "name": "idealCustomer",
+            "label": "Describe your ideal customer",
+            "type": "textarea",
+            "placeholder": "e.g., Mid-market B2B service companies, $2M-$20M revenue, CEO/COO decision makers, pain point: team alignment",
+            "required": true,
+            "helpText": "Be specific: role, company size, pain point, budget"
+          }
+        ]
+      },
+      {
+        "id": "q5",
+        "number": 5,
+        "title": "Current Assets",
+        "description": "What do you already have? (email list, social followers, website traffic, customers)",
+        "type": "assets",
+        "fields": [
+          {
+            "name": "emailListSize",
+            "label": "Email List Size",
+            "type": "number",
+            "placeholder": "e.g., 3400",
+            "required": false,
+            "helpText": "How many people on your email list?"
+          },
+          {
+            "name": "socialFollowing",
+            "label": "Social Media Following",
+            "type": "number",
+            "placeholder": "e.g., 2100",
+            "required": false,
+            "helpText": "Combined followers across LinkedIn, Twitter, etc"
+          },
+          {
+            "name": "websiteMonthlyVisitors",
+            "label": "Website Monthly Visitors",
+            "type": "number",
+            "placeholder": "e.g., 4200",
+            "required": false,
+            "helpText": "Average monthly website traffic"
+          },
+          {
+            "name": "existingCustomers",
+            "label": "Number of Existing Customers",
+            "type": "number",
+            "placeholder": "e.g., 12",
+            "required": false,
+            "helpText": "Customers you can reach out to"
+          }
+        ]
+      },
+      {
+        "id": "q6",
+        "number": 6,
+        "title": "Budget & Team",
+        "description": "What's your marketing budget and who's on your team?",
+        "type": "budget-team",
+        "fields": [
+          {
+            "name": "monthlyMarketingBudget",
+            "label": "Monthly Marketing Budget",
+            "type": "currency",
+            "placeholder": "e.g., 12000",
+            "required": true,
+            "helpText": "What can you spend on marketing each month?"
+          },
+          {
+            "name": "teamSize",
+            "label": "Team Size",
+            "type": "number",
+            "placeholder": "e.g., 3",
+            "required": true,
+            "helpText": "How many people on your marketing/sales team?"
+          },
+          {
+            "name": "teamRoles",
+            "label": "Team Roles",
+            "type": "checkbox-list",
+            "options": [
+              { "value": "founder", "label": "Founder / CEO" },
+              { "value": "marketer", "label": "Marketer / Marketing Manager" },
+              { "value": "sales", "label": "Sales Person" },
+              { "value": "content_creator", "label": "Content Creator / Writer" },
+              { "value": "designer", "label": "Designer" },
+              { "value": "operations", "label": "Operations / Admin" }
+            ],
+            "required": true,
+            "helpText": "What roles are on your team?"
+          }
+        ]
+      }
+    ],
+    "sampleAnswers": {
+      "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+      "intakeRoute": "full",
+      "revenueGoal": 750000,
+      "timeframe": 12,
+      "products": [
+        {
+          "productName": "1:1 Executive Coaching",
+          "price": 3000,
+          "revenueType": "recurring",
+          "ticketTier": "high"
+        },
+        {
+          "productName": "Team Leadership Intensive",
+          "price": 15000,
+          "revenueType": "one-time",
+          "ticketTier": "high"
+        },
+        {
+          "productName": "Leadership Framework Masterclass",
+          "price": 497,
+          "revenueType": "one-time",
+          "ticketTier": "mid"
+        },
+        {
+          "productName": "Monthly Group Coaching Circle",
+          "price": 497,
+          "revenueType": "recurring",
+          "ticketTier": "mid"
+        }
+      ],
+      "successfulInitiatives": ["webinar", "email", "linkedin", "referral"],
+      "failedInitiatives": "Cold calling (low conversion), generic email blasts (high unsubscribe), YouTube advertising (wrong audience)",
+      "idealCustomer": "Mid-market B2B service companies ($2M-$20M revenue). Decision makers: C-suite executives (CEO, COO, Head of Sales). Pain point: leadership team misalignment and ineffective delegation. Annual training budget: $50K+.",
+      "emailListSize": 3400,
+      "socialFollowing": 2100,
+      "websiteMonthlyVisitors": 4200,
+      "existingCustomers": 12,
+      "monthlyMarketingBudget": 12000,
+      "teamSize": 3,
+      "teamRoles": ["founder", "operations", "content_creator"]
+    }
+  }
+}

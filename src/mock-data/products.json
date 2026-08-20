@@ -1,0 +1,54 @@
+[
+  {
+    "id": "prod-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "name": "1:1 Executive Coaching",
+    "description": "Premium one-on-one coaching for C-suite executives focusing on leadership presence, strategic decision-making, and team dynamics",
+    "price": 3000,
+    "revenueType": "recurring",
+    "ticketTier": "high",
+    "isActive": true,
+    "displayOrder": 1,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2026-01-05T14:32:00Z"
+  },
+  {
+    "id": "prod-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "name": "Team Leadership Intensive",
+    "description": "Multi-week intensive program for entire leadership teams. Includes group workshops, individual coaching, and implementation support",
+    "price": 15000,
+    "revenueType": "one-time",
+    "ticketTier": "high",
+    "isActive": true,
+    "displayOrder": 2,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2026-01-05T14:32:00Z"
+  },
+  {
+    "id": "prod-f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "name": "Leadership Framework Masterclass",
+    "description": "Self-paced online masterclass covering the Elevate Framework for authentic leadership. Includes video modules, workbooks, and email support",
+    "price": 497,
+    "revenueType": "one-time",
+    "ticketTier": "mid",
+    "isActive": true,
+    "displayOrder": 3,
+    "createdAt": "2024-08-20T10:30:00Z",
+    "updatedAt": "2026-01-05T14:32:00Z"
+  },
+  {
+    "id": "prod-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "name": "Monthly Group Coaching Circle",
+    "description": "Monthly cohort-based coaching circle for executives. Limited to 8 participants. Focuses on peer learning and accountability",
+    "price": 497,
+    "revenueType": "recurring",
+    "ticketTier": "mid",
+    "isActive": true,
+    "displayOrder": 4,
+    "createdAt": "2024-09-10T11:00:00Z",
+    "updatedAt": "2026-01-05T14:32:00Z"
+  }
+]

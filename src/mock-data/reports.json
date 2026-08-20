@@ -1,0 +1,212 @@
+[
+  {
+    "id": "report-weekly-status-2026-01-06-ea0b1c2d-e3f4-46e7-8f9a-0b1c2d3e4f5a",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "reportType": "weekly_status",
+    "startDate": "2026-01-06T00:00:00Z",
+    "endDate": "2026-01-12T23:59:59Z",
+    "totalRevenue": 7488,
+    "totalExpenses": 1100,
+    "netRevenue": 6388,
+    "grossMargin": 0.853,
+    "revenueByProduct": [
+      {
+        "productId": "prod-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+        "productName": "1:1 Executive Coaching",
+        "revenue": 6000,
+        "percentOfTotal": 0.801
+      },
+      {
+        "productId": "prod-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+        "productName": "Monthly Group Coaching Circle",
+        "revenue": 1488,
+        "percentOfTotal": 0.199
+      }
+    ],
+    "revenueByInitiative": [
+      {
+        "initiativeId": "init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
+        "initiativeName": "Q1 Live Webinar: Leadership Authenticity",
+        "revenue": 0,
+        "percentOfTotal": 0,
+        "roi": null
+      },
+      {
+        "initiativeId": "init-linkedin-outreach-q1-a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c",
+        "initiativeName": "LinkedIn Outreach: Q1 Target List",
+        "revenue": 0,
+        "percentOfTotal": 0,
+        "roi": null
+      }
+    ],
+    "expenseByCategory": [
+      {
+        "category": "tools",
+        "amount": 100,
+        "percentOfTotal": 0.091
+      },
+      {
+        "category": "talent",
+        "amount": 800,
+        "percentOfTotal": 0.727
+      },
+      {
+        "category": "production",
+        "amount": 200,
+        "percentOfTotal": 0.182
+      }
+    ],
+    "summary": "Week 1 of Q1 kickoff. Foundational setup week. Two recurring products generating baseline revenue (1:1 coaching + group coaching). Early-stage initiatives (webinar, LinkedIn) still in promotion phase with no revenue yet. All systems green. On track for 400 webinar registrations and 100 LinkedIn connections.",
+    "createdAt": "2026-01-13T09:00:00Z",
+    "updatedAt": "2026-01-13T09:00:00Z"
+  },
+  {
+    "id": "report-weekly-status-2026-01-13-b1c2d3e4-f5a6-47e8-9a0b-1c2d3e4f5a6b",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "reportType": "weekly_status",
+    "startDate": "2026-01-13T00:00:00Z",
+    "endDate": "2026-01-19T23:59:59Z",
+    "totalRevenue": 8240,
+    "totalExpenses": 350,
+    "netRevenue": 7890,
+    "grossMargin": 0.958,
+    "revenueByProduct": [
+      {
+        "productId": "prod-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+        "productName": "1:1 Executive Coaching",
+        "revenue": 6000,
+        "percentOfTotal": 0.728
+      },
+      {
+        "productId": "prod-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+        "productName": "Monthly Group Coaching Circle",
+        "revenue": 1488,
+        "percentOfTotal": 0.181
+      },
+      {
+        "productId": "prod-f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
+        "productName": "Leadership Framework Masterclass",
+        "revenue": 752,
+        "percentOfTotal": 0.091
+      }
+    ],
+    "revenueByInitiative": [
+      {
+        "initiativeId": "init-email-nurture-q1-b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d",
+        "initiativeName": "Email Nurture: Masterclass Jan-Feb",
+        "revenue": 752,
+        "percentOfTotal": 0.091,
+        "roi": null
+      }
+    ],
+    "expenseByCategory": [
+      {
+        "category": "production",
+        "amount": 350,
+        "percentOfTotal": 1.0
+      }
+    ],
+    "summary": "Week 2: Momentum building. Email campaign (masterclass nurture) driving first revenue. 28 registrations for webinar (7% of goal). Email open rate 25% (vs 18% conservative benchmark). Excellent engagement. Expect webinar registrations to accelerate as we enter final 2 weeks of promo.",
+    "createdAt": "2026-01-20T09:00:00Z",
+    "updatedAt": "2026-01-20T09:00:00Z"
+  },
+  {
+    "id": "report-monthly-review-2026-01-end-c2d3e4f5-a6b7-48e9-0a1b-2c3d4e5f6a7b",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "reportType": "monthly_review",
+    "startDate": "2026-01-01T00:00:00Z",
+    "endDate": "2026-01-31T23:59:59Z",
+    "totalRevenue": 25728,
+    "totalExpenses": 2350,
+    "netRevenue": 23378,
+    "grossMargin": 0.909,
+    "revenueByProduct": [
+      {
+        "productId": "prod-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+        "productName": "1:1 Executive Coaching",
+        "revenue": 18000,
+        "percentOfTotal": 0.699
+      },
+      {
+        "productId": "prod-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+        "productName": "Monthly Group Coaching Circle",
+        "revenue": 4464,
+        "percentOfTotal": 0.173
+      },
+      {
+        "productId": "prod-f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
+        "productName": "Leadership Framework Masterclass",
+        "revenue": 3264,
+        "percentOfTotal": 0.127
+      }
+    ],
+    "revenueByInitiative": [
+      {
+        "initiativeId": "init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
+        "initiativeName": "Q1 Live Webinar: Leadership Authenticity",
+        "revenue": 0,
+        "percentOfTotal": 0,
+        "roi": null
+      },
+      {
+        "initiativeId": "init-email-nurture-q1-b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d",
+        "initiativeName": "Email Nurture: Masterclass Jan-Feb",
+        "revenue": 3264,
+        "percentOfTotal": 0.127,
+        "roi": null
+      },
+      {
+        "initiativeId": "init-linkedin-outreach-q1-a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c",
+        "initiativeName": "LinkedIn Outreach: Q1 Target List",
+        "revenue": 0,
+        "percentOfTotal": 0,
+        "roi": null
+      }
+    ],
+    "summary": "Strong January performance. Baseline recurring revenue (1:1 + group coaching) providing $22.5K foundation. Email campaign successfully driving masterclass signups (+$3.2K). Webinar still in promo phase (88 registrations vs 400 goal by Feb 13). LinkedIn outreach progressing on schedule. Expenses well-controlled at 9.1% of revenue. Tracking toward Q1 target of $135K.",
+    "createdAt": "2026-02-01T09:00:00Z",
+    "updatedAt": "2026-02-01T09:00:00Z"
+  },
+  {
+    "id": "report-roi-analysis-q1-d3d4e5f6-a7b8-49d0-1e2f-3a4b5c6d7e8f",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "reportType": "roi_analysis",
+    "startDate": "2026-01-01T00:00:00Z",
+    "endDate": "2026-01-31T23:59:59Z",
+    "totalRevenue": 25728,
+    "totalExpenses": 2350,
+    "netRevenue": 23378,
+    "grossMargin": 0.909,
+    "roiAnalyses": [
+      {
+        "initiativeId": "init-email-nurture-q1-b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d",
+        "initiativeName": "Email Nurture: Masterclass Jan-Feb",
+        "revenue": 3264,
+        "expenses": 0,
+        "netRevenue": 3264,
+        "roi": 0,
+        "roiPercentage": 0
+      },
+      {
+        "initiativeId": "init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
+        "initiativeName": "Q1 Live Webinar: Leadership Authenticity",
+        "revenue": 0,
+        "expenses": 450,
+        "netRevenue": -450,
+        "roi": -1,
+        "roiPercentage": -100
+      },
+      {
+        "initiativeId": "init-linkedin-outreach-q1-a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c",
+        "initiativeName": "LinkedIn Outreach: Q1 Target List",
+        "revenue": 0,
+        "expenses": 800,
+        "netRevenue": -800,
+        "roi": -1,
+        "roiPercentage": -100
+      }
+    ],
+    "createdAt": "2026-02-01T09:00:00Z",
+    "updatedAt": "2026-02-01T09:00:00Z"
+  }
+]

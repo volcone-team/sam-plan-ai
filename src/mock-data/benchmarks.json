@@ -1,0 +1,461 @@
+[
+  {
+    "id": "bench-webinar-reg-rate-d3e4f5a6-b7c8-49d0-1e2f-3a4b5c6d7e8f",
+    "initiativeTypeId": "inittype-webinar-90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
+    "fieldName": "registration_rate",
+    "fieldDescription": "Percentage of audience that registers for webinar",
+    "data": {
+      "conservative": 0.05,
+      "moderate": 0.08,
+      "aggressive": 0.12
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching historical webinars (2023-2024). Based on 8 live webinars to warm list.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-webinar-show-rate-e4f5a6b7-c8d9-40e1-2f3a-4b5c6d7e8f9a",
+    "initiativeTypeId": "inittype-webinar-90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
+    "fieldName": "show_rate",
+    "fieldDescription": "Percentage of registrants who show up live",
+    "data": {
+      "conservative": 0.45,
+      "moderate": 0.55,
+      "aggressive": 0.65
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching webinars. Avg 52% show rate across 8 events.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-webinar-conversion-f5a6b7c8-d9ea-41f2-3a4b-5c6d7e8f9a0b",
+    "initiativeTypeId": "inittype-webinar-90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
+    "fieldName": "offer_conversion",
+    "fieldDescription": "Percentage of attendees who book call or purchase offer",
+    "data": {
+      "conservative": 0.08,
+      "moderate": 0.12,
+      "aggressive": 0.18
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching. Soft offer to 1:1 coaching. Avg 10% conversion.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-email-open-rate-a6b7c8d9-ea0b-42a3-4b5c-6d7e8f9a0b1c",
+    "initiativeTypeId": "inittype-email-a1b2c3d4-e5f6-4a7b-1c8d-9e0f1a2b3c4d",
+    "fieldName": "open_rate",
+    "fieldDescription": "Percentage of emails opened",
+    "data": {
+      "conservative": 0.18,
+      "moderate": 0.25,
+      "aggressive": 0.35
+    },
+    "source": "published",
+    "sourceDetails": "HubSpot Email Benchmark Report (2024). B2B service industry avg.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-email-click-rate-b7c8d9ea-b0c1-43b4-5c6d-7e8f9a0b1c2d",
+    "initiativeTypeId": "inittype-email-a1b2c3d4-e5f6-4a7b-1c8d-9e0f1a2b3c4d",
+    "fieldName": "click_rate",
+    "fieldDescription": "Percentage of emails clicked",
+    "data": {
+      "conservative": 0.02,
+      "moderate": 0.04,
+      "aggressive": 0.08
+    },
+    "source": "published",
+    "sourceDetails": "HubSpot Email Benchmark Report (2024).",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-email-conversion-rate-c8d9ea0b-c1d2-44c5-6d7e-8f9a0b1c2d3e",
+    "initiativeTypeId": "inittype-email-a1b2c3d4-e5f6-4a7b-1c8d-9e0f1a2b3c4d",
+    "fieldName": "conversion_rate",
+    "fieldDescription": "Percentage of clicks that convert to sale/signup",
+    "data": {
+      "conservative": 0.01,
+      "moderate": 0.025,
+      "aggressive": 0.05
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching email campaigns. Avg 2-3% click-to-sale.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-linkedin-accept-rate-d9ea0b1c-d2e3-45d6-7e8f-9a0b1c2d3e4f",
+    "initiativeTypeId": "inittype-linkedin-b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
+    "fieldName": "connection_accept_rate",
+    "fieldDescription": "Percentage of connection requests accepted",
+    "data": {
+      "conservative": 0.25,
+      "moderate": 0.35,
+      "aggressive": 0.50
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching LinkedIn outreach. 30% avg accept rate on personalized requests.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-linkedin-response-rate-ea0b1c2d-e3f4-46e7-8f9a-0b1c2d3e4f5a",
+    "initiativeTypeId": "inittype-linkedin-b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
+    "fieldName": "response_rate",
+    "fieldDescription": "Percentage of accepted connections who respond to DM",
+    "data": {
+      "conservative": 0.05,
+      "moderate": 0.10,
+      "aggressive": 0.15
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching. 8-10% of accepted connections respond to value-first DM.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-linkedin-meeting-rate-b0b1c2d3-e4f5-47e8-9a0b-1c2d3e4f5a6b",
+    "initiativeTypeId": "inittype-linkedin-b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
+    "fieldName": "meeting_booking_rate",
+    "fieldDescription": "Percentage of respondents who book a meeting",
+    "data": {
+      "conservative": 0.08,
+      "moderate": 0.15,
+      "aggressive": 0.25
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching LinkedIn pipeline. 12% of responders book discovery call.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-webinar-cost-per-lead-c1c2d3e4-f5a6-48e9-0a1b-2c3d4e5f6a7b",
+    "initiativeTypeId": "inittype-webinar-90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
+    "costMetric": "cost_per_registrant",
+    "costMetricDescription": "Average cost per webinar registrant",
+    "data": {
+      "conservative": 1.25,
+      "moderate": 1.0,
+      "aggressive": 0.75
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching. Webinar platform + email + small ad spend. ~$500 total cost for 400-600 regs.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-linkedin-cost-per-meeting-d2d3e4f5-a6b7-49ea-1b2c-3d4e5f6a7b8c",
+    "initiativeTypeId": "inittype-linkedin-b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
+    "costMetric": "cost_per_meeting_booked",
+    "costMetricDescription": "Average cost per discovery meeting booked",
+    "data": {
+      "conservative": 120.0,
+      "moderate": 80.0,
+      "aggressive": 50.0
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching. Internal labor estimate. 100 connections @ 17 hrs = $1,200 total. 10-20 meetings = $60-120/meeting.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-referral-rate-a0b1c2d3-e4f5-46e7-8f9a-0b1c2d3e4f5a",
+    "initiativeTypeId": "inittype-referral-c3d4e5f6-a7b8-4c9d-3e0f-1a2b3c4d5e6f",
+    "fieldName": "referral_rate",
+    "fieldDescription": "Percentage of active partners generating referrals per quarter",
+    "data": {
+      "conservative": 0.02,
+      "moderate": 0.05,
+      "aggressive": 0.10
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching partner network. 5-10% of partners actively referring.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-referral-conversion-b1c2d3e4-f5a6-47e8-9a0b-1c2d3e4f5a6b",
+    "initiativeTypeId": "inittype-referral-c3d4e5f6-a7b8-4c9d-3e0f-1a2b3c4d5e6f",
+    "fieldName": "conversion_rate",
+    "fieldDescription": "Percentage of referrals that convert to customers",
+    "data": {
+      "conservative": 0.30,
+      "moderate": 0.50,
+      "aggressive": 0.70
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching. Referred prospects are warm intro from trusted source. High close rate.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-challenge-signup-c2d3e4f5-a6b7-48e9-0a1b-2c3d4e5f6a7b",
+    "initiativeTypeId": "inittype-challenge-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+    "fieldName": "signup_rate",
+    "fieldDescription": "Percentage of traffic that signs up for free challenge",
+    "data": {
+      "conservative": 0.02,
+      "moderate": 0.04,
+      "aggressive": 0.08
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching challenges. 2-8% opt-in rate from organic + email promotion.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-challenge-completion-d3e4f5a6-b7c8-49d0-1e2f-3a4b5c6d7e8f",
+    "initiativeTypeId": "inittype-challenge-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+    "fieldName": "completion_rate",
+    "fieldDescription": "Percentage of signups that complete all 7 days",
+    "data": {
+      "conservative": 0.15,
+      "moderate": 0.25,
+      "aggressive": 0.40
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching. High-engagement challenge format drives 15-40% completion.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-challenge-application-e4f5a6b7-c8d9-40e1-2f3a-4b5c6d7e8f9a",
+    "initiativeTypeId": "inittype-challenge-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+    "fieldName": "application_rate",
+    "fieldDescription": "Percentage of completers who submit application for paid offer",
+    "data": {
+      "conservative": 0.10,
+      "moderate": 0.20,
+      "aggressive": 0.35
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching. Pre-qualified by completing 7 days. 10-35% apply.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-vsl-view-rate-f5a6b7c8-d9ea-41f2-3a4b-5c6d7e8f9a0b",
+    "initiativeTypeId": "inittype-vsl-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+    "fieldName": "view_rate",
+    "fieldDescription": "Percentage of visitors who play the VSL",
+    "data": {
+      "conservative": 0.25,
+      "moderate": 0.40,
+      "aggressive": 0.60
+    },
+    "source": "published",
+    "sourceDetails": "VSL industry benchmarks. Well-written VSL achieves 25-60% play rate.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-vsl-click-rate-a6b7c8d9-ea0b-42a3-4b5c-6d7e8f9a0b1c",
+    "initiativeTypeId": "inittype-vsl-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+    "fieldName": "click_rate",
+    "fieldDescription": "Percentage of viewers who click CTA button",
+    "data": {
+      "conservative": 0.02,
+      "moderate": 0.05,
+      "aggressive": 0.10
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching VSL history. Strong VSL with good CTA placement achieves 2-10% CTR.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-vsl-conversion-b7c8d9ea-b0c1-43b4-5c6d-7e8f9a0b1c2d",
+    "initiativeTypeId": "inittype-vsl-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+    "fieldName": "conversion_rate",
+    "fieldDescription": "Percentage of CTA clicks that convert to customer",
+    "data": {
+      "conservative": 0.01,
+      "moderate": 0.025,
+      "aggressive": 0.05
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching. VSL-to-booking flow. 1-5% of clickers purchase/book.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-paid-ads-ctr-c8d9ea0b-c1d2-44c5-6d7e-8f9a0b1c2d3e",
+    "initiativeTypeId": "inittype-paid-ads-f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
+    "fieldName": "click_through_rate",
+    "fieldDescription": "Percentage of ad impressions that are clicked",
+    "data": {
+      "conservative": 0.008,
+      "moderate": 0.015,
+      "aggressive": 0.03
+    },
+    "source": "published",
+    "sourceDetails": "Facebook/Google Ads industry benchmarks for B2B service ads.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-paid-ads-conversion-d9ea0b1c-d2e3-45d6-7e8f-9a0b1c2d3e4f",
+    "initiativeTypeId": "inittype-paid-ads-f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
+    "fieldName": "landing_page_conversion",
+    "fieldDescription": "Percentage of ad clicks that convert on landing page",
+    "data": {
+      "conservative": 0.10,
+      "moderate": 0.20,
+      "aggressive": 0.35
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching paid campaigns. Well-optimized pages achieve 10-35% conversion.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-sales-calls-booking-rate-ea0b1c2d-e3f4-46e7-8f9a-0b1c2d3e4f5a",
+    "initiativeTypeId": "inittype-sales-calls-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+    "fieldName": "call_booking_rate",
+    "fieldDescription": "Percentage of prospects who book a discovery call",
+    "data": {
+      "conservative": 0.05,
+      "moderate": 0.10,
+      "aggressive": 0.20
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching sales funnel. 5-20% of qualified leads book calls.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-sales-calls-show-rate-b0b1c2d3-e4f5-47e8-9a0b-1c2d3e4f5a6b",
+    "initiativeTypeId": "inittype-sales-calls-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+    "fieldName": "show_rate",
+    "fieldDescription": "Percentage of booked calls where prospect shows up",
+    "data": {
+      "conservative": 0.60,
+      "moderate": 0.75,
+      "aggressive": 0.85
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching discovery calls. 60-85% show rate on booked calls.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-sales-calls-close-rate-c1c2d3e4-f5a6-48e9-0a1b-2c3d4e5f6a7b",
+    "initiativeTypeId": "inittype-sales-calls-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+    "fieldName": "close_rate",
+    "fieldDescription": "Percentage of calls that close to a sale",
+    "data": {
+      "conservative": 0.15,
+      "moderate": 0.25,
+      "aggressive": 0.40
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching. Discovery calls to pre-qualified leads. 15-40% close rate.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-content-engagement-d2d3e4f5-a6b7-49ea-1b2c-3d4e5f6a7b8c",
+    "initiativeTypeId": "inittype-content-social-b8c9d0e1-f2a3-4b4c-2d5e-6f7a8b9c0d1e",
+    "fieldName": "engagement_rate",
+    "fieldDescription": "Percentage of followers who engage with posted content (likes, comments, shares)",
+    "data": {
+      "conservative": 0.02,
+      "moderate": 0.04,
+      "aggressive": 0.08
+    },
+    "source": "published",
+    "sourceDetails": "Social media benchmarks. B2B service industry. 2-8% engagement is typical.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-content-follower-growth-e3e4f5a6-b7c8-49d0-1e2f-3a4b5c6d7e8f",
+    "initiativeTypeId": "inittype-content-social-b8c9d0e1-f2a3-4b4c-2d5e-6f7a8b9c0d1e",
+    "fieldName": "follower_growth_rate",
+    "fieldDescription": "Monthly percentage growth of follower base",
+    "data": {
+      "conservative": 0.02,
+      "moderate": 0.05,
+      "aggressive": 0.10
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching social channels. Consistent posting with relevant content = 2-10% monthly growth.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "bench-content-lead-gen-f4f5a6b7-c8d9-40e1-2f3a-4b5c6d7e8f9a",
+    "initiativeTypeId": "inittype-content-social-b8c9d0e1-f2a3-4b4c-2d5e-6f7a8b9c0d1e",
+    "fieldName": "lead_generation_rate",
+    "fieldDescription": "Percentage of social traffic that converts to email subscriber",
+    "data": {
+      "conservative": 0.005,
+      "moderate": 0.01,
+      "aggressive": 0.025
+    },
+    "source": "first_party",
+    "sourceDetails": "Elevate Coaching. Lead magnet linked in bio/posts. 0.5-2.5% of social traffic to email list.",
+    "initiativeTypeVersion": "2026-Q1",
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  }
+]

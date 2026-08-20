@@ -1,26 +1,714 @@
 @import "tailwindcss";
 
+/* ============================================================
+   DESIGN SYSTEM FOUNDATION — Phase 2.1
+   SAM Flow AI Design Tokens
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   BASE THEME (Light Mode)
+   All colors use HSL format for easy manipulation.
+   Naming: --{semantic}-{variant}
+   ------------------------------------------------------------ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* --- Background --- */
+  --background: 0 0% 100%;
+  --background-subtle: 180 20% 98%;
+  --background-muted: 180 15% 96%;
+  --background-elevated: 0 0% 100%;
+
+  /* --- Foreground --- */
+  --foreground: 210 89% 12%;
+  --foreground-muted: 210 30% 35%;
+  --foreground-subtle: 210 20% 50%;
+
+  /* --- Card --- */
+  --card: 0 0% 100%;
+  --card-foreground: 210 89% 12%;
+
+  /* --- Popover --- */
+  --popover: 0 0% 100%;
+  --popover-foreground: 210 89% 12%;
+
+  /* --- Primary --- */
+  --primary: 152 100% 35%;
+  --primary-foreground: 0 0% 100%;
+  --primary-hover: 152 100% 30%;
+
+  /* --- Secondary --- */
+  --secondary: 180 15% 96%;
+  --secondary-foreground: 210 89% 12%;
+  --secondary-hover: 180 15% 92%;
+
+  /* --- Accent --- */
+  --accent: 181 82% 92%;
+  --accent-foreground: 210 89% 12%;
+
+  /* --- Destructive --- */
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+
+  /* --- Border & Input --- */
+  --border: 180 10% 90%;
+  --border-muted: 180 10% 94%;
+  --border-strong: 180 15% 75%;
+  --input: 180 10% 90%;
+  --ring: 152 100% 35%;
+
+  /* --- Status Colors --- */
+  --success: 152 100% 35%;
+  --success-foreground: 0 0% 100%;
+  --success-background: 152 80% 95%;
+  --success-border: 152 80% 75%;
+
+  --warning: 38 92% 50%;
+  --warning-foreground: 0 0% 100%;
+  --warning-background: 48 96% 95%;
+  --warning-border: 43 96% 77%;
+
+  --error: 0 84% 60%;
+  --error-foreground: 0 0% 100%;
+  --error-background: 0 86% 97%;
+  --error-border: 0 84% 82%;
+
+  --info: 181 82% 41%;
+  --info-foreground: 0 0% 100%;
+  --info-background: 181 80% 95%;
+  --info-border: 181 80% 75%;
+
+  /* --- Form Validation --- */
+  --valid: 152 100% 35%;
+  --valid-foreground: 152 100% 20%;
+  --valid-background: 152 80% 95%;
+  --valid-border: 152 80% 60%;
+
+  --invalid: 0 84% 60%;
+  --invalid-foreground: 0 84% 30%;
+  --invalid-background: 0 86% 97%;
+  --invalid-border: 0 84% 70%;
+
+  --focus: 152 100% 35%;
+  --focus-ring: 152 100% 35%;
+
+  /* --- Chart Colors --- */
+  --chart-1: 152 100% 35%;
+  --chart-2: 181 82% 41%;
+  --chart-3: 38 92% 50%;
+  --chart-4: 233 100% 62%;
+  --chart-5: 163 100% 40%;
+  --chart-6: 340 75% 55%;
+  --chart-7: 117 80% 40%;
+  --chart-8: 25 95% 53%;
+
+  /* --- Sidebar --- */
+  --sidebar: 180 15% 97%;
+  --sidebar-foreground: 210 89% 12%;
+  --sidebar-border: 180 10% 90%;
+  --sidebar-accent: 180 15% 93%;
+  --sidebar-accent-foreground: 210 89% 12%;
+  --sidebar-primary: 152 100% 35%;
+  --sidebar-primary-foreground: 0 0% 100%;
+
+  /* --- Border Radius --- */
+  --radius: 0.5rem;
+  --radius-sm: 0.125rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-full: 9999px;
+
+  /* --- Shadows --- */
+  --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.05);
+  --shadow: 0 1px 3px 0 hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
+  --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.1), 0 2px 4px -2px hsl(0 0% 0% / 0.1);
+  --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.1), 0 4px 6px -4px hsl(0 0% 0% / 0.1);
+  --shadow-xl: 0 20px 25px -5px hsl(0 0% 0% / 0.1), 0 8px 10px -6px hsl(0 0% 0% / 0.1);
+  --shadow-2xl: 0 25px 50px -12px hsl(0 0% 0% / 0.25);
+  --shadow-inner: inset 0 2px 4px 0 hsl(0 0% 0% / 0.05);
+
+  /* --- Animation / Motion --- */
+  --duration-fast: 100ms;
+  --duration-default: 200ms;
+  --duration-slow: 300ms;
+  --duration-slower: 500ms;
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* --- Container Widths --- */
+  --container-sm: 640px;
+  --container-md: 768px;
+  --container-lg: 1024px;
+  --container-xl: 1280px;
+  --container-2xl: 1536px;
+  --container-prose: 65ch;
+
+  /* --- Sidebar Dimensions --- */
+  --sidebar-width: 240px;
+  --sidebar-width-collapsed: 64px;
 }
 
+/* ------------------------------------------------------------
+   DARK THEME
+   ------------------------------------------------------------ */
+.dark {
+  /* --- Background --- */
+  --background: 212 68% 6%;
+  --background-subtle: 213 67% 10%;
+  --background-muted: 213 63% 13%;
+  --background-elevated: 213 63% 16%;
+
+  /* --- Foreground --- */
+  --foreground: 0 0% 98%;
+  --foreground-muted: 210 20% 65%;
+  --foreground-subtle: 210 15% 50%;
+
+  /* --- Card --- */
+  --card: 213 63% 16%;
+  --card-foreground: 0 0% 98%;
+
+  /* --- Popover --- */
+  --popover: 213 63% 16%;
+  --popover-foreground: 0 0% 98%;
+
+  /* --- Primary --- */
+  --primary: 152 100% 40%;
+  --primary-foreground: 212 68% 6%;
+  --primary-hover: 152 100% 47%;
+
+  /* --- Secondary --- */
+  --secondary: 213 63% 16%;
+  --secondary-foreground: 0 0% 98%;
+  --secondary-hover: 213 55% 20%;
+
+  /* --- Accent --- */
+  --accent: 213 63% 16%;
+  --accent-foreground: 0 0% 98%;
+
+  /* --- Destructive --- */
+  --destructive: 0 63% 51%;
+  --destructive-foreground: 0 0% 98%;
+
+  /* --- Border & Input --- */
+  --border: 213 50% 20%;
+  --border-muted: 213 50% 14%;
+  --border-strong: 213 45% 30%;
+  --input: 213 50% 20%;
+  --ring: 152 100% 40%;
+
+  /* --- Status Colors --- */
+  --success: 152 100% 40%;
+  --success-foreground: 152 80% 95%;
+  --success-background: 152 80% 12%;
+  --success-border: 152 80% 28%;
+
+  --warning: 38 92% 50%;
+  --warning-foreground: 48 96% 95%;
+  --warning-background: 38 92% 12%;
+  --warning-border: 38 92% 28%;
+
+  --error: 0 63% 51%;
+  --error-foreground: 0 86% 97%;
+  --error-background: 0 63% 12%;
+  --error-border: 0 63% 28%;
+
+  --info: 181 82% 45%;
+  --info-foreground: 181 80% 95%;
+  --info-background: 181 80% 12%;
+  --info-border: 181 80% 28%;
+
+  /* --- Form Validation --- */
+  --valid: 152 100% 40%;
+  --valid-foreground: 152 80% 90%;
+  --valid-background: 152 80% 12%;
+  --valid-border: 152 80% 32%;
+
+  --invalid: 0 63% 51%;
+  --invalid-foreground: 0 86% 90%;
+  --invalid-background: 0 63% 12%;
+  --invalid-border: 0 63% 32%;
+
+  --focus: 152 100% 40%;
+  --focus-ring: 152 100% 40%;
+
+  /* --- Chart Colors --- */
+  --chart-1: 152 100% 45%;
+  --chart-2: 181 82% 50%;
+  --chart-3: 43 96% 56%;
+  --chart-4: 233 100% 68%;
+  --chart-5: 163 100% 50%;
+  --chart-6: 340 75% 65%;
+  --chart-7: 117 80% 50%;
+  --chart-8: 25 95% 60%;
+
+  /* --- Sidebar --- */
+  --sidebar: 213 67% 10%;
+  --sidebar-foreground: 0 0% 98%;
+  --sidebar-border: 213 50% 20%;
+  --sidebar-accent: 213 63% 16%;
+  --sidebar-accent-foreground: 0 0% 98%;
+  --sidebar-primary: 152 100% 40%;
+  --sidebar-primary-foreground: 212 68% 6%;
+
+  /* --- Shadows (subtler in dark mode) --- */
+  --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.2);
+  --shadow: 0 1px 3px 0 hsl(0 0% 0% / 0.3), 0 1px 2px -1px hsl(0 0% 0% / 0.3);
+  --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.3), 0 2px 4px -2px hsl(0 0% 0% / 0.3);
+  --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.3), 0 4px 6px -4px hsl(0 0% 0% / 0.3);
+  --shadow-xl: 0 20px 25px -5px hsl(0 0% 0% / 0.4), 0 8px 10px -6px hsl(0 0% 0% / 0.4);
+  --shadow-2xl: 0 25px 50px -12px hsl(0 0% 0% / 0.5);
+  --shadow-inner: inset 0 2px 4px 0 hsl(0 0% 0% / 0.2);
+}
+
+/* ------------------------------------------------------------
+   TAILWIND v4 THEME INTEGRATION
+   Maps CSS variables to Tailwind utilities via @theme inline
+   ------------------------------------------------------------ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Colors */
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  /* Status */
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  --color-error: hsl(var(--error));
+  --color-error-foreground: hsl(var(--error-foreground));
+  --color-info: hsl(var(--info));
+  --color-info-foreground: hsl(var(--info-foreground));
+
+  /* Chart */
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+  --color-chart-6: hsl(var(--chart-6));
+  --color-chart-7: hsl(var(--chart-7));
+  --color-chart-8: hsl(var(--chart-8));
+
+  /* Sidebar */
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+
+  /* Fonts */
+  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, monospace;
+
+  /* Border Radius */
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+
+  /* Animation */
+  --animate-duration: var(--duration-default);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ------------------------------------------------------------
+   BASE STYLES
+   ------------------------------------------------------------ */
+* {
+  border-color: hsl(var(--border));
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+}
+
+/* ------------------------------------------------------------
+   FOCUS STYLES
+   Focus-visible only (no ring on mouse click)
+   ------------------------------------------------------------ */
+*:focus-visible {
+  outline: 2px solid hsl(var(--focus-ring));
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ------------------------------------------------------------
+   REDUCED MOTION
+   ------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ------------------------------------------------------------
+   SCROLLBAR STYLES
+   ------------------------------------------------------------ */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--border-strong));
+}
+
+/* ------------------------------------------------------------
+   UTILITY CLASSES
+   ------------------------------------------------------------ */
+.text-balance {
+  text-wrap: balance;
+}
+
+.skip-to-content {
+  position: absolute;
+  left: -9999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.skip-to-content:focus {
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  width: auto;
+  height: auto;
+  padding: 0.75rem 1.5rem;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-radius: var(--radius-md);
+  z-index: 9999;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------
+   ANIMATION KEYFRAMES & UTILITIES
+   Used by shadcn/ui components (Sheet, Dialog, etc.)
+   ------------------------------------------------------------ */
+@keyframes enter {
+  from {
+    opacity: var(--tw-enter-opacity, 1);
+    transform: translate3d(
+        var(--tw-enter-translate-x, 0),
+        var(--tw-enter-translate-y, 0),
+        0
+      )
+      scale3d(
+        var(--tw-enter-scale, 1),
+        var(--tw-enter-scale, 1),
+        var(--tw-enter-scale, 1)
+      )
+      rotate(var(--tw-enter-rotate, 0));
+  }
+}
+
+@keyframes exit {
+  to {
+    opacity: var(--tw-exit-opacity, 1);
+    transform: translate3d(
+        var(--tw-exit-translate-x, 0),
+        var(--tw-exit-translate-y, 0),
+        0
+      )
+      scale3d(
+        var(--tw-exit-scale, 1),
+        var(--tw-exit-scale, 1),
+        var(--tw-exit-scale, 1)
+      )
+      rotate(var(--tw-exit-rotate, 0));
+  }
+}
+
+.animate-in {
+  animation-name: enter;
+  animation-duration: var(--duration-default);
+  --tw-enter-opacity: initial;
+  --tw-enter-scale: initial;
+  --tw-enter-rotate: initial;
+  --tw-enter-translate-x: initial;
+  --tw-enter-translate-y: initial;
+}
+
+.animate-out {
+  animation-name: exit;
+  animation-duration: var(--duration-default);
+  --tw-exit-opacity: initial;
+  --tw-exit-scale: initial;
+  --tw-exit-rotate: initial;
+  --tw-exit-translate-x: initial;
+  --tw-exit-translate-y: initial;
+}
+
+.fade-in-0 {
+  --tw-enter-opacity: 0;
+}
+
+.fade-out-0 {
+  --tw-exit-opacity: 0;
+}
+
+.slide-in-from-top {
+  --tw-enter-translate-y: -100%;
+}
+
+.slide-in-from-bottom {
+  --tw-enter-translate-y: 100%;
+}
+
+.slide-in-from-left {
+  --tw-enter-translate-x: -100%;
+}
+
+.slide-in-from-right {
+  --tw-enter-translate-x: 100%;
+}
+
+.slide-out-to-top {
+  --tw-exit-translate-y: -100%;
+}
+
+.slide-out-to-bottom {
+  --tw-exit-translate-y: 100%;
+}
+
+.slide-out-to-left {
+  --tw-exit-translate-x: -100%;
+}
+
+.slide-out-to-right {
+  --tw-exit-translate-x: 100%;
+}
+
+/* Duration modifiers for animations */
+.duration-300 {
+  animation-duration: 300ms;
+}
+
+.duration-500 {
+  animation-duration: 500ms;
+}
+
+/* ------------------------------------------------------------
+   GENERATING DOTS ANIMATION
+   Subtle pulse animation for AI generation loading state
+   ------------------------------------------------------------ */
+@keyframes generating-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.generating-dot {
+  animation: generating-pulse 1.4s ease-in-out infinite;
+}
+
+.animation-delay-200 {
+  animation-delay: 0.2s;
+}
+
+.animation-delay-400 {
+  animation-delay: 0.4s;
+}
+
+/* Duration utility for fade-out */
+.duration-600 {
+  transition-duration: 600ms;
+}
+
+/* ------------------------------------------------------------
+   BRAND GRADIENT HEADINGS
+   Per brand guideline: gradient text effect on key headings
+   ------------------------------------------------------------ */
+.gradient-heading {
+  background: linear-gradient(90deg, #234f7d, #06213d, #234f7d);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.dark .gradient-heading {
+  background: linear-gradient(90deg, #8c8c8d, #ffffff, #8c8c8d);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ------------------------------------------------------------
+   GLASS EFFECT CARDS
+   Per brand guideline: frosted glass effect for premium feel
+   ------------------------------------------------------------ */
+.glass-card {
+  background: hsla(0, 0%, 100%, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid hsla(180, 10%, 90%, 0.6);
+  box-shadow: 0 4px 24px hsla(210, 89%, 12%, 0.05);
+}
+
+.dark .glass-card {
+  background: hsla(210, 60%, 15%, 0.6);
+  border: 1px solid hsla(210, 40%, 30%, 0.3);
+  box-shadow: 0 4px 24px hsla(0, 0%, 0%, 0.2);
+}
+
+/* Subtle glow variant — use on landing page feature cards */
+.glass-card-glow {
+  background: hsla(0, 0%, 100%, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid hsla(152, 100%, 35%, 0.15);
+  box-shadow:
+    0 4px 24px hsla(152, 100%, 35%, 0.06),
+    inset 0 1px 0 hsla(0, 0%, 100%, 0.6);
+}
+
+.dark .glass-card-glow {
+  background: hsla(210, 60%, 15%, 0.6);
+  border: 1px solid hsla(152, 100%, 40%, 0.2);
+  box-shadow:
+    0 4px 24px hsla(152, 100%, 40%, 0.08),
+    inset 0 1px 0 hsla(0, 0%, 100%, 0.05);
+}
+
+/* ------------------------------------------------------------
+   GLASS BUTTON EFFECT
+   Frosted dark button with animated green/teal glow orbs
+   Matches brand guideline glass assets
+   ------------------------------------------------------------ */
+.btn-glass {
+  position: relative;
+  overflow: hidden;
+  background: hsla(210, 60%, 12%, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid hsla(180, 30%, 40%, 0.25);
+  color: #ffffff;
+}
+
+.btn-glass::before,
+.btn-glass::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(12px);
+  opacity: 0.6;
+  animation: glass-glow 4s ease-in-out infinite;
+}
+
+.btn-glass::before {
+  width: 40px;
+  height: 40px;
+  background: #ACFFA7;
+  top: 50%;
+  left: 20%;
+  transform: translate(-50%, -50%);
+  animation-delay: 0s;
+}
+
+.btn-glass::after {
+  width: 35px;
+  height: 35px;
+  background: #48FFD6;
+  top: 50%;
+  right: 15%;
+  transform: translate(50%, -50%);
+  animation-delay: 2s;
+}
+
+.btn-glass:hover::before,
+.btn-glass:hover::after {
+  opacity: 0.9;
+}
+
+.btn-glass > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes glass-glow {
+  0%, 100% {
+    opacity: 0.4;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+  50% {
+    opacity: 0.7;
+    transform: translate(-50%, -50%) scale(1.1);
+  }
+}
+
+/* ------------------------------------------------------------
+   HERO BACKGROUND — Light/Dark mode switching
+   ------------------------------------------------------------ */
+.hero-bg {
+  background: #ffffff;
+}
+
+.dark .hero-bg {
+  background: #04213C;
+}
+
+.hero-blob-light {
+  opacity: 0.6;
+}
+
+.dark .hero-blob-light {
+  opacity: 0;
+}
+
+.hero-blob-dark {
+  opacity: 0;
+}
+
+.dark .hero-blob-dark {
+  opacity: 0.3;
 }

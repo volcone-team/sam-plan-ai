@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Create specs directory",
+  "description": "Creating .kiro/specs directory structure for Phase 5",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "mkdir -p /Users/upashanak/sam-ai/.kiro/specs/phase-5-initiative-engine",
+    "timeout": 5
+  }
+}

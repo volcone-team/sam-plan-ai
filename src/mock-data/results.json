@@ -1,0 +1,153 @@
+[
+  {
+    "id": "result-week-1-06-jan-b5c6d7e8-f9a0-41b2-3c4d-5e6f7a8b9c0d",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "initiativeId": "init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
+    "weekStartDate": "2026-01-06T00:00:00Z",
+    "weekEndDate": "2026-01-12T23:59:59Z",
+    "actualRevenue": 0,
+    "actualSpend": 100,
+    "metrics": {
+      "registration_page_views": 142,
+      "registrations": 8,
+      "email_opens": 0
+    },
+    "source": "manual",
+    "notes": "Week 1: Promotion begins. Modest early engagement. Still in setup phase.",
+    "createdAt": "2026-01-13T09:00:00Z",
+    "updatedAt": "2026-01-13T09:00:00Z"
+  },
+  {
+    "id": "result-week-2-13-jan-c6d7e8f9-a0b1-42c3-4d5e-6f7a8b9c0d1e",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "initiativeId": "init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
+    "weekStartDate": "2026-01-13T00:00:00Z",
+    "weekEndDate": "2026-01-19T23:59:59Z",
+    "actualRevenue": 0,
+    "actualSpend": 150,
+    "metrics": {
+      "registration_page_views": 389,
+      "registrations": 28,
+      "email_opens": 642,
+      "email_click_rate": 0.08
+    },
+    "source": "manual",
+    "notes": "Week 2: Email promotion ramping. Registrations accelerating. Email performing well (25% open rate).",
+    "createdAt": "2026-01-20T09:00:00Z",
+    "updatedAt": "2026-01-20T09:00:00Z"
+  },
+  {
+    "id": "result-week-3-20-jan-d7e8f9a0-b1c2-43d4-5e6f-7a8b9c0d1e2f",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "initiativeId": "init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
+    "weekStartDate": "2026-01-20T00:00:00Z",
+    "weekEndDate": "2026-01-26T23:59:59Z",
+    "actualRevenue": 0,
+    "actualSpend": 100,
+    "metrics": {
+      "registration_page_views": 512,
+      "registrations": 52,
+      "email_opens": 1205,
+      "email_click_rate": 0.12,
+      "total_registered": 88
+    },
+    "source": "manual",
+    "notes": "Week 3: Strong momentum building. 88 registrations so far (22% of 400 goal). On track.",
+    "createdAt": "2026-01-27T09:00:00Z",
+    "updatedAt": "2026-01-27T09:00:00Z"
+  },
+  {
+    "id": "result-evergreen-vsl-week-1-e8f9a0b1-c2d3-44e5-6f7a-8b9c0d1e2f3a",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "productId": "prod-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+    "initiativeId": null,
+    "weekStartDate": "2026-01-06T00:00:00Z",
+    "weekEndDate": "2026-01-12T23:59:59Z",
+    "actualRevenue": 1488,
+    "actualSpend": 200,
+    "metrics": {
+      "group_coaching_signups": 3,
+      "cohort_size": 4
+    },
+    "source": "manual",
+    "notes": "Week 1: Evergreen monthly group coaching circle (product level). 3 new members joined. Nearly at cohort minimum of 6.",
+    "createdAt": "2026-01-13T09:00:00Z",
+    "updatedAt": "2026-01-13T09:00:00Z"
+  },
+  {
+    "id": "result-1on1-coaching-week-1-f9a0b1c2-d3e4-45f6-7a8b-9c0d1e2f3a4b",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "productId": "prod-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+    "initiativeId": null,
+    "weekStartDate": "2026-01-06T00:00:00Z",
+    "weekEndDate": "2026-01-12T23:59:59Z",
+    "actualRevenue": 6000,
+    "actualSpend": 0,
+    "metrics": {
+      "active_1on1_clients": 2,
+      "new_bookings": 0,
+      "retention": 1.0
+    },
+    "source": "manual",
+    "notes": "Week 1: Recurring 1:1 coaching revenue. 2 active clients with monthly retainers. No new bookings yet.",
+    "createdAt": "2026-01-13T09:00:00Z",
+    "updatedAt": "2026-01-13T09:00:00Z"
+  },
+  {
+    "id": "result-linkedin-week-2-a0b1c2d3-e4f5-46e7-8f9a-0b1c2d3e4f5a",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "initiativeId": "init-linkedin-outreach-q1-a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c",
+    "weekStartDate": "2026-01-13T00:00:00Z",
+    "weekEndDate": "2026-01-19T23:59:59Z",
+    "actualRevenue": 0,
+    "actualSpend": 100,
+    "metrics": {
+      "connection_requests_sent": 15,
+      "connection_accept_rate": 0.40,
+      "connections_accepted": 6
+    },
+    "source": "manual",
+    "notes": "Week 2: LinkedIn outreach ramping. Sent 15 personalized requests. 40% acceptance rate is strong. 6 accepted connections.",
+    "createdAt": "2026-01-20T09:00:00Z",
+    "updatedAt": "2026-01-20T09:00:00Z"
+  },
+  {
+    "id": "result-evergreen-coaching-circle-week-2-b1c2d3e4-f5a6-47e8-9a0b-1c2d3e4f5a6b",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "productId": "prod-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+    "initiativeId": null,
+    "weekStartDate": "2026-01-13T00:00:00Z",
+    "weekEndDate": "2026-01-19T23:59:59Z",
+    "actualRevenue": 1488,
+    "actualSpend": 0,
+    "metrics": {
+      "group_coaching_signups": 1,
+      "cohort_size": 5,
+      "cohort_launch": "2026-01-27"
+    },
+    "source": "manual",
+    "notes": "Week 2: Group coaching circle. 1 new member. Cohort now at 5 members. Launching month-long cohort on Jan 27.",
+    "createdAt": "2026-01-20T09:00:00Z",
+    "updatedAt": "2026-01-20T09:00:00Z"
+  },
+  {
+    "id": "result-content-social-week-1-c2d3e4f5-a6b7-48e9-0a1b-2c3d4e5f6a7b",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "productId": "prod-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+    "initiativeId": null,
+    "weekStartDate": "2026-01-06T00:00:00Z",
+    "weekEndDate": "2026-01-12T23:59:59Z",
+    "actualRevenue": 0,
+    "actualSpend": 0,
+    "metrics": {
+      "posts_published": 5,
+      "total_impressions": 2140,
+      "engagement_rate": 0.034,
+      "new_followers": 32
+    },
+    "source": "manual",
+    "notes": "Week 1: Content and social strategy launched. Published 5 organic posts across LinkedIn and Twitter. 3.4% engagement rate, 32 new followers.",
+    "createdAt": "2026-01-13T09:00:00Z",
+    "updatedAt": "2026-01-13T09:00:00Z"
+  }
+]

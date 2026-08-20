@@ -1,0 +1,953 @@
+[
+  {
+    "id": "inittype-webinar-90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
+    "name": "Webinar",
+    "channel": "webinar",
+    "description": "Live or evergreen webinar to warm audience. Combines education and soft pitch.",
+    "owner": "system",
+    "benchmarks": {
+      "registration_rate": {
+        "conservative": 0.05,
+        "moderate": 0.08,
+        "aggressive": 0.12
+      },
+      "show_rate": {
+        "conservative": 0.45,
+        "moderate": 0.55,
+        "aggressive": 0.65
+      },
+      "offer_conversion": {
+        "conservative": 0.08,
+        "moderate": 0.12,
+        "aggressive": 0.18
+      }
+    },
+    "projectTemplate": {
+      "tasks": [
+        {
+          "id": "task-template-webinar-001",
+          "name": "Develop webinar slides and outline",
+          "description": "Create compelling slide deck and detailed speaker notes",
+          "daysBeforeEvent": -21,
+          "estimatedHours": 8,
+          "estimatedHoursRange": { "min": 6, "max": 10 },
+          "roles": ["founder", "content_creator"],
+          "dependencies": [],
+          "displayOrder": 1
+        },
+        {
+          "id": "task-template-webinar-002",
+          "name": "Set up webinar platform and landing page",
+          "description": "Configure Zoom/Wistia, create registration page with CTAs",
+          "daysBeforeEvent": -18,
+          "estimatedHours": 4,
+          "estimatedHoursRange": { "min": 2, "max": 6 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-webinar-001"],
+          "displayOrder": 2
+        },
+        {
+          "id": "task-template-webinar-003",
+          "name": "Create email invite sequence",
+          "description": "3-email nurture sequence (teaser, value, reminder)",
+          "daysBeforeEvent": -14,
+          "estimatedHours": 3,
+          "estimatedHoursRange": { "min": 2, "max": 4 },
+          "roles": ["content_creator"],
+          "dependencies": ["task-template-webinar-002"],
+          "displayOrder": 3
+        },
+        {
+          "id": "task-template-webinar-004",
+          "name": "Email promotion to list",
+          "description": "Send initial invite to email list",
+          "daysBeforeEvent": -14,
+          "estimatedHours": 1,
+          "estimatedHoursRange": { "min": 0.5, "max": 1.5 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-webinar-003"],
+          "displayOrder": 4
+        },
+        {
+          "id": "task-template-webinar-005",
+          "name": "Run webinar",
+          "description": "Execute live webinar with Q&A",
+          "daysBeforeEvent": 0,
+          "estimatedHours": 2,
+          "estimatedHoursRange": { "min": 1.5, "max": 2.5 },
+          "roles": ["founder"],
+          "dependencies": ["task-template-webinar-004"],
+          "displayOrder": 5
+        },
+        {
+          "id": "task-template-webinar-006",
+          "name": "Send replay to non-attendees",
+          "description": "24-hour replay sequence to people who didn't attend",
+          "daysBeforeEvent": 1,
+          "estimatedHours": 1,
+          "estimatedHoursRange": { "min": 0.5, "max": 1.5 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-webinar-005"],
+          "displayOrder": 6
+        }
+      ],
+      "totalEstimatedHours": 19
+    },
+    "difficulty": {
+      "effortToImplement": 6,
+      "skillExpertiseRequired": 5,
+      "timeToResults": 7,
+      "costToRun": 3
+    },
+    "aiContext": {
+      "description": "Webinars work well for warm audiences (email list, social followers) who want education before commitment. Recommend for founders with speaking ability and time.",
+      "sizingGuidance": "If audience is 5K+, plan 300-600 registrants (5-12% rate). If 1K-5K, plan 50-400 registrants (5-8% rate). If under 1K, expect 10-50.",
+      "recommendationWeights": {
+        "budget": 0.3,
+        "timeframe": 0.4,
+        "teamSize": 0.2,
+        "assets": 0.4
+      }
+    },
+    "tier": 1,
+    "displayOrder": 1,
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "inittype-email-a1b2c3d4-e5f6-4a7b-1c8d-9e0f1a2b3c4d",
+    "name": "Email Campaign",
+    "channel": "email",
+    "description": "Targeted email sequence to existing list or segment",
+    "owner": "system",
+    "benchmarks": {
+      "open_rate": {
+        "conservative": 0.18,
+        "moderate": 0.25,
+        "aggressive": 0.35
+      },
+      "click_rate": {
+        "conservative": 0.02,
+        "moderate": 0.04,
+        "aggressive": 0.08
+      },
+      "conversion_rate": {
+        "conservative": 0.01,
+        "moderate": 0.025,
+        "aggressive": 0.05
+      }
+    },
+    "projectTemplate": {
+      "tasks": [
+        {
+          "id": "task-template-email-001",
+          "name": "Plan email sequence and messaging",
+          "description": "Define sequence flow, value prop, CTAs",
+          "daysBeforeEvent": -14,
+          "estimatedHours": 4,
+          "estimatedHoursRange": { "min": 3, "max": 6 },
+          "roles": ["content_creator"],
+          "dependencies": [],
+          "displayOrder": 1
+        },
+        {
+          "id": "task-template-email-002",
+          "name": "Write email copy",
+          "description": "Write 5-email sequence with subject lines",
+          "daysBeforeEvent": -12,
+          "estimatedHours": 6,
+          "estimatedHoursRange": { "min": 4, "max": 8 },
+          "roles": ["content_creator"],
+          "dependencies": ["task-template-email-001"],
+          "displayOrder": 2
+        },
+        {
+          "id": "task-template-email-003",
+          "name": "Set up email automation",
+          "description": "Configure sequences in email platform",
+          "daysBeforeEvent": -7,
+          "estimatedHours": 3,
+          "estimatedHoursRange": { "min": 2, "max": 4 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-email-002"],
+          "displayOrder": 3
+        },
+        {
+          "id": "task-template-email-004",
+          "name": "Test and launch campaign",
+          "description": "QA all emails, send test batch, monitor open rates",
+          "daysBeforeEvent": -1,
+          "estimatedHours": 2,
+          "estimatedHoursRange": { "min": 1, "max": 3 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-email-003"],
+          "displayOrder": 4
+        }
+      ],
+      "totalEstimatedHours": 15
+    },
+    "difficulty": {
+      "effortToImplement": 4,
+      "skillExpertiseRequired": 3,
+      "timeToResults": 5,
+      "costToRun": 1
+    },
+    "aiContext": {
+      "description": "Email is low-cost, highly repeatable. Best for nurturing warm lists. Works for all team sizes.",
+      "sizingGuidance": "Base revenue on list size and conversion benchmarks. 3K list at 25% open, 4% click, 2% conversion = ~6 conversions per campaign.",
+      "recommendationWeights": {
+        "budget": 0.1,
+        "timeframe": 0.3,
+        "teamSize": 0.2,
+        "assets": 0.9
+      }
+    },
+    "tier": 1,
+    "displayOrder": 2,
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "inittype-linkedin-b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
+    "name": "LinkedIn Outreach",
+    "channel": "linkedin",
+    "description": "Targeted LinkedIn connection requests and DM sequences to ideal customers",
+    "owner": "system",
+    "benchmarks": {
+      "connection_accept_rate": {
+        "conservative": 0.25,
+        "moderate": 0.35,
+        "aggressive": 0.50
+      },
+      "response_rate": {
+        "conservative": 0.05,
+        "moderate": 0.10,
+        "aggressive": 0.15
+      },
+      "meeting_booking_rate": {
+        "conservative": 0.08,
+        "moderate": 0.15,
+        "aggressive": 0.25
+      }
+    },
+    "projectTemplate": {
+      "tasks": [
+        {
+          "id": "task-template-linkedin-001",
+          "name": "Identify and list target accounts",
+          "description": "Research 50-100 ideal customer profiles on LinkedIn",
+          "daysBeforeEvent": -21,
+          "estimatedHours": 5,
+          "estimatedHoursRange": { "min": 4, "max": 8 },
+          "roles": ["operations_manager"],
+          "dependencies": [],
+          "displayOrder": 1
+        },
+        {
+          "id": "task-template-linkedin-002",
+          "name": "Create personalized connection message",
+          "description": "Write 3-5 variations of connection requests",
+          "daysBeforeEvent": -14,
+          "estimatedHours": 2,
+          "estimatedHoursRange": { "min": 1, "max": 3 },
+          "roles": ["content_creator"],
+          "dependencies": ["task-template-linkedin-001"],
+          "displayOrder": 2
+        },
+        {
+          "id": "task-template-linkedin-003",
+          "name": "Send connection requests",
+          "description": "Spread 50-100 requests over 2-3 weeks (20-30 per day)",
+          "daysBeforeEvent": -14,
+          "estimatedHours": 4,
+          "estimatedHoursRange": { "min": 3, "max": 5 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-linkedin-002"],
+          "displayOrder": 3
+        },
+        {
+          "id": "task-template-linkedin-004",
+          "name": "Create DM follow-up sequence",
+          "description": "Write personalized DM sequence for accepted connections",
+          "daysBeforeEvent": -7,
+          "estimatedHours": 3,
+          "estimatedHoursRange": { "min": 2, "max": 4 },
+          "roles": ["content_creator"],
+          "dependencies": ["task-template-linkedin-003"],
+          "displayOrder": 4
+        },
+        {
+          "id": "task-template-linkedin-005",
+          "name": "Send DMs and track responses",
+          "description": "Follow up with accepted connections. Track meeting bookings.",
+          "daysBeforeEvent": -1,
+          "estimatedHours": 3,
+          "estimatedHoursRange": { "min": 2, "max": 5 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-linkedin-004"],
+          "displayOrder": 5
+        }
+      ],
+      "totalEstimatedHours": 17
+    },
+    "difficulty": {
+      "effortToImplement": 7,
+      "skillExpertiseRequired": 4,
+      "timeToResults": 6,
+      "costToRun": 2
+    },
+    "aiContext": {
+      "description": "LinkedIn outreach is labor-intensive but highly targeted. Best for founders who are comfortable with sales. Requires consistency and personalization.",
+      "sizingGuidance": "Expect 25-50% connection accept rate. Of those, 5-15% respond. Of responders, 8-25% book meetings. 100 connections = 10-20 meets if done well.",
+      "recommendationWeights": {
+        "budget": 0.2,
+        "timeframe": 0.5,
+        "teamSize": 0.3,
+        "assets": 0.2
+      }
+    },
+    "tier": 1,
+    "displayOrder": 3,
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "inittype-referral-c3d4e5f6-a7b8-4c9d-3e0f-1a2b3c4d5e6f",
+    "name": "Referral Program",
+    "channel": "referral",
+    "description": "Partner referral program with commission structure or joint venture arrangement",
+    "owner": "system",
+    "benchmarks": {
+      "referral_rate": {
+        "conservative": 0.02,
+        "moderate": 0.05,
+        "aggressive": 0.10
+      },
+      "conversion_rate": {
+        "conservative": 0.30,
+        "moderate": 0.50,
+        "aggressive": 0.70
+      }
+    },
+    "projectTemplate": {
+      "tasks": [
+        {
+          "id": "task-template-referral-001",
+          "name": "Identify potential referral partners",
+          "description": "List 20-30 complementary service providers or consultants",
+          "daysBeforeEvent": -30,
+          "estimatedHours": 3,
+          "estimatedHoursRange": { "min": 2, "max": 4 },
+          "roles": ["founder"],
+          "dependencies": [],
+          "displayOrder": 1
+        },
+        {
+          "id": "task-template-referral-002",
+          "name": "Design referral commission structure",
+          "description": "Decide on commission, deal terms, tracking mechanism",
+          "daysBeforeEvent": -21,
+          "estimatedHours": 2,
+          "estimatedHoursRange": { "min": 1, "max": 3 },
+          "roles": ["founder"],
+          "dependencies": ["task-template-referral-001"],
+          "displayOrder": 2
+        },
+        {
+          "id": "task-template-referral-003",
+          "name": "Reach out to partners with proposal",
+          "description": "1-on-1 calls or emails proposing partnership",
+          "daysBeforeEvent": -14,
+          "estimatedHours": 4,
+          "estimatedHoursRange": { "min": 3, "max": 6 },
+          "roles": ["founder"],
+          "dependencies": ["task-template-referral-002"],
+          "displayOrder": 3
+        },
+        {
+          "id": "task-template-referral-004",
+          "name": "Onboard accepted partners",
+          "description": "Brief partners on service, set up tracking, send marketing materials",
+          "daysBeforeEvent": -7,
+          "estimatedHours": 3,
+          "estimatedHoursRange": { "min": 2, "max": 4 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-referral-003"],
+          "displayOrder": 4
+        }
+      ],
+      "totalEstimatedHours": 12
+    },
+    "difficulty": {
+      "effortToImplement": 3,
+      "skillExpertiseRequired": 6,
+      "timeToResults": 8,
+      "costToRun": 4
+    },
+    "aiContext": {
+      "description": "Referral programs have slow ramp but highest LTV and lowest CAC. Requires strong sales skills and existing relationships.",
+      "sizingGuidance": "Low-touch model. Assumes 5-10 active partners. 2-5% generating referrals. Each partner sends 1-3 per quarter.",
+      "recommendationWeights": {
+        "budget": 0.1,
+        "timeframe": 0.1,
+        "teamSize": 0.2,
+        "assets": 0.6
+      }
+    },
+    "tier": 1,
+    "displayOrder": 4,
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "inittype-challenge-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+    "name": "Challenge/Bootcamp",
+    "channel": "challenge",
+    "description": "Free or low-cost 5-7 day challenge to build community and pre-qualify buyers",
+    "owner": "system",
+    "benchmarks": {
+      "signup_rate": {
+        "conservative": 0.02,
+        "moderate": 0.04,
+        "aggressive": 0.08
+      },
+      "completion_rate": {
+        "conservative": 0.15,
+        "moderate": 0.25,
+        "aggressive": 0.40
+      },
+      "application_rate": {
+        "conservative": 0.10,
+        "moderate": 0.20,
+        "aggressive": 0.35
+      }
+    },
+    "projectTemplate": {
+      "tasks": [
+        {
+          "id": "task-template-challenge-001",
+          "name": "Design challenge curriculum (5-7 modules)",
+          "description": "Create outline, key insights, daily structure",
+          "daysBeforeEvent": -28,
+          "estimatedHours": 12,
+          "estimatedHoursRange": { "min": 10, "max": 16 },
+          "roles": ["founder", "content_creator"],
+          "dependencies": [],
+          "displayOrder": 1
+        },
+        {
+          "id": "task-template-challenge-002",
+          "name": "Create challenge landing page and email sequence",
+          "description": "Landing page, 5 daily emails, bonus materials",
+          "daysBeforeEvent": -21,
+          "estimatedHours": 8,
+          "estimatedHoursRange": { "min": 6, "max": 10 },
+          "roles": ["content_creator"],
+          "dependencies": ["task-template-challenge-001"],
+          "displayOrder": 2
+        },
+        {
+          "id": "task-template-challenge-003",
+          "name": "Promote challenge to list and social",
+          "description": "2-week promotion campaign (emails, posts, ads if budget allows)",
+          "daysBeforeEvent": -14,
+          "estimatedHours": 5,
+          "estimatedHoursRange": { "min": 3, "max": 8 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-challenge-002"],
+          "displayOrder": 3
+        },
+        {
+          "id": "task-template-challenge-004",
+          "name": "Run live challenge (5-7 days)",
+          "description": "Daily email sends, community engagement, Q&A if applicable",
+          "daysBeforeEvent": 0,
+          "estimatedHours": 7,
+          "estimatedHoursRange": { "min": 5, "max": 10 },
+          "roles": ["founder", "operations_manager"],
+          "dependencies": ["task-template-challenge-003"],
+          "displayOrder": 4
+        },
+        {
+          "id": "task-template-challenge-005",
+          "name": "Post-challenge offer sequence",
+          "description": "Thank you emails, application form, 1-on-1 intro calls",
+          "daysBeforeEvent": 7,
+          "estimatedHours": 4,
+          "estimatedHoursRange": { "min": 2, "max": 6 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-challenge-004"],
+          "displayOrder": 5
+        }
+      ],
+      "totalEstimatedHours": 36
+    },
+    "difficulty": {
+      "effortToImplement": 8,
+      "skillExpertiseRequired": 6,
+      "timeToResults": 5,
+      "costToRun": 2
+    },
+    "aiContext": {
+      "description": "High-effort, high-reward model. Builds community and qualifies buyers. Best for coaches/consultants with strong IP.",
+      "sizingGuidance": "With 5K list: 100-400 signups (2-8%). 15-100 completers. 2-35 applications. Expect 1-7 high-intent prospects.",
+      "recommendationWeights": {
+        "budget": 0.3,
+        "timeframe": 0.5,
+        "teamSize": 0.4,
+        "assets": 0.7
+      }
+    },
+    "tier": 1,
+    "displayOrder": 5,
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "inittype-vsl-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+    "name": "VSL / Sales Page",
+    "channel": "vsl",
+    "description": "Video Sales Letter or high-conversion sales page for offer",
+    "owner": "system",
+    "benchmarks": {
+      "view_rate": {
+        "conservative": 0.25,
+        "moderate": 0.40,
+        "aggressive": 0.60
+      },
+      "click_rate": {
+        "conservative": 0.02,
+        "moderate": 0.05,
+        "aggressive": 0.10
+      },
+      "conversion_rate": {
+        "conservative": 0.01,
+        "moderate": 0.025,
+        "aggressive": 0.05
+      }
+    },
+    "projectTemplate": {
+      "tasks": [
+        {
+          "id": "task-template-vsl-001",
+          "name": "Write VSL script or page copy",
+          "description": "Create compelling narrative (pain → agitate → solve → CTA)",
+          "daysBeforeEvent": -14,
+          "estimatedHours": 6,
+          "estimatedHoursRange": { "min": 4, "max": 8 },
+          "roles": ["content_creator"],
+          "dependencies": [],
+          "displayOrder": 1
+        },
+        {
+          "id": "task-template-vsl-002",
+          "name": "Film and edit video (if VSL) or design landing page (if page)",
+          "description": "Production work or page design and CMS setup",
+          "daysBeforeEvent": -10,
+          "estimatedHours": 8,
+          "estimatedHoursRange": { "min": 6, "max": 12 },
+          "roles": ["content_creator", "operations_manager"],
+          "dependencies": ["task-template-vsl-001"],
+          "displayOrder": 2
+        },
+        {
+          "id": "task-template-vsl-003",
+          "name": "Set up checkout / application flow",
+          "description": "Stripe, Calendly, or application form integration",
+          "daysBeforeEvent": -5,
+          "estimatedHours": 3,
+          "estimatedHoursRange": { "min": 2, "max": 5 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-vsl-002"],
+          "displayOrder": 3
+        },
+        {
+          "id": "task-template-vsl-004",
+          "name": "Traffic and promotion",
+          "description": "Email blasts, ads, social posts driving to page",
+          "daysBeforeEvent": 0,
+          "estimatedHours": 4,
+          "estimatedHoursRange": { "min": 2, "max": 8 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-vsl-003"],
+          "displayOrder": 4
+        }
+      ],
+      "totalEstimatedHours": 21
+    },
+    "difficulty": {
+      "effortToImplement": 7,
+      "skillExpertiseRequired": 7,
+      "timeToResults": 4,
+      "costToRun": 5
+    },
+    "aiContext": {
+      "description": "High-conversion offer vehicle. Requires strong copywriting and traffic. Best for proven offers with case studies.",
+      "sizingGuidance": "VSLs typically see 25-60% view rate, 2-10% click rate. If driving 1K visitors: 250-600 watch, 5-60 click, 0.5-3 conversions.",
+      "recommendationWeights": {
+        "budget": 0.6,
+        "timeframe": 0.4,
+        "teamSize": 0.3,
+        "assets": 0.5
+      }
+    },
+    "tier": 1,
+    "displayOrder": 6,
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "inittype-paid-ads-f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
+    "name": "Paid Ads",
+    "channel": "paid_ads",
+    "description": "Facebook, Google, or LinkedIn paid advertising campaigns driving traffic to offers",
+    "owner": "system",
+    "benchmarks": {
+      "click_through_rate": {
+        "conservative": 0.008,
+        "moderate": 0.015,
+        "aggressive": 0.03
+      },
+      "landing_page_conversion": {
+        "conservative": 0.10,
+        "moderate": 0.20,
+        "aggressive": 0.35
+      },
+      "cost_per_acquisition": {
+        "conservative": 150,
+        "moderate": 80,
+        "aggressive": 40
+      }
+    },
+    "projectTemplate": {
+      "tasks": [
+        {
+          "id": "task-template-ads-001",
+          "name": "Define campaign strategy and targeting",
+          "description": "Choose platform, define audiences, set budget, identify offer",
+          "daysBeforeEvent": -14,
+          "estimatedHours": 4,
+          "estimatedHoursRange": { "min": 3, "max": 6 },
+          "roles": ["founder", "operations_manager"],
+          "dependencies": [],
+          "displayOrder": 1
+        },
+        {
+          "id": "task-template-ads-002",
+          "name": "Create ad creatives and copy",
+          "description": "Design 3-5 ad variations (image/video + headlines + body copy)",
+          "daysBeforeEvent": -10,
+          "estimatedHours": 6,
+          "estimatedHoursRange": { "min": 4, "max": 8 },
+          "roles": ["content_creator"],
+          "dependencies": ["task-template-ads-001"],
+          "displayOrder": 2
+        },
+        {
+          "id": "task-template-ads-003",
+          "name": "Build landing page",
+          "description": "Create dedicated landing page with clear CTA and tracking pixels",
+          "daysBeforeEvent": -7,
+          "estimatedHours": 5,
+          "estimatedHoursRange": { "min": 3, "max": 7 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-ads-001"],
+          "displayOrder": 3
+        },
+        {
+          "id": "task-template-ads-004",
+          "name": "Set up campaigns in ad platform",
+          "description": "Configure targeting, budgets, bidding, and tracking",
+          "daysBeforeEvent": -3,
+          "estimatedHours": 3,
+          "estimatedHoursRange": { "min": 2, "max": 4 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-ads-002", "task-template-ads-003"],
+          "displayOrder": 4
+        },
+        {
+          "id": "task-template-ads-005",
+          "name": "Launch and monitor for 48 hours",
+          "description": "Go live, monitor performance, pause underperformers",
+          "daysBeforeEvent": 0,
+          "estimatedHours": 2,
+          "estimatedHoursRange": { "min": 1, "max": 3 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-ads-004"],
+          "displayOrder": 5
+        },
+        {
+          "id": "task-template-ads-006",
+          "name": "Optimize and scale winning ads",
+          "description": "Kill losers, scale winners, test new audiences",
+          "daysBeforeEvent": 7,
+          "estimatedHours": 3,
+          "estimatedHoursRange": { "min": 2, "max": 5 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-ads-005"],
+          "displayOrder": 6
+        }
+      ],
+      "totalEstimatedHours": 23
+    },
+    "difficulty": {
+      "effortToImplement": 5,
+      "skillExpertiseRequired": 7,
+      "timeToResults": 8,
+      "costToRun": 9
+    },
+    "aiContext": {
+      "description": "Paid ads deliver fast results but require budget and skill. Best for proven offers with strong landing pages. Requires ongoing optimization.",
+      "sizingGuidance": "At $3K/mo budget with $80 CPA: ~37 acquisitions/mo. At $5K with $50 CPA: ~100/mo. ROI depends heavily on product price and LTV.",
+      "recommendationWeights": {
+        "budget": 0.9,
+        "timeframe": 0.8,
+        "teamSize": 0.3,
+        "assets": 0.4
+      }
+    },
+    "tier": 1,
+    "displayOrder": 7,
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "inittype-sales-calls-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+    "name": "Sales Calls",
+    "channel": "sales_calls",
+    "description": "Direct outbound or inbound discovery/sales calls to close high-ticket offers",
+    "owner": "system",
+    "benchmarks": {
+      "call_booking_rate": {
+        "conservative": 0.05,
+        "moderate": 0.10,
+        "aggressive": 0.20
+      },
+      "show_rate": {
+        "conservative": 0.60,
+        "moderate": 0.75,
+        "aggressive": 0.85
+      },
+      "close_rate": {
+        "conservative": 0.15,
+        "moderate": 0.25,
+        "aggressive": 0.40
+      }
+    },
+    "projectTemplate": {
+      "tasks": [
+        {
+          "id": "task-template-sales-001",
+          "name": "Define ideal prospect profile and qualification criteria",
+          "description": "Document who qualifies, deal-breakers, and pricing tiers",
+          "daysBeforeEvent": -14,
+          "estimatedHours": 3,
+          "estimatedHoursRange": { "min": 2, "max": 4 },
+          "roles": ["founder"],
+          "dependencies": [],
+          "displayOrder": 1
+        },
+        {
+          "id": "task-template-sales-002",
+          "name": "Create sales script and objection handling",
+          "description": "Write discovery questions, presentation flow, and objection responses",
+          "daysBeforeEvent": -10,
+          "estimatedHours": 5,
+          "estimatedHoursRange": { "min": 3, "max": 7 },
+          "roles": ["founder"],
+          "dependencies": ["task-template-sales-001"],
+          "displayOrder": 2
+        },
+        {
+          "id": "task-template-sales-003",
+          "name": "Set up booking system and CRM tracking",
+          "description": "Configure Calendly/booking link, set up CRM pipeline stages",
+          "daysBeforeEvent": -7,
+          "estimatedHours": 2,
+          "estimatedHoursRange": { "min": 1, "max": 3 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-sales-002"],
+          "displayOrder": 3
+        },
+        {
+          "id": "task-template-sales-004",
+          "name": "Create call-to-action assets",
+          "description": "Application form, booking page copy, confirmation emails",
+          "daysBeforeEvent": -5,
+          "estimatedHours": 3,
+          "estimatedHoursRange": { "min": 2, "max": 4 },
+          "roles": ["content_creator"],
+          "dependencies": ["task-template-sales-003"],
+          "displayOrder": 4
+        },
+        {
+          "id": "task-template-sales-005",
+          "name": "Conduct discovery calls",
+          "description": "Run 10-20 discovery calls over 2-4 weeks",
+          "daysBeforeEvent": 0,
+          "estimatedHours": 10,
+          "estimatedHoursRange": { "min": 5, "max": 20 },
+          "roles": ["founder"],
+          "dependencies": ["task-template-sales-004"],
+          "displayOrder": 5
+        },
+        {
+          "id": "task-template-sales-006",
+          "name": "Follow up with undecided prospects",
+          "description": "Send follow-up emails, address remaining objections, offer next steps",
+          "daysBeforeEvent": 7,
+          "estimatedHours": 3,
+          "estimatedHoursRange": { "min": 2, "max": 5 },
+          "roles": ["founder"],
+          "dependencies": ["task-template-sales-005"],
+          "displayOrder": 6
+        }
+      ],
+      "totalEstimatedHours": 26
+    },
+    "difficulty": {
+      "effortToImplement": 6,
+      "skillExpertiseRequired": 8,
+      "timeToResults": 7,
+      "costToRun": 2
+    },
+    "aiContext": {
+      "description": "Sales calls are the highest-conversion channel for high-ticket offers ($3K+). Requires founder selling confidence. Works best with warm pipeline from other initiatives.",
+      "sizingGuidance": "20 booked calls at 75% show rate = 15 conversations. At 25% close rate = 3-4 clients. At $5K average deal = $15-20K revenue per batch.",
+      "recommendationWeights": {
+        "budget": 0.1,
+        "timeframe": 0.6,
+        "teamSize": 0.2,
+        "assets": 0.3
+      }
+    },
+    "tier": 1,
+    "displayOrder": 8,
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  },
+  {
+    "id": "inittype-content-social-b8c9d0e1-f2a3-4b4c-2d5e-6f7a8b9c0d1e",
+    "name": "Content & Organic Social",
+    "channel": "content_social",
+    "description": "Consistent content publishing and organic social media presence to build audience and generate inbound leads",
+    "owner": "system",
+    "benchmarks": {
+      "engagement_rate": {
+        "conservative": 0.02,
+        "moderate": 0.04,
+        "aggressive": 0.08
+      },
+      "follower_growth_rate": {
+        "conservative": 0.02,
+        "moderate": 0.05,
+        "aggressive": 0.10
+      },
+      "lead_generation_rate": {
+        "conservative": 0.005,
+        "moderate": 0.01,
+        "aggressive": 0.025
+      }
+    },
+    "projectTemplate": {
+      "tasks": [
+        {
+          "id": "task-template-content-001",
+          "name": "Define content pillars and editorial calendar",
+          "description": "Choose 3-5 themes, plan 4 weeks of content, identify platforms",
+          "daysBeforeEvent": -21,
+          "estimatedHours": 4,
+          "estimatedHoursRange": { "min": 3, "max": 6 },
+          "roles": ["founder", "content_creator"],
+          "dependencies": [],
+          "displayOrder": 1
+        },
+        {
+          "id": "task-template-content-002",
+          "name": "Create lead magnet or content upgrade",
+          "description": "Build a free resource that captures emails (PDF, checklist, template)",
+          "daysBeforeEvent": -14,
+          "estimatedHours": 6,
+          "estimatedHoursRange": { "min": 4, "max": 8 },
+          "roles": ["content_creator"],
+          "dependencies": ["task-template-content-001"],
+          "displayOrder": 2
+        },
+        {
+          "id": "task-template-content-003",
+          "name": "Batch-create first 2 weeks of content",
+          "description": "Write/record 8-10 posts, prepare graphics, schedule in tool",
+          "daysBeforeEvent": -10,
+          "estimatedHours": 8,
+          "estimatedHoursRange": { "min": 6, "max": 12 },
+          "roles": ["content_creator"],
+          "dependencies": ["task-template-content-001"],
+          "displayOrder": 3
+        },
+        {
+          "id": "task-template-content-004",
+          "name": "Set up scheduling and automation",
+          "description": "Configure Buffer/Later/Hootsuite, set up link tracking",
+          "daysBeforeEvent": -7,
+          "estimatedHours": 2,
+          "estimatedHoursRange": { "min": 1, "max": 3 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-content-003"],
+          "displayOrder": 4
+        },
+        {
+          "id": "task-template-content-005",
+          "name": "Launch content and engage daily",
+          "description": "Publish on schedule, respond to comments, DM engaged followers",
+          "daysBeforeEvent": 0,
+          "estimatedHours": 5,
+          "estimatedHoursRange": { "min": 3, "max": 7 },
+          "roles": ["founder", "operations_manager"],
+          "dependencies": ["task-template-content-004"],
+          "displayOrder": 5
+        },
+        {
+          "id": "task-template-content-006",
+          "name": "Review analytics and adjust strategy",
+          "description": "Review engagement, reach, leads. Double down on what works.",
+          "daysBeforeEvent": 14,
+          "estimatedHours": 2,
+          "estimatedHoursRange": { "min": 1, "max": 3 },
+          "roles": ["operations_manager"],
+          "dependencies": ["task-template-content-005"],
+          "displayOrder": 6
+        }
+      ],
+      "totalEstimatedHours": 27
+    },
+    "difficulty": {
+      "effortToImplement": 6,
+      "skillExpertiseRequired": 4,
+      "timeToResults": 3,
+      "costToRun": 1
+    },
+    "aiContext": {
+      "description": "Content & social is a slow-burn audience builder. Low cost, high effort, compounds over time. Best for founders willing to show up consistently.",
+      "sizingGuidance": "Expect 2-5% engagement rate. With 2K followers: 40-100 interactions per post. Lead gen: 0.5-2.5% of audience converts to email list per month. Revenue is indirect.",
+      "recommendationWeights": {
+        "budget": 0.1,
+        "timeframe": 0.2,
+        "teamSize": 0.4,
+        "assets": 0.3
+      }
+    },
+    "tier": 1,
+    "displayOrder": 9,
+    "isActive": true,
+    "createdAt": "2024-06-15T09:00:00Z",
+    "updatedAt": "2024-06-15T09:00:00Z"
+  }
+]

@@ -1,0 +1,147 @@
+/**
+ * Company Service
+ * Handles all company data operations.
+ *
+ * Strategy: Try Supabase first. If not configured or query fails,
+ * fall back to mock JSON data so the app works during development.
+ */
+
+import type { Company, UpdateCompanyDTO } from '@/types';
+import { isSupabaseConfigured, getSupabase, snakeToCamel, camelToSnake } from '@/lib/supabase/db';
+import companyData from '@/mock-data/company.json';
+
+export class CompanyService {
+  /**
+   * Get the company profile by ID
+   */
+  async getCompany(id?: string): Promise<Company> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        let query = supabase.from('companies').select('*');
+
+        if (id) {
+          query = query.eq('id', id);
+        }
+
+        const { data, error } = await query.limit(1).single();
+
+        if (!error && data) {
+          return this.mapRowToCompany(data);
+        }
+      } catch {
+        // Fall through to mock
+      }
+    }
+
+    // Fallback: mock data
+    await this.delay();
+    return this.transformMockData(companyData);
+  }
+
+  /**
+   * Update company details
+   */
+  async updateCompany(id: string, dto: UpdateCompanyDTO): Promise<Company> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const updateData = camelToSnake(dto as unknown as Record<string, unknown>);
+
+        const { data, error } = await supabase
+          .from('companies')
+          .update(updateData)
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (!error && data) {
+          return this.mapRowToCompany(data);
+        }
+      } catch {
+        // Fall through to mock
+      }
+    }
+
+    // Fallback: mock update
+    await this.delay();
+    return this.transformMockData({ ...companyData, ...dto, updatedAt: new Date().toISOString() });
+  }
+
+  /**
+   * Get company revenue metrics
+   */
+  async getRevenueMetrics(id: string) {
+    const company = await this.getCompany(id);
+    return {
+      priorYearRevenue: company.priorYearRevenue,
+      targetRevenue: company.targetRevenue,
+      baselineRevenue: company.baselineRevenue,
+      stretchRevenue: company.stretchRevenue,
+      operatingBudget: company.operatingBudget,
+      growthTargetPercent: company.priorYearRevenue > 0
+        ? ((company.targetRevenue - company.priorYearRevenue) / company.priorYearRevenue) * 100
+        : 0,
+    };
+  }
+
+  /**
+   * Get company fiscal configuration
+   */
+  async getFiscalConfig(id: string) {
+    const company = await this.getCompany(id);
+    return {
+      fiscalYear: company.fiscalYear,
+      planningYear: company.planningYear,
+      currency: company.currency,
+    };
+  }
+
+  /**
+   * Map a Supabase row (snake_case) to Company type (camelCase)
+   */
+  private mapRowToCompany(row: Record<string, unknown>): Company {
+    return {
+      id: row.id as string,
+      name: row.name as string,
+      description: (row.description as string) || '',
+      fiscalYear: row.fiscal_year as number,
+      planningYear: row.planning_year as number,
+      currency: (row.currency as Company['currency']) || 'USD',
+      priorYearRevenue: Number(row.prior_year_revenue) || 0,
+      targetRevenue: Number(row.target_revenue) || 0,
+      baselineRevenue: Number(row.baseline_revenue) || 0,
+      stretchRevenue: Number(row.stretch_revenue) || 0,
+      operatingBudget: Number(row.operating_budget) || 0,
+      createdAt: new Date(row.created_at as string),
+      updatedAt: new Date(row.updated_at as string),
+    };
+  }
+
+  /**
+   * Transform mock JSON data to Company type
+   */
+  private transformMockData(data: typeof companyData): Company {
+    return {
+      id: data.id,
+      name: data.name,
+      description: data.description,
+      fiscalYear: data.fiscalYear,
+      planningYear: data.planningYear,
+      currency: (data.currency as Company['currency']) || 'USD',
+      priorYearRevenue: data.priorYearRevenue,
+      targetRevenue: data.targetRevenue,
+      baselineRevenue: data.baselineRevenue,
+      stretchRevenue: data.stretchRevenue,
+      operatingBudget: data.operatingBudget,
+      createdAt: new Date(data.createdAt),
+      updatedAt: new Date(data.updatedAt),
+    };
+  }
+
+  private delay(ms: number = 100): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, Math.random() * ms));
+  }
+}
+
+export const companyService = new CompanyService();

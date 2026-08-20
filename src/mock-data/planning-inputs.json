@@ -1,0 +1,39 @@
+[
+  {
+    "id": "pi-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "intakeRoute": "full",
+    "completedAt": "2026-01-02T09:30:00Z",
+    "revenueGoal": 750000,
+    "revenueTimeframe": 12,
+    "productIds": [
+      "prod-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+      "prod-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+      "prod-f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
+      "prod-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d"
+    ],
+    "successfulInitiativeTypes": [
+      "webinar",
+      "email",
+      "referral",
+      "linkedin_outreach"
+    ],
+    "failedInitiatives": "Cold calling (low conversion), generic email blasts (high unsubscribe), YouTube advertising (wrong audience)",
+    "idealCustomerDescription": "Mid-market B2B service companies ($2M-$20M revenue). Decision makers: C-suite executives (CEO, COO, Head of Sales). Pain point: leadership team misalignment and ineffective delegation. Annual training budget: $50K+.",
+    "currentAssets": {
+      "emailListSize": 3400,
+      "socialFollowing": 2100,
+      "websiteMonthlyVisitors": 4200,
+      "existingCustomers": 12
+    },
+    "monthlyMarketingBudget": 12000,
+    "teamSize": 3,
+    "teamRoles": [
+      "founder",
+      "operations_manager",
+      "content_creator"
+    ],
+    "createdAt": "2026-01-02T09:30:00Z",
+    "updatedAt": "2026-01-02T09:30:00Z"
+  }
+]
