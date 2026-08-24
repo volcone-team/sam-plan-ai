@@ -1,7 +1,6 @@
 'use client';
 
-import { COMPANY_ID } from '@/lib/constants';
-const companyId = COMPANY_ID;
+import { useAuth } from '@/hooks/use-auth';
 
 import { useState, useEffect } from 'react';
 import { Save, CheckCircle } from 'lucide-react';
@@ -19,59 +18,74 @@ interface ProfileFormData {
 }
 
 export function UserProfile() {
+  const { userId, firstName, lastName, email, loading: authLoading } = useAuth();
   const [formData, setFormData] = useState<ProfileFormData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (authLoading) return;
+
     async function loadUser() {
+      // Theme is a local UI preference only.
+      let theme: ProfileFormData['theme'] = 'system';
       try {
-        // Check localStorage first
         const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          setFormData(JSON.parse(saved));
+        if (saved) theme = (JSON.parse(saved).theme as ProfileFormData['theme']) ?? 'system';
+      } catch { /* ignore malformed cache */ }
+
+      // Identity always comes from the signed-in user's profile row.
+      let role = 'Owner';
+      if (userId) {
+        try {
+          const me: User = await userService.getUser(userId);
+          setFormData({
+            firstName: me.firstName || firstName || '',
+            lastName: me.lastName || lastName || '',
+            email: me.email || email || '',
+            role: me.role || role,
+            theme,
+          });
           setLoading(false);
           return;
+        } catch {
+          // Fall back to the auth/profile values we already have.
         }
+      }
 
-        const users: User[] = await userService.getUsersByCompany(companyId);
-        const owner = users.find(u => u.role === 'owner') || users[0];
+      setFormData({
+        firstName: firstName || '',
+        lastName: lastName || '',
+        email: email || '',
+        role,
+        theme,
+      });
+      setLoading(false);
+    }
 
-        if (owner) {
-          setFormData({
-            firstName: owner.firstName,
-            lastName: owner.lastName,
-            email: owner.email,
-            role: 'Founder',
-            theme: 'system',
-          });
-        } else {
-          setFormData({
-            firstName: 'Sarah',
-            lastName: 'Mitchell',
-            email: 'sarah@elevatecaching.com',
-            role: 'Founder',
-            theme: 'system',
-          });
-        }
-      } catch {
-        setFormData({
-          firstName: 'Sarah',
-          lastName: 'Mitchell',
-          email: 'sarah@elevatecaching.com',
-          role: 'Founder',
-          theme: 'system',
+    loadUser();
+  }, [authLoading, userId, firstName, lastName, email]);
+
+  const handleSave = async () => {
+    if (!formData) return;
+    setSaveError(null);
+
+    // Theme stays local; name changes are persisted to the profile row.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ theme: formData.theme }));
+
+    if (userId) {
+      try {
+        await userService.updateUser(userId, {
+          firstName: formData.firstName,
+          lastName: formData.lastName,
         });
-      } finally {
-        setLoading(false);
+      } catch (err) {
+        setSaveError(err instanceof Error ? err.message : 'Could not save your profile.');
+        return;
       }
     }
-    loadUser();
-  }, []);
 
-  const handleSave = () => {
-    if (!formData) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(formData));
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 3000);
   };
@@ -96,6 +110,12 @@ export function UserProfile() {
 
   return (
     <div className="space-y-6">
+      {saveError && (
+        <div role="alert" className="rounded-[var(--radius-md)] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+          {saveError}
+        </div>
+      )}
+
       {/* Success Toast */}
       {showSuccess && (
         <div className="flex items-center gap-2 rounded-[var(--radius-md)] border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200">

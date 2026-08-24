@@ -1,7 +1,9 @@
 /**
  * Initiative Service
- * Manages initiatives (one-time, recurring, evergreen)
- * This is the core execution engine
+ * Manages initiatives (one-time, recurring, evergreen).
+ *
+ * Strategy: Try Supabase first. If not configured or query fails,
+ * fall back to mock JSON data.
  */
 
 import type {
@@ -10,282 +12,457 @@ import type {
   UpdateInitiativeDTO,
   InitiativeStatus,
   InitiativeKind,
-  RecurringTemplate,
-  CreateRecurringTemplateDTO,
 } from '@/types';
+import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
 import initiativesData from '@/mock-data/initiatives.json';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class InitiativeService {
   /**
    * Get all initiatives for a company
    */
   async getInitiativesByCompany(companyId: string): Promise<Initiative[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('initiatives')
+          .select('*')
+          .eq('company_id', companyId)
+          .order('display_order', { ascending: true });
+
+        if (error) console.error("[Supabase initiatives]", (error as any).message, "|details:", (error as any).details, "|hint:", (error as any).hint, "|code:", (error as any).code);
+
+        if (!error && data) {
+          return data.map(row => this.mapRowToInitiative(row));
+        }
+      } catch (e) { console.error("[Supabase]", e); }
+    }
+
     await this.delay();
-    
     return initiativesData
       .filter(i => i.companyId === companyId)
-      .map(i => this.transformInitiativeData(i));
+      .map(i => this.transformMockData(i));
   }
 
   /**
    * Get a specific initiative
    */
   async getInitiative(id: string): Promise<Initiative> {
-    await this.delay();
-    
-    const initiative = initiativesData.find(i => i.id === id);
-    if (!initiative) {
-      throw new Error(`Initiative ${id} not found`);
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('initiatives')
+          .select('*')
+          .eq('id', id)
+          .single();
+
+        if (error) console.error("[Supabase initiatives]", (error as any).message, "|details:", (error as any).details, "|hint:", (error as any).hint, "|code:", (error as any).code);
+
+        if (!error && data) {
+          return this.mapRowToInitiative(data);
+        }
+      } catch (e) { console.error("[Supabase]", e); }
     }
 
-    return this.transformInitiativeData(initiative);
+    await this.delay();
+    const initiative = initiativesData.find(i => i.id === id);
+    if (!initiative) throw new Error(`Initiative ${id} not found`);
+    return this.transformMockData(initiative);
   }
 
   /**
    * Get initiatives by status
    */
-  async getInitiativesByStatus(
-    companyId: string,
-    status: InitiativeStatus
-  ): Promise<Initiative[]> {
+  async getInitiativesByStatus(companyId: string, status: InitiativeStatus): Promise<Initiative[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('initiatives')
+          .select('*')
+          .eq('company_id', companyId)
+          .eq('status', status)
+          .order('display_order', { ascending: true });
+
+        if (error) console.error("[Supabase initiatives]", (error as any).message, "|details:", (error as any).details, "|hint:", (error as any).hint, "|code:", (error as any).code);
+
+        if (!error && data) {
+          return data.map(row => this.mapRowToInitiative(row));
+        }
+      } catch (e) { console.error("[Supabase]", e); }
+    }
+
     await this.delay();
-    
     return initiativesData
       .filter(i => i.companyId === companyId && i.status === status)
-      .map(i => this.transformInitiativeData(i));
+      .map(i => this.transformMockData(i));
   }
 
   /**
-   * Get active initiatives
-   * Active = planned, in_progress, or launched
+   * Get active initiatives (planned, in_progress, launched)
    */
   async getActiveInitiatives(companyId: string): Promise<Initiative[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('initiatives')
+          .select('*')
+          .eq('company_id', companyId)
+          .in('status', ['planned', 'in_progress', 'launched'])
+          .order('display_order', { ascending: true });
+
+        if (error) console.error("[Supabase initiatives]", (error as any).message, "|details:", (error as any).details, "|hint:", (error as any).hint, "|code:", (error as any).code);
+
+        if (!error && data) {
+          return data.map(row => this.mapRowToInitiative(row));
+        }
+      } catch (e) { console.error("[Supabase]", e); }
+    }
+
     await this.delay();
-    
     const activeStatuses: InitiativeStatus[] = ['planned', 'in_progress', 'launched'];
     return initiativesData
       .filter(i => i.companyId === companyId && activeStatuses.includes(i.status as InitiativeStatus))
-      .map(i => this.transformInitiativeData(i));
+      .map(i => this.transformMockData(i));
   }
 
   /**
    * Get initiatives by type
    */
-  async getInitiativesByType(
-    companyId: string,
-    initiativeTypeId: string
-  ): Promise<Initiative[]> {
+  async getInitiativesByType(companyId: string, initiativeTypeId: string): Promise<Initiative[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('initiatives')
+          .select('*')
+          .eq('company_id', companyId)
+          .eq('initiative_type_id', initiativeTypeId);
+
+        if (error) console.error("[Supabase initiatives]", (error as any).message, "|details:", (error as any).details, "|hint:", (error as any).hint, "|code:", (error as any).code);
+
+        if (!error && data) {
+          return data.map(row => this.mapRowToInitiative(row));
+        }
+      } catch (e) { console.error("[Supabase]", e); }
+    }
+
     await this.delay();
-    
     return initiativesData
       .filter(i => i.companyId === companyId && i.initiativeTypeId === initiativeTypeId)
-      .map(i => this.transformInitiativeData(i));
+      .map(i => this.transformMockData(i));
   }
 
   /**
-   * Get initiatives by kind (one-time, recurring, evergreen)
+   * Get initiatives by kind
    */
-  async getInitiativesByKind(
-    companyId: string,
-    kind: InitiativeKind
-  ): Promise<Initiative[]> {
+  async getInitiativesByKind(companyId: string, kind: InitiativeKind): Promise<Initiative[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('initiatives')
+          .select('*')
+          .eq('company_id', companyId)
+          .eq('kind', kind);
+
+        if (error) console.error("[Supabase initiatives]", (error as any).message, "|details:", (error as any).details, "|hint:", (error as any).hint, "|code:", (error as any).code);
+
+        if (!error && data) {
+          return data.map(row => this.mapRowToInitiative(row));
+        }
+      } catch (e) { console.error("[Supabase]", e); }
+    }
+
     await this.delay();
-    
     return initiativesData
       .filter(i => i.companyId === companyId && i.kind === kind)
-      .map(i => this.transformInitiativeData(i));
+      .map(i => this.transformMockData(i));
   }
 
   /**
    * Get initiatives for a product
    */
-  async getInitiativesByProduct(
-    companyId: string,
-    productId: string
-  ): Promise<Initiative[]> {
+  async getInitiativesByProduct(companyId: string, productId: string): Promise<Initiative[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('initiatives')
+          .select('*')
+          .eq('company_id', companyId)
+          .eq('product_id', productId);
+
+        if (error) console.error("[Supabase initiatives]", (error as any).message, "|details:", (error as any).details, "|hint:", (error as any).hint, "|code:", (error as any).code);
+
+        if (!error && data) {
+          return data.map(row => this.mapRowToInitiative(row));
+        }
+      } catch (e) { console.error("[Supabase]", e); }
+    }
+
     await this.delay();
-    
     return initiativesData
       .filter(i => i.companyId === companyId && i.productId === productId)
-      .map(i => this.transformInitiativeData(i));
+      .map(i => this.transformMockData(i));
   }
 
   /**
    * Get initiatives within a date range
-   * For planning horizons (week, month, quarter)
    */
-  async getInitiativesByDateRange(
-    companyId: string,
-    startDate: Date,
-    endDate: Date
-  ): Promise<Initiative[]> {
+  async getInitiativesByDateRange(companyId: string, startDate: Date, endDate: Date): Promise<Initiative[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const startStr = startDate.toISOString().split('T')[0];
+        const endStr = endDate.toISOString().split('T')[0];
+
+        const { data, error } = await supabase
+          .from('initiatives')
+          .select('*')
+          .eq('company_id', companyId)
+          .lte('activation_date', endStr)
+          .or(`event_date.gte.${startStr},event_date.is.null`);
+
+        if (error) console.error("[Supabase initiatives]", (error as any).message, "|details:", (error as any).details, "|hint:", (error as any).hint, "|code:", (error as any).code);
+
+        if (!error && data) {
+          return data.map(row => this.mapRowToInitiative(row));
+        }
+      } catch (e) { console.error("[Supabase]", e); }
+    }
+
     await this.delay();
-    
     return initiativesData
       .filter(i => {
         if (i.companyId !== companyId) return false;
-
-        const data = i as any;
-        
-        // One-time: check if event date falls within range
-        if (data.kind === 'one-time' && data.eventDate) {
-          const eventDate = new Date(data.eventDate);
-          return eventDate >= startDate && eventDate <= endDate;
-        }
-
-        // Recurring: check if any instance overlaps
-        if (data.kind === 'recurring' && data.recurringTemplate?.eventDates) {
-          return data.recurringTemplate.eventDates.some((d: string) => {
-            const date = new Date(d);
-            return date >= startDate && date <= endDate;
-          });
-        }
-
-        // Evergreen: check if activated during range
-        if (data.kind === 'evergreen') {
-          const activationDate = new Date(data.activationDate);
-          const retirementDate = data.retirementDate ? new Date(data.retirementDate) : null;
-          const isActive = activationDate <= endDate && (!retirementDate || retirementDate >= startDate);
-          return isActive;
-        }
-
-        return false;
+        const activation = new Date(i.activationDate);
+        const event = i.eventDate ? new Date(i.eventDate) : null;
+        if (i.kind === 'evergreen') return activation <= endDate;
+        if (event) return activation <= endDate && event >= startDate;
+        return activation <= endDate;
       })
-      .map(i => this.transformInitiativeData(i));
+      .map(i => this.transformMockData(i));
   }
 
   /**
    * Create a new initiative
    */
   async createInitiative(dto: CreateInitiativeDTO): Promise<Initiative> {
+    if (isSupabaseConfigured()) {
+      const supabase = getSupabase();
+
+      // The "Custom Initiative" flow hands us a client-side id like
+      // "custom-1699999999". initiative_type_id is a UUID FK, so persist a
+      // real user-owned type first and use its id.
+      let typeId = dto.initiativeTypeId;
+      if (!UUID_RE.test(typeId || '')) {
+        const { data: newType, error: typeError } = await supabase
+          .from('initiative_types')
+          .insert({
+            name: dto.name || 'Custom Initiative',
+            channel: 'custom',
+            description: dto.description || '',
+            owner: 'user',
+            benchmarks: {},
+            project_template: { tasks: [], totalEstimatedHours: 0 },
+            difficulty: { effortToImplement: 5, skillExpertiseRequired: 5, timeToResults: 5, costToRun: 5 },
+            ai_context: { description: '', sizingGuidance: '', recommendationWeights: {} },
+            tier: 1,
+            display_order: 999,
+            is_active: true,
+          })
+          .select('id')
+          .single();
+
+        if (typeError || !newType) {
+          console.error('[Supabase createInitiativeType]', (typeError as any)?.message, (typeError as any)?.details);
+          throw new Error('Could not create the custom initiative type. Please try again.');
+        }
+        typeId = newType.id as string;
+      }
+
+      // product_id is NOT NULL. A brand-new company has no products yet.
+      if (!UUID_RE.test(dto.productId || '')) {
+        throw new Error('Add a product first — every initiative must be tied to a product.');
+      }
+
+      const insertData = {
+        company_id: dto.companyId,
+        annual_plan_id: dto.annualPlanId,
+        product_id: dto.productId,
+        initiative_type_id: typeId,
+        name: dto.name,
+        description: dto.description || '',
+        kind: dto.kind,
+        status: 'planned',
+        activation_date: dto.activationDate instanceof Date ? dto.activationDate.toISOString().split('T')[0] : dto.activationDate,
+        event_date: dto.eventDate ? (dto.eventDate instanceof Date ? dto.eventDate.toISOString().split('T')[0] : dto.eventDate) : null,
+        traffic_input: dto.trafficInput || null,
+        revenue_good: dto.revenueScenarios?.good || 0,
+        revenue_better: dto.revenueScenarios?.better || 0,
+        revenue_best: dto.revenueScenarios?.best || 0,
+        planned_budget: dto.plannedBudget || 0,
+        actual_spend: 0,
+        display_order: dto.displayOrder || 0,
+      };
+
+      const { data, error } = await supabase
+        .from('initiatives')
+        .insert(insertData)
+        .select()
+        .single();
+
+      // Surface write failures instead of silently returning throwaway mock data.
+      if (error || !data) {
+        console.error('[Supabase createInitiative]', (error as any)?.message, '|details:', (error as any)?.details, '|hint:', (error as any)?.hint, insertData);
+        throw new Error((error as any)?.message || 'Could not save the initiative.');
+      }
+
+      return this.mapRowToInitiative(data);
+    }
+
     await this.delay();
-    
-    const newInitiative = {
-      id: `init-${Date.now()}`,
+    const newInit = {
+      id: `${Date.now()}`,
       ...dto,
       status: 'planned' as InitiativeStatus,
-      roi: null,
-      plannedBudget: dto.plannedBudget || 0,
       actualSpend: 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-
-    initiativesData.push(newInitiative as any);
-    return this.transformInitiativeData(newInitiative as any);
+    return this.transformMockData(newInit as any);
   }
 
-  /**
-   * Update initiative
-   */
-  async updateInitiative(
-    id: string,
-    dto: UpdateInitiativeDTO
-  ): Promise<Initiative> {
-    await this.delay();
-    
-    const index = initiativesData.findIndex(i => i.id === id);
-    if (index === -1) {
-      throw new Error(`Initiative ${id} not found`);
+  async updateInitiative(id: string, dto: UpdateInitiativeDTO): Promise<Initiative> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const d = dto as any; const updateData: Record<string, unknown> = {};
+        if (d.name !== undefined) updateData.name = d.name;
+        if (d.description !== undefined) updateData.description = d.description;
+        if (d.status !== undefined) updateData.status = d.status;
+        if (d.kind !== undefined) updateData.kind = d.kind;
+        if (d.activationDate !== undefined) updateData.activation_date = d.activationDate instanceof Date ? d.activationDate.toISOString().split('T')[0] : d.activationDate;
+        if (d.eventDate !== undefined) updateData.event_date = d.eventDate instanceof Date ? d.eventDate.toISOString().split('T')[0] : d.eventDate;
+        if (d.trafficInput !== undefined) updateData.traffic_input = d.trafficInput;
+        if (d.plannedBudget !== undefined) updateData.planned_budget = d.plannedBudget;
+        if (d.actualSpend !== undefined) updateData.actual_spend = d.actualSpend;
+        if (d.revenueScenarios !== undefined) {
+          updateData.revenue_good = d.revenueScenarios.good;
+          updateData.revenue_better = d.revenueScenarios.better;
+          updateData.revenue_best = d.revenueScenarios.best;
+        }
+        if (d.displayOrder !== undefined) updateData.display_order = d.displayOrder;
+
+        const { data, error } = await supabase
+          .from('initiatives')
+          .update(updateData)
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (error) console.error("[Supabase initiatives]", (error as any).message, "|details:", (error as any).details, "|hint:", (error as any).hint, "|code:", (error as any).code);
+
+        if (!error && data) {
+          return this.mapRowToInitiative(data);
+        }
+      } catch (e) { console.error("[Supabase]", e); }
     }
 
-    const data = initiativesData[index] as any;
-    const updated = {
-      ...data,
-      ...dto,
-      activationDate: dto.activationDate ? (dto.activationDate instanceof Date ? dto.activationDate.toISOString() : dto.activationDate) : data.activationDate,
-      eventDate: dto.eventDate ? (dto.eventDate instanceof Date ? dto.eventDate.toISOString() : dto.eventDate) : data.eventDate,
-      updatedAt: new Date().toISOString(),
-    };
-
-    initiativesData[index] = updated;
-    return this.transformInitiativeData(updated);
+    await this.delay();
+    const index = initiativesData.findIndex(i => i.id === id);
+    if (index === -1) throw new Error(`Initiative ${id} not found`);
+    const updated = { ...initiativesData[index], ...dto, updatedAt: new Date().toISOString() };
+    return this.transformMockData(updated as any);
   }
 
-  /**
-   * Update initiative status
-   */
-  async updateInitiativeStatus(
-    id: string,
-    status: InitiativeStatus
-  ): Promise<Initiative> {
+  async updateInitiativeStatus(id: string, status: InitiativeStatus): Promise<Initiative> {
     return this.updateInitiative(id, { status });
   }
 
-  /**
-   * Launch an initiative
-   */
   async launchInitiative(id: string): Promise<Initiative> {
     return this.updateInitiativeStatus(id, 'launched');
   }
 
-  /**
-   * Pause an initiative
-   */
   async pauseInitiative(id: string): Promise<Initiative> {
     return this.updateInitiativeStatus(id, 'paused');
   }
 
-  /**
-   * Complete an initiative
-   */
   async completeInitiative(id: string): Promise<Initiative> {
     return this.updateInitiativeStatus(id, 'completed');
   }
 
-  /**
-   * Retire an evergreen initiative
-   */
   async retireInitiative(id: string): Promise<Initiative> {
-    const initiative = await this.getInitiative(id);
-    if (initiative.kind !== 'evergreen') {
-      throw new Error('Can only retire evergreen initiatives');
-    }
-
-    const index = initiativesData.findIndex(i => i.id === id);
-    if (index === -1) {
-      throw new Error(`Initiative ${id} not found`);
-    }
-
-    const data = initiativesData[index] as any;
-    const updated = {
-      ...data,
-      retirementDate: new Date().toISOString(),
-      status: 'retired',
-      updatedAt: new Date().toISOString(),
-    };
-
-    initiativesData[index] = updated;
-    return this.transformInitiativeData(updated);
+    return this.updateInitiativeStatus(id, 'retired');
   }
 
   /**
    * Delete an initiative
    */
   async deleteInitiative(id: string): Promise<void> {
-    await this.delay();
+    if (isSupabaseConfigured()) {
+      const supabase = getSupabase();
+      const { error } = await supabase
+        .from('initiatives')
+        .delete()
+        .eq('id', id);
 
-    const index = initiativesData.findIndex(i => i.id === id);
-    if (index === -1) {
-      throw new Error(`Initiative ${id} not found`);
+      if (error) {
+        throw new Error(error.message);
+      }
+      return;
     }
 
+    await this.delay();
+    const index = initiativesData.findIndex(i => i.id === id);
+    if (index === -1) throw new Error(`Initiative ${id} not found`);
     initiativesData.splice(index, 1);
   }
 
-  /**
-   * Calculate ROI for an initiative
-   * ROI = (Revenue - Spend) / Spend * 100
-   */
   calculateROI(revenue: number, spend: number): number | null {
     if (spend === 0) return null;
     return ((revenue - spend) / spend) * 100;
   }
 
   /**
-   * Transform initiative data
+   * Map Supabase row to Initiative
    */
-  private transformInitiativeData(data: typeof initiativesData[0]): Initiative {
+  private mapRowToInitiative(row: Record<string, unknown>): Initiative {
+    return {
+      id: row.id as string,
+      companyId: row.company_id as string,
+      annualPlanId: row.annual_plan_id as string,
+      initiativeTypeId: row.initiative_type_id as string,
+      productId: row.product_id as string,
+      name: row.name as string,
+      description: (row.description as string) || '',
+      kind: row.kind as InitiativeKind,
+      status: row.status as InitiativeStatus,
+      activationDate: new Date(row.activation_date as string),
+      eventDate: row.event_date ? new Date(row.event_date as string) : undefined,
+      trafficInput: row.traffic_input as number | undefined,
+      revenueScenarios: {
+        good: Number(row.revenue_good) || 0,
+        better: Number(row.revenue_better) || 0,
+        best: Number(row.revenue_best) || 0,
+      },
+      plannedBudget: Number(row.planned_budget) || 0,
+      actualSpend: Number(row.actual_spend) || 0,
+      displayOrder: (row.display_order as number) || 0,
+      createdAt: new Date(row.created_at as string),
+      updatedAt: new Date(row.updated_at as string),
+    } as Initiative;
+  }
+
+  /**
+   * Transform mock JSON to Initiative
+   */
+  private transformMockData(data: typeof initiativesData[0]): Initiative {
     return {
       id: data.id,
       companyId: data.companyId,
@@ -299,19 +476,15 @@ export class InitiativeService {
       activationDate: new Date(data.activationDate),
       eventDate: data.eventDate ? new Date(data.eventDate) : undefined,
       trafficInput: (data as any).trafficInput,
+      revenueScenarios: data.revenueScenarios,
       plannedBudget: data.plannedBudget,
       actualSpend: data.actualSpend,
-      revenueScenarios: data.revenueScenarios,
-      roi: (data as any).roi,
       displayOrder: (data as any).displayOrder || 0,
       createdAt: new Date(data.createdAt),
       updatedAt: new Date(data.updatedAt),
     } as Initiative;
   }
 
-  /**
-   * Simulate network delay
-   */
   private delay(ms: number = 50): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, Math.random() * ms));
   }

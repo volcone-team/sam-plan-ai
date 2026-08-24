@@ -1,7 +1,6 @@
 'use client';
 
-import { COMPANY_ID } from '@/lib/constants';
-const companyId = COMPANY_ID;
+import { useCompanyId } from '@/hooks/use-auth';
 
 import { useState, useEffect, useMemo } from 'react';
 import { Package, TrendingUp, Crown, BarChart3, Download } from 'lucide-react';
@@ -44,6 +43,7 @@ interface ProductRevenueData {
 }
 
 export function ProductsReport() {
+  const companyId = useCompanyId() || "";
   const [products, setProducts] = useState<Product[]>([]);
   const [results, setResults] = useState<Result[]>([]);
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
@@ -51,6 +51,7 @@ export function ProductsReport() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!companyId) return;
     async function loadData() {
       setLoading(true);
       try {
@@ -74,7 +75,7 @@ export function ProductsReport() {
       }
     }
     loadData();
-  }, []);
+  }, [companyId]);
 
   // Build initiative → product mapping
   const initiativeProductMap = useMemo(() => {

@@ -55,7 +55,8 @@ export async function updateSession(request: NextRequest) {
   const isPublicRoute =
     request.nextUrl.pathname === '/' ||
     request.nextUrl.pathname.startsWith('/sample-plan') ||
-    request.nextUrl.pathname.startsWith('/onboarding');
+    request.nextUrl.pathname.startsWith('/onboarding') ||
+    request.nextUrl.pathname.startsWith('/admin-login');
   const isAdminRoute = request.nextUrl.pathname.startsWith('/admin');
   const isAppRoute =
     !isAuthRoute && !isPublicRoute && !isAdminRoute;
@@ -74,8 +75,27 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // TODO: Admin route protection (check is_admin flag in profiles table)
-  // For now, admin routes are accessible to any authenticated user
+  // Admin route protection
+  if (isAdminRoute && !request.nextUrl.pathname.startsWith('/admin/login') && !request.nextUrl.pathname.startsWith('/admin-login')) {
+    if (!user) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/admin-login';
+      return NextResponse.redirect(url);
+    }
+
+    // Check is_admin flag
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('is_admin')
+      .eq('id', user.id)
+      .single();
+
+    if (!profile?.is_admin) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/admin-login';
+      return NextResponse.redirect(url);
+    }
+  }
 
   return supabaseResponse;
 }

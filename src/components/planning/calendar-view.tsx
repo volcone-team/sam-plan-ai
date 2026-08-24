@@ -1,8 +1,7 @@
 'use client';
 import { formatDate, formatDateShort } from '@/lib/format-date';
 
-import { COMPANY_ID } from '@/lib/constants';
-const companyId = COMPANY_ID;
+import { useCompanyId } from '@/hooks/use-auth';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -71,6 +70,7 @@ function getCalendarDays(year: number, month: number): Date[] {
 }
 
 export function CalendarView() {
+  const companyId = useCompanyId() || "";
   const router = useRouter();
   const [currentYear, setCurrentYear] = useState(2026);
   const [currentMonth, setCurrentMonth] = useState(() => new Date().getMonth());
@@ -101,8 +101,8 @@ export function CalendarView() {
     });
     setSelectedDay(null);
   }, []);
-
   useEffect(() => {
+    if (!companyId) return;
     const loadData = async () => {
       try {
         setLoading(true);
@@ -129,7 +129,7 @@ export function CalendarView() {
     };
 
     loadData();
-  }, []);
+  }, [companyId]);
 
   const today = useMemo(() => new Date(), []);
 

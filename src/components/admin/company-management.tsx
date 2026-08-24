@@ -40,7 +40,7 @@ interface AdminCompany {
 
 const MOCK_COMPANIES: AdminCompany[] = [
   {
-    id: "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    id: "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
     name: "Elevate Coaching",
     description: "A premium coaching and consulting firm specializing in executive leadership development",
     owner: "Sarah Mitchell",

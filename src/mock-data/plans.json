@@ -1,8 +1,8 @@
 {
   "annualPlans": [
     {
-      "id": "plan-annual-2026-7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
-      "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+      "id": "7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
+      "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
       "year": 2026,
       "baselineRevenue": 495000,
       "stretchRevenue": 900000,
@@ -15,8 +15,8 @@
   ],
   "quarterlyPlans": [
     {
-      "id": "plan-q1-2026-b8c9d0e1-f2a3-44b5-0c6d-7e8f9a0b1c2d",
-      "annualPlanId": "plan-annual-2026-7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
+      "id": "b8c9d0e1-f2a3-44b5-0c6d-7e8f9a0b1c2d",
+      "annualPlanId": "7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
       "quarter": 1,
       "year": 2026,
       "targetRevenue": 135000,
@@ -25,8 +25,8 @@
       "updatedAt": "2026-01-02T08:00:00Z"
     },
     {
-      "id": "plan-q2-2026-c9d0e1f2-a3b4-45c6-1d7e-8f9a0b1c2d3e",
-      "annualPlanId": "plan-annual-2026-7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
+      "id": "c9d0e1f2-a3b4-45c6-1d7e-8f9a0b1c2d3e",
+      "annualPlanId": "7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
       "quarter": 2,
       "year": 2026,
       "targetRevenue": 145000,
@@ -35,8 +35,8 @@
       "updatedAt": "2026-01-02T08:00:00Z"
     },
     {
-      "id": "plan-q3-2026-d0e1f2a3-b4c5-46d7-2e8f-9a0b1c2d3e4f",
-      "annualPlanId": "plan-annual-2026-7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
+      "id": "d0e1f2a3-b4c5-46d7-2e8f-9a0b1c2d3e4f",
+      "annualPlanId": "7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
       "quarter": 3,
       "year": 2026,
       "targetRevenue": 155000,
@@ -45,8 +45,8 @@
       "updatedAt": "2026-01-02T08:00:00Z"
     },
     {
-      "id": "plan-q4-2026-e1f2a3b4-c5d6-47e8-3f9a-0b1c2d3e4f5a",
-      "annualPlanId": "plan-annual-2026-7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
+      "id": "e1f2a3b4-c5d6-47e8-3f9a-0b1c2d3e4f5a",
+      "annualPlanId": "7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
       "quarter": 4,
       "year": 2026,
       "targetRevenue": 160000,
@@ -57,8 +57,8 @@
   ],
   "monthlyPlans": [
     {
-      "id": "plan-m-2026-01-f2a3b4c5-d6e7-48f9-4a0b-1c2d3e4f5a6b",
-      "quarterlyPlanId": "plan-q1-2026-b8c9d0e1-f2a3-44b5-0c6d-7e8f9a0b1c2d",
+      "id": "f2a3b4c5-d6e7-48f9-4a0b-1c2d3e4f5a6b",
+      "quarterlyPlanId": "b8c9d0e1-f2a3-44b5-0c6d-7e8f9a0b1c2d",
       "month": 1,
       "year": 2026,
       "targetRevenue": 35000,
@@ -67,8 +67,8 @@
       "updatedAt": "2026-01-02T08:00:00Z"
     },
     {
-      "id": "plan-m-2026-02-a3b4c5d6-e7f8-49a0-5b1c-2d3e4f5a6b7c",
-      "quarterlyPlanId": "plan-q1-2026-b8c9d0e1-f2a3-44b5-0c6d-7e8f9a0b1c2d",
+      "id": "a3b4c5d6-e7f8-49a0-5b1c-2d3e4f5a6b7c",
+      "quarterlyPlanId": "b8c9d0e1-f2a3-44b5-0c6d-7e8f9a0b1c2d",
       "month": 2,
       "year": 2026,
       "targetRevenue": 45000,
@@ -77,8 +77,8 @@
       "updatedAt": "2026-01-02T08:00:00Z"
     },
     {
-      "id": "plan-m-2026-03-b4c5d6e7-f8a9-40b1-6c2d-3e4f5a6b7c8d",
-      "quarterlyPlanId": "plan-q1-2026-b8c9d0e1-f2a3-44b5-0c6d-7e8f9a0b1c2d",
+      "id": "b4c5d6e7-f8a9-40b1-6c2d-3e4f5a6b7c8d",
+      "quarterlyPlanId": "b8c9d0e1-f2a3-44b5-0c6d-7e8f9a0b1c2d",
       "month": 3,
       "year": 2026,
       "targetRevenue": 55000,
@@ -89,12 +89,12 @@
   ],
   "weeklyPlans": [
     {
-      "id": "plan-w-2026-06-c5d6e7f8-a9b0-41c2-7d3e-4f5a6b7c8d9e",
-      "monthlyPlanId": "plan-m-2026-01-f2a3b4c5-d6e7-48f9-4a0b-1c2d3e4f5a6b",
+      "id": "c5d6e7f8-a9b0-41c2-7d3e-4f5a6b7c8d9e",
+      "monthlyPlanId": "f2a3b4c5-d6e7-48f9-4a0b-1c2d3e4f5a6b",
       "weekStartDate": "2026-01-06T00:00:00Z",
       "weekEndDate": "2026-01-12T23:59:59Z",
       "targetRevenue": 8000,
-      "topPriorities": ["init-webinar-jan-2026", "init-linkedin-outreach-q1"],
+      "topPriorities": ["f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b", "a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c"],
       "notes": "Week 1: Finalize webinar registration page. Begin LinkedIn DM sequence.",
       "createdAt": "2026-01-02T08:00:00Z",
       "updatedAt": "2026-01-05T14:32:00Z"

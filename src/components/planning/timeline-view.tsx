@@ -1,8 +1,7 @@
 'use client';
 import { formatDate, formatDateShort } from '@/lib/format-date';
 
-import { COMPANY_ID } from '@/lib/constants';
-const companyId = COMPANY_ID;
+import { useCompanyId } from '@/hooks/use-auth';
 
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -54,6 +53,7 @@ function getQuarterForDate(date: Date): number {
 }
 
 export function TimelineView() {
+  const companyId = useCompanyId() || "";
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +62,7 @@ export function TimelineView() {
   const [selectedProduct, setSelectedProduct] = useState<string>('all');
 
   useEffect(() => {
+    if (!companyId) return;
     const loadData = async () => {
       try {
         setLoading(true);
@@ -83,7 +84,7 @@ export function TimelineView() {
     };
 
     loadData();
-  }, []);
+  }, [companyId]);
 
   const filteredInitiatives = useMemo(() => {
     if (selectedProduct === 'all') return initiatives;

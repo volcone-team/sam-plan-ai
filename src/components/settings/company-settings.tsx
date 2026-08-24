@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 import { Save, CheckCircle } from 'lucide-react';
 import { companyService } from '@/services/company.service';
+import { useCompanyId } from '@/hooks/use-auth';
 import type { Company } from '@/types';
 
-const STORAGE_KEY = 'sam-flow-company-settings';
 
 interface CompanyFormData {
   name: string;
@@ -21,22 +21,16 @@ interface CompanyFormData {
 }
 
 export function CompanySettings() {
+  const companyId = useCompanyId();
   const [formData, setFormData] = useState<CompanyFormData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSuccess, setShowSuccess] = useState(false);
 
   useEffect(() => {
     async function loadCompany() {
+      if (!companyId) return; // wait for auth
       try {
-        // Check localStorage first
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          setFormData(JSON.parse(saved));
-          setLoading(false);
-          return;
-        }
-
-        const company: Company = await companyService.getCompany();
+        const company: Company = await companyService.getCompany(companyId);
         setFormData({
           name: company.name,
           fiscalYear: company.fiscalYear,
@@ -68,13 +62,25 @@ export function CompanySettings() {
       }
     }
     loadCompany();
-  }, []);
+  }, [companyId]);
 
-  const handleSave = () => {
-    if (!formData) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(formData));
-    setShowSuccess(true);
-    setTimeout(() => setShowSuccess(false), 3000);
+  const handleSave = async () => {
+    if (!formData || !companyId) return;
+    try {
+      await companyService.updateCompany(companyId, {
+        name: formData.name,
+        description: formData.description,
+        currency: formData.currency,
+        targetRevenue: formData.baselineRevenue,
+        baselineRevenue: formData.baselineRevenue,
+        stretchRevenue: formData.stretchRevenue,
+        operatingBudget: formData.operatingBudget,
+      });
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    } catch (err) {
+      console.error("[settings] save failed:", err);
+    }
   };
 
   const handleChange = (field: keyof CompanyFormData, value: string | number) => {

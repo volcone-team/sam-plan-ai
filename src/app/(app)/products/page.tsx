@@ -1,5 +1,6 @@
 'use client';
 
+import { useCompanyId } from '@/hooks/use-auth';
 import { useEffect, useState, useCallback } from 'react';
 import {
   Plus,
@@ -17,7 +18,6 @@ import { projectionService } from '@/services/projection.service';
 import { initiativeService } from '@/services/initiative.service';
 import type { Product, CreateProductDTO, UpdateProductDTO, RevenueType, ProductTicketTier } from '@/types';
 
-const companyId = 'comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d';
 type ProductType = 'Service' | 'Course' | 'Membership' | 'Coaching' | 'Digital Product' | 'Subscription';
 
 const PRODUCT_TYPES: ProductType[] = [
@@ -86,6 +86,7 @@ const emptyForm: ProductFormData = {
 };
 
 export default function ProductsPage() {
+  const companyId = useCompanyId() || "";
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +106,7 @@ export default function ProductsPage() {
   // Delete confirmation state
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -140,11 +142,12 @@ export default function ProductsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [companyId]);
 
   useEffect(() => {
+    if (!companyId) return;
     loadData();
-  }, [loadData]);
+  }, [loadData, companyId]);
 
   const handleAddProduct = async () => {
     if (!addForm.name.trim() || !addForm.price) return;
@@ -163,6 +166,7 @@ export default function ProductsPage() {
       setShowAddForm(false);
     } catch (err) {
       console.error('Error creating product:', err);
+      setError(err instanceof Error ? err.message : 'Could not save the product.');
     } finally {
       setAddLoading(false);
     }
@@ -202,11 +206,14 @@ export default function ProductsPage() {
   const handleDelete = async (id: string) => {
     try {
       setDeleteLoading(true);
+      setDeleteError(null);
       await productService.deleteProduct(id);
       setProducts((prev) => prev.filter((p) => p.id !== id));
       setDeletingId(null);
-    } catch (err) {
-      console.error('Error deleting product:', err);
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to delete product';
+      console.error('Error deleting product:', msg);
+      setDeleteError(msg);
     } finally {
       setDeleteLoading(false);
     }
@@ -488,10 +495,15 @@ export default function ProductsPage() {
               >
                 {/* Delete Confirmation Overlay */}
                 {isDeleting && (
-                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-[var(--radius-md)] bg-card/95 backdrop-blur-sm">
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-[var(--radius-md)] bg-card/95 backdrop-blur-sm p-4">
                     <p className="mb-3 text-sm font-medium text-[hsl(var(--foreground))]">
-                      Delete this product?
+                      Are you sure you want to delete this product?
                     </p>
+                    {deleteError && (
+                      <p className="mb-3 max-w-[240px] text-center text-xs text-red-600 dark:text-red-400">
+                        {deleteError}
+                      </p>
+                    )}
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleDelete(product.id)}
@@ -506,7 +518,7 @@ export default function ProductsPage() {
                         Confirm
                       </button>
                       <button
-                        onClick={() => setDeletingId(null)}
+                        onClick={() => { setDeletingId(null); setDeleteError(null); }}
                         className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-xs font-medium text-[hsl(var(--foreground-muted))] transition-colors hover:bg-[hsl(var(--background))]"
                       >
                         Cancel

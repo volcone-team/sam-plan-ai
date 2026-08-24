@@ -113,8 +113,18 @@ export function QuestionnaireEngine({ mode }: QuestionnaireEngineProps) {
       return;
     }
     dispatch({ type: "SET_SUBMITTING", isSubmitting: true });
+
+    // Record which questionnaire was completed and flush the answers, so the
+    // review screen reads this record rather than a stale one from the other mode.
+    try {
+      localStorage.setItem(`sam-questionnaire-${mode}`, JSON.stringify(questionnaireData));
+      localStorage.setItem("sam-questionnaire-mode", mode);
+    } catch {
+      // ignore quota errors
+    }
+
     router.push("/onboarding/review");
-  }, [currentStepConfig.id, questionnaireData, router]);
+  }, [currentStepConfig.id, questionnaireData, mode, router]);
 
   return (
     <div className="flex min-h-dvh flex-col">

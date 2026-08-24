@@ -1,7 +1,7 @@
 [
   {
     "id": "user-f1b2c3d4-e5f6-47a8-9b1c-2d3e4f5a6b7c",
-    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
     "email": "sarah@elevatecaching.com",
     "firstName": "Sarah",
     "lastName": "Mitchell",
@@ -14,7 +14,7 @@
   },
   {
     "id": "user-a7b8c9d0-e1f2-43a4-9b5c-6d7e8f9a0b1c",
-    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
     "email": "marcus@elevatecaching.com",
     "firstName": "Marcus",
     "lastName": "Chen",
@@ -27,7 +27,7 @@
   },
   {
     "id": "user-p2q3r4s5-t6u7-48v9-0w1x-2y3z4a5b6c7d",
-    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
     "email": "alex@elevatecaching.com",
     "firstName": "Alex",
     "lastName": "Rodriguez",

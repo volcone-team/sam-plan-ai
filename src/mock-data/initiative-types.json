@@ -1,6 +1,6 @@
 [
   {
-    "id": "inittype-webinar-90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
+    "id": "90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
     "name": "Webinar",
     "channel": "webinar",
     "description": "Live or evergreen webinar to warm audience. Combines education and soft pitch.",
@@ -116,7 +116,7 @@
     "updatedAt": "2024-06-15T09:00:00Z"
   },
   {
-    "id": "inittype-email-a1b2c3d4-e5f6-4a7b-1c8d-9e0f1a2b3c4d",
+    "id": "a1b2c3d4-e5f6-4a7b-1c8d-9e0f1a2b3c4d",
     "name": "Email Campaign",
     "channel": "email",
     "description": "Targeted email sequence to existing list or segment",
@@ -210,7 +210,7 @@
     "updatedAt": "2024-06-15T09:00:00Z"
   },
   {
-    "id": "inittype-linkedin-b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
+    "id": "b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
     "name": "LinkedIn Outreach",
     "channel": "linkedin",
     "description": "Targeted LinkedIn connection requests and DM sequences to ideal customers",
@@ -315,7 +315,7 @@
     "updatedAt": "2024-06-15T09:00:00Z"
   },
   {
-    "id": "inittype-referral-c3d4e5f6-a7b8-4c9d-3e0f-1a2b3c4d5e6f",
+    "id": "c3d4e5f6-a7b8-4c9d-3e0f-1a2b3c4d5e6f",
     "name": "Referral Program",
     "channel": "referral",
     "description": "Partner referral program with commission structure or joint venture arrangement",
@@ -404,7 +404,7 @@
     "updatedAt": "2024-06-15T09:00:00Z"
   },
   {
-    "id": "inittype-challenge-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+    "id": "d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
     "name": "Challenge/Bootcamp",
     "channel": "challenge",
     "description": "Free or low-cost 5-7 day challenge to build community and pre-qualify buyers",
@@ -509,7 +509,7 @@
     "updatedAt": "2024-06-15T09:00:00Z"
   },
   {
-    "id": "inittype-vsl-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+    "id": "e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
     "name": "VSL / Sales Page",
     "channel": "vsl",
     "description": "Video Sales Letter or high-conversion sales page for offer",
@@ -603,7 +603,7 @@
     "updatedAt": "2024-06-15T09:00:00Z"
   },
   {
-    "id": "inittype-paid-ads-f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
+    "id": "f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
     "name": "Paid Ads",
     "channel": "paid_ads",
     "description": "Facebook, Google, or LinkedIn paid advertising campaigns driving traffic to offers",
@@ -719,7 +719,7 @@
     "updatedAt": "2024-06-15T09:00:00Z"
   },
   {
-    "id": "inittype-sales-calls-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+    "id": "a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
     "name": "Sales Calls",
     "channel": "sales_calls",
     "description": "Direct outbound or inbound discovery/sales calls to close high-ticket offers",
@@ -835,7 +835,7 @@
     "updatedAt": "2024-06-15T09:00:00Z"
   },
   {
-    "id": "inittype-content-social-b8c9d0e1-f2a3-4b4c-2d5e-6f7a8b9c0d1e",
+    "id": "b8c9d0e1-f2a3-4b4c-2d5e-6f7a8b9c0d1e",
     "name": "Content & Organic Social",
     "channel": "content_social",
     "description": "Consistent content publishing and organic social media presence to build audience and generate inbound leads",

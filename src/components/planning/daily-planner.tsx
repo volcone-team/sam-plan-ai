@@ -1,8 +1,7 @@
 'use client';
 import { formatDate, formatDateShort } from '@/lib/format-date';
 
-import { COMPANY_ID } from '@/lib/constants';
-const companyId = COMPANY_ID;
+import { useCompanyId } from '@/hooks/use-auth';
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -96,6 +95,7 @@ interface TaskWithInitiative extends Task {
 }
 
 export function DailyPlanner() {
+  const companyId = useCompanyId() || "";
   const router = useRouter();
   const [selectedDate, setSelectedDate] = useState(() => {
     const today = new Date();
@@ -133,6 +133,7 @@ export function DailyPlanner() {
   const isToday = isSameDay(selectedDate, new Date());
 
   useEffect(() => {
+    if (!companyId) return;
     const loadData = async () => {
       try {
         setLoading(true);
@@ -186,7 +187,7 @@ export function DailyPlanner() {
     };
 
     loadData();
-  }, [selectedDate]);
+  }, [selectedDate, companyId]);
 
   const handleStatusToggle = async (taskId: string, currentStatus: TaskStatus) => {
     const newStatus = cycleStatus(currentStatus);

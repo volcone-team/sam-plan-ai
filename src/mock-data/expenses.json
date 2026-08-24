@@ -1,8 +1,8 @@
 [
   {
-    "id": "expense-webinar-email-d3e4f5a6-b7c8-49d0-1e2f-3a4b5c6d7e8f",
-    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
-    "initiativeId": "init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
+    "id": "d3e4f5a6-b7c8-49d0-1e2f-3a4b5c6d7e8f",
+    "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "initiativeId": "f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
     "category": "tools",
     "description": "Zoom webinar platform subscription (monthly)",
     "amount": 100,
@@ -13,9 +13,9 @@
     "updatedAt": "2026-01-06T10:00:00Z"
   },
   {
-    "id": "expense-webinar-slides-e4f5a6b7-c8d9-40e1-2f3a-4b5c6d7e8f9a",
-    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
-    "initiativeId": "init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
+    "id": "e4f5a6b7-c8d9-40e1-2f3a-4b5c6d7e8f9a",
+    "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "initiativeId": "f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
     "category": "production",
     "description": "Design and formatting of webinar slides",
     "amount": 350,
@@ -26,9 +26,9 @@
     "updatedAt": "2026-01-20T10:00:00Z"
   },
   {
-    "id": "expense-linkedin-outreach-f5a6b7c8-d9ea-41f2-3a4b-5c6d7e8f9a0b",
-    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
-    "initiativeId": "init-linkedin-outreach-q1-a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c",
+    "id": "f5a6b7c8-d9ea-41f2-3a4b-5c6d7e8f9a0b",
+    "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "initiativeId": "a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c",
     "category": "talent",
     "description": "Contractor for LinkedIn target research and list building",
     "amount": 800,
@@ -39,9 +39,9 @@
     "updatedAt": "2026-01-10T10:00:00Z"
   },
   {
-    "id": "expense-challenge-production-a6b7c8d9-ea0b-42a3-4b5c-6d7e8f9a0b1c",
-    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
-    "initiativeId": "init-challenge-q2-d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f",
+    "id": "a6b7c8d9-ea0b-42a3-4b5c-6d7e8f9a0b1c",
+    "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "initiativeId": "d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f",
     "category": "production",
     "description": "Video recording and editing for 7-day challenge modules",
     "amount": 2400,
@@ -52,9 +52,9 @@
     "updatedAt": "2026-03-15T10:00:00Z"
   },
   {
-    "id": "expense-vsl-production-b7c8d9ea-b0c1-43b4-5c6d-7e8f9a0b1c2d",
-    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
-    "initiativeId": "init-vsl-intensives-e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a",
+    "id": "b7c8d9ea-b0c1-43b4-5c6d-7e8f9a0b1c2d",
+    "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "initiativeId": "e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a",
     "category": "production",
     "description": "VSL scripting, filming, and editing",
     "amount": 2200,
@@ -65,9 +65,9 @@
     "updatedAt": "2026-05-20T10:00:00Z"
   },
   {
-    "id": "expense-vsl-ads-c8d9ea0b-c1d2-44c5-6d7e-8f9a0b1c2d3e",
-    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
-    "initiativeId": "init-vsl-intensives-e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a",
+    "id": "c8d9ea0b-c1d2-44c5-6d7e-8f9a0b1c2d3e",
+    "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "initiativeId": "e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a",
     "category": "advertising",
     "description": "Facebook/LinkedIn paid ads to drive traffic to VSL",
     "amount": 1800,
@@ -78,9 +78,9 @@
     "updatedAt": "2026-06-01T10:00:00Z"
   },
   {
-    "id": "expense-challenge-ads-d9ea0b1c-d2e3-45d6-7e8f-9a0b1c2d3e4f",
-    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
-    "initiativeId": "init-challenge-q2-d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f",
+    "id": "d9ea0b1c-d2e3-45d6-7e8f-9a0b1c2d3e4f",
+    "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "initiativeId": "d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f",
     "category": "advertising",
     "description": "Facebook ads promoting free 7-day challenge",
     "amount": 600,

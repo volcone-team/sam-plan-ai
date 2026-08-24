@@ -1,7 +1,6 @@
 'use client';
 
-import { COMPANY_ID } from '@/lib/constants';
-const companyId = COMPANY_ID;
+import { useCompanyId } from '@/hooks/use-auth';
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -33,6 +32,7 @@ interface TypeROI {
 }
 
 export function ROIReport() {
+  const companyId = useCompanyId() || "";
   const router = useRouter();
   const [initiativeROIs, setInitiativeROIs] = useState<InitiativeROI[]>([]);
   const [typeROIs, setTypeROIs] = useState<TypeROI[]>([]);
@@ -41,6 +41,7 @@ export function ROIReport() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!companyId) return;
     async function loadData() {
       setLoading(true);
       try {
@@ -125,7 +126,7 @@ export function ROIReport() {
       }
     }
     loadData();
-  }, []);
+  }, [companyId]);
 
   const netProfit = totalRevenue - totalSpend;
   const overallROI = totalSpend > 0 ? ((totalRevenue - totalSpend) / totalSpend) * 100 : null;

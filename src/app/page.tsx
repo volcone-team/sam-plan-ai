@@ -22,12 +22,21 @@ export default function LandingPage() {
               Sample Plan
             </Link>
             <ThemeToggle />
+            <Link
+              href="/auth/login"
+              className="text-sm text-[hsl(var(--foreground-muted))] hover:text-foreground transition-colors"
+            >
+              Login
+            </Link>
             <Link href="/onboarding">
               <Button size="sm">Get Started</Button>
             </Link>
           </nav>
           <div className="flex items-center gap-2 sm:hidden">
             <ThemeToggle />
+            <Link href="/auth/login" className="text-sm text-[hsl(var(--foreground-muted))] hover:text-foreground">
+              Login
+            </Link>
             <Link href="/onboarding">
               <Button size="sm">Get Started</Button>
             </Link>

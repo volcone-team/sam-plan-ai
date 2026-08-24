@@ -1,16 +1,18 @@
-import { NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+import { NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
 /**
- * Auth Callback Route Handler
- * Processes the redirect from Supabase after email confirmation or OAuth login.
- * Exchanges the auth code for a session and redirects to the app.
+ * GET /auth/callback
+ *
+ * Supabase redirects here after email confirmation (or OAuth).
+ * Exchanges the auth code for a session, then redirects the user
+ * to their intended destination.
  */
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
-  const code = searchParams.get('code');
-  const next = searchParams.get('next') ?? '/year-at-a-glance';
+  const code = searchParams.get("code");
+  const next = searchParams.get("next") || "/year-at-a-glance";
 
   if (code) {
     const cookieStore = await cookies();
@@ -28,7 +30,8 @@ export async function GET(request: Request) {
                 cookieStore.set(name, value, options)
               );
             } catch {
-              // Ignore — may be called from a Server Component context
+              // Can't set cookies in middleware redirect responses.
+              // The session will be picked up on the next request.
             }
           },
         },
@@ -42,6 +45,6 @@ export async function GET(request: Request) {
     }
   }
 
-  // If no code or error, redirect to login with error
+  // If no code or exchange failed, redirect to login
   return NextResponse.redirect(`${origin}/auth/login?error=auth_callback_failed`);
 }

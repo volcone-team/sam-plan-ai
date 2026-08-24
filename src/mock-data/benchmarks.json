@@ -1,7 +1,7 @@
 [
   {
     "id": "bench-webinar-reg-rate-d3e4f5a6-b7c8-49d0-1e2f-3a4b5c6d7e8f",
-    "initiativeTypeId": "inittype-webinar-90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
+    "initiativeTypeId": "90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
     "fieldName": "registration_rate",
     "fieldDescription": "Percentage of audience that registers for webinar",
     "data": {
@@ -18,7 +18,7 @@
   },
   {
     "id": "bench-webinar-show-rate-e4f5a6b7-c8d9-40e1-2f3a-4b5c6d7e8f9a",
-    "initiativeTypeId": "inittype-webinar-90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
+    "initiativeTypeId": "90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
     "fieldName": "show_rate",
     "fieldDescription": "Percentage of registrants who show up live",
     "data": {
@@ -35,7 +35,7 @@
   },
   {
     "id": "bench-webinar-conversion-f5a6b7c8-d9ea-41f2-3a4b-5c6d7e8f9a0b",
-    "initiativeTypeId": "inittype-webinar-90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
+    "initiativeTypeId": "90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
     "fieldName": "offer_conversion",
     "fieldDescription": "Percentage of attendees who book call or purchase offer",
     "data": {
@@ -52,7 +52,7 @@
   },
   {
     "id": "bench-email-open-rate-a6b7c8d9-ea0b-42a3-4b5c-6d7e8f9a0b1c",
-    "initiativeTypeId": "inittype-email-a1b2c3d4-e5f6-4a7b-1c8d-9e0f1a2b3c4d",
+    "initiativeTypeId": "a1b2c3d4-e5f6-4a7b-1c8d-9e0f1a2b3c4d",
     "fieldName": "open_rate",
     "fieldDescription": "Percentage of emails opened",
     "data": {
@@ -69,7 +69,7 @@
   },
   {
     "id": "bench-email-click-rate-b7c8d9ea-b0c1-43b4-5c6d-7e8f9a0b1c2d",
-    "initiativeTypeId": "inittype-email-a1b2c3d4-e5f6-4a7b-1c8d-9e0f1a2b3c4d",
+    "initiativeTypeId": "a1b2c3d4-e5f6-4a7b-1c8d-9e0f1a2b3c4d",
     "fieldName": "click_rate",
     "fieldDescription": "Percentage of emails clicked",
     "data": {
@@ -86,7 +86,7 @@
   },
   {
     "id": "bench-email-conversion-rate-c8d9ea0b-c1d2-44c5-6d7e-8f9a0b1c2d3e",
-    "initiativeTypeId": "inittype-email-a1b2c3d4-e5f6-4a7b-1c8d-9e0f1a2b3c4d",
+    "initiativeTypeId": "a1b2c3d4-e5f6-4a7b-1c8d-9e0f1a2b3c4d",
     "fieldName": "conversion_rate",
     "fieldDescription": "Percentage of clicks that convert to sale/signup",
     "data": {
@@ -103,7 +103,7 @@
   },
   {
     "id": "bench-linkedin-accept-rate-d9ea0b1c-d2e3-45d6-7e8f-9a0b1c2d3e4f",
-    "initiativeTypeId": "inittype-linkedin-b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
+    "initiativeTypeId": "b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
     "fieldName": "connection_accept_rate",
     "fieldDescription": "Percentage of connection requests accepted",
     "data": {
@@ -120,7 +120,7 @@
   },
   {
     "id": "bench-linkedin-response-rate-ea0b1c2d-e3f4-46e7-8f9a-0b1c2d3e4f5a",
-    "initiativeTypeId": "inittype-linkedin-b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
+    "initiativeTypeId": "b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
     "fieldName": "response_rate",
     "fieldDescription": "Percentage of accepted connections who respond to DM",
     "data": {
@@ -137,7 +137,7 @@
   },
   {
     "id": "bench-linkedin-meeting-rate-b0b1c2d3-e4f5-47e8-9a0b-1c2d3e4f5a6b",
-    "initiativeTypeId": "inittype-linkedin-b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
+    "initiativeTypeId": "b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
     "fieldName": "meeting_booking_rate",
     "fieldDescription": "Percentage of respondents who book a meeting",
     "data": {
@@ -154,7 +154,7 @@
   },
   {
     "id": "bench-webinar-cost-per-lead-c1c2d3e4-f5a6-48e9-0a1b-2c3d4e5f6a7b",
-    "initiativeTypeId": "inittype-webinar-90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
+    "initiativeTypeId": "90a1b2c3-d4e5-4f6a-0b7c-8d9e0f1a2b3c",
     "costMetric": "cost_per_registrant",
     "costMetricDescription": "Average cost per webinar registrant",
     "data": {
@@ -171,7 +171,7 @@
   },
   {
     "id": "bench-linkedin-cost-per-meeting-d2d3e4f5-a6b7-49ea-1b2c-3d4e5f6a7b8c",
-    "initiativeTypeId": "inittype-linkedin-b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
+    "initiativeTypeId": "b2c3d4e5-f6a7-4b8c-2d9e-0f1a2b3c4d5e",
     "costMetric": "cost_per_meeting_booked",
     "costMetricDescription": "Average cost per discovery meeting booked",
     "data": {
@@ -188,7 +188,7 @@
   },
   {
     "id": "bench-referral-rate-a0b1c2d3-e4f5-46e7-8f9a-0b1c2d3e4f5a",
-    "initiativeTypeId": "inittype-referral-c3d4e5f6-a7b8-4c9d-3e0f-1a2b3c4d5e6f",
+    "initiativeTypeId": "c3d4e5f6-a7b8-4c9d-3e0f-1a2b3c4d5e6f",
     "fieldName": "referral_rate",
     "fieldDescription": "Percentage of active partners generating referrals per quarter",
     "data": {
@@ -205,7 +205,7 @@
   },
   {
     "id": "bench-referral-conversion-b1c2d3e4-f5a6-47e8-9a0b-1c2d3e4f5a6b",
-    "initiativeTypeId": "inittype-referral-c3d4e5f6-a7b8-4c9d-3e0f-1a2b3c4d5e6f",
+    "initiativeTypeId": "c3d4e5f6-a7b8-4c9d-3e0f-1a2b3c4d5e6f",
     "fieldName": "conversion_rate",
     "fieldDescription": "Percentage of referrals that convert to customers",
     "data": {
@@ -222,7 +222,7 @@
   },
   {
     "id": "bench-challenge-signup-c2d3e4f5-a6b7-48e9-0a1b-2c3d4e5f6a7b",
-    "initiativeTypeId": "inittype-challenge-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+    "initiativeTypeId": "d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
     "fieldName": "signup_rate",
     "fieldDescription": "Percentage of traffic that signs up for free challenge",
     "data": {
@@ -239,7 +239,7 @@
   },
   {
     "id": "bench-challenge-completion-d3e4f5a6-b7c8-49d0-1e2f-3a4b5c6d7e8f",
-    "initiativeTypeId": "inittype-challenge-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+    "initiativeTypeId": "d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
     "fieldName": "completion_rate",
     "fieldDescription": "Percentage of signups that complete all 7 days",
     "data": {
@@ -256,7 +256,7 @@
   },
   {
     "id": "bench-challenge-application-e4f5a6b7-c8d9-40e1-2f3a-4b5c6d7e8f9a",
-    "initiativeTypeId": "inittype-challenge-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+    "initiativeTypeId": "d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
     "fieldName": "application_rate",
     "fieldDescription": "Percentage of completers who submit application for paid offer",
     "data": {
@@ -273,7 +273,7 @@
   },
   {
     "id": "bench-vsl-view-rate-f5a6b7c8-d9ea-41f2-3a4b-5c6d7e8f9a0b",
-    "initiativeTypeId": "inittype-vsl-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+    "initiativeTypeId": "e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
     "fieldName": "view_rate",
     "fieldDescription": "Percentage of visitors who play the VSL",
     "data": {
@@ -290,7 +290,7 @@
   },
   {
     "id": "bench-vsl-click-rate-a6b7c8d9-ea0b-42a3-4b5c-6d7e8f9a0b1c",
-    "initiativeTypeId": "inittype-vsl-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+    "initiativeTypeId": "e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
     "fieldName": "click_rate",
     "fieldDescription": "Percentage of viewers who click CTA button",
     "data": {
@@ -307,7 +307,7 @@
   },
   {
     "id": "bench-vsl-conversion-b7c8d9ea-b0c1-43b4-5c6d-7e8f9a0b1c2d",
-    "initiativeTypeId": "inittype-vsl-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+    "initiativeTypeId": "e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
     "fieldName": "conversion_rate",
     "fieldDescription": "Percentage of CTA clicks that convert to customer",
     "data": {
@@ -324,7 +324,7 @@
   },
   {
     "id": "bench-paid-ads-ctr-c8d9ea0b-c1d2-44c5-6d7e-8f9a0b1c2d3e",
-    "initiativeTypeId": "inittype-paid-ads-f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
+    "initiativeTypeId": "f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
     "fieldName": "click_through_rate",
     "fieldDescription": "Percentage of ad impressions that are clicked",
     "data": {
@@ -341,7 +341,7 @@
   },
   {
     "id": "bench-paid-ads-conversion-d9ea0b1c-d2e3-45d6-7e8f-9a0b1c2d3e4f",
-    "initiativeTypeId": "inittype-paid-ads-f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
+    "initiativeTypeId": "f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
     "fieldName": "landing_page_conversion",
     "fieldDescription": "Percentage of ad clicks that convert on landing page",
     "data": {
@@ -358,7 +358,7 @@
   },
   {
     "id": "bench-sales-calls-booking-rate-ea0b1c2d-e3f4-46e7-8f9a-0b1c2d3e4f5a",
-    "initiativeTypeId": "inittype-sales-calls-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+    "initiativeTypeId": "a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
     "fieldName": "call_booking_rate",
     "fieldDescription": "Percentage of prospects who book a discovery call",
     "data": {
@@ -375,7 +375,7 @@
   },
   {
     "id": "bench-sales-calls-show-rate-b0b1c2d3-e4f5-47e8-9a0b-1c2d3e4f5a6b",
-    "initiativeTypeId": "inittype-sales-calls-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+    "initiativeTypeId": "a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
     "fieldName": "show_rate",
     "fieldDescription": "Percentage of booked calls where prospect shows up",
     "data": {
@@ -392,7 +392,7 @@
   },
   {
     "id": "bench-sales-calls-close-rate-c1c2d3e4-f5a6-48e9-0a1b-2c3d4e5f6a7b",
-    "initiativeTypeId": "inittype-sales-calls-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+    "initiativeTypeId": "a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
     "fieldName": "close_rate",
     "fieldDescription": "Percentage of calls that close to a sale",
     "data": {
@@ -409,7 +409,7 @@
   },
   {
     "id": "bench-content-engagement-d2d3e4f5-a6b7-49ea-1b2c-3d4e5f6a7b8c",
-    "initiativeTypeId": "inittype-content-social-b8c9d0e1-f2a3-4b4c-2d5e-6f7a8b9c0d1e",
+    "initiativeTypeId": "b8c9d0e1-f2a3-4b4c-2d5e-6f7a8b9c0d1e",
     "fieldName": "engagement_rate",
     "fieldDescription": "Percentage of followers who engage with posted content (likes, comments, shares)",
     "data": {
@@ -426,7 +426,7 @@
   },
   {
     "id": "bench-content-follower-growth-e3e4f5a6-b7c8-49d0-1e2f-3a4b5c6d7e8f",
-    "initiativeTypeId": "inittype-content-social-b8c9d0e1-f2a3-4b4c-2d5e-6f7a8b9c0d1e",
+    "initiativeTypeId": "b8c9d0e1-f2a3-4b4c-2d5e-6f7a8b9c0d1e",
     "fieldName": "follower_growth_rate",
     "fieldDescription": "Monthly percentage growth of follower base",
     "data": {
@@ -443,7 +443,7 @@
   },
   {
     "id": "bench-content-lead-gen-f4f5a6b7-c8d9-40e1-2f3a-4b5c6d7e8f9a",
-    "initiativeTypeId": "inittype-content-social-b8c9d0e1-f2a3-4b4c-2d5e-6f7a8b9c0d1e",
+    "initiativeTypeId": "b8c9d0e1-f2a3-4b4c-2d5e-6f7a8b9c0d1e",
     "fieldName": "lead_generation_rate",
     "fieldDescription": "Percentage of social traffic that converts to email subscriber",
     "data": {

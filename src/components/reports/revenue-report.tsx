@@ -1,7 +1,6 @@
 'use client';
 
-import { COMPANY_ID } from '@/lib/constants';
-const companyId = COMPANY_ID;
+import { useCompanyId } from '@/hooks/use-auth';
 
 import { useState, useEffect, useMemo } from 'react';
 import { TrendingUp, TrendingDown, DollarSign, Target, Hash, Download } from 'lucide-react';
@@ -35,12 +34,14 @@ const MONTH_SHORT = [
 ];
 
 export function RevenueReport() {
+  const companyId = useCompanyId() || "";
   const [periodView, setPeriodView] = useState<PeriodView>('monthly');
   const [projections, setProjections] = useState<Projection[]>([]);
   const [results, setResults] = useState<Result[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!companyId) return;
     async function loadData() {
       setLoading(true);
       try {
@@ -60,7 +61,7 @@ export function RevenueReport() {
       }
     }
     loadData();
-  }, []);
+  }, [companyId]);
 
   // Build monthly data from projections and results
   const monthlyData: MonthlyData[] = useMemo(() => {

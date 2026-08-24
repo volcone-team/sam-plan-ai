@@ -1,5 +1,6 @@
 'use client';
 
+import { useCompanyId } from '@/hooks/use-auth';
 import { useEffect, useState } from 'react';
 import {
   Plus,
@@ -23,7 +24,6 @@ export interface InitiativeResultsProps {
   initiativeId: string;
 }
 
-const companyId = 'comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d';
 
 const categoryLabels: Record<ExpenseCategory, string> = {
   advertising: 'Advertising',
@@ -46,6 +46,7 @@ const categoryColors: Record<ExpenseCategory, string> = {
 };
 
 export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
+  const companyId = useCompanyId() || "";
   const [results, setResults] = useState<InitiativeResult[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);

@@ -1,6 +1,9 @@
 /**
  * Planning Service
- * Manages planning intake and questionnaire
+ * Manages planning intake and questionnaire.
+ *
+ * Strategy: Try Supabase first. If not configured or query fails,
+ * fall back to mock JSON data.
  */
 
 import type {
@@ -9,170 +12,226 @@ import type {
   UpdatePlanningInputDTO,
   IntakeRoute,
 } from '@/types';
+import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
 import planningInputsData from '@/mock-data/planning-inputs.json';
 
 export class PlanningService {
-  /**
-   * Get planning input by ID
-   */
   async getPlanningInput(id: string): Promise<PlanningInput> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('planning_inputs')
+          .select('*')
+          .eq('id', id)
+          .single();
+
+        if (!error && data) return this.mapRow(data);
+      } catch { /* fall through */ }
+    }
+
     await this.delay();
-    
     const input = planningInputsData.find(p => p.id === id);
-    if (!input) {
-      throw new Error(`Planning input ${id} not found`);
-    }
-
-    return this.transformPlanningInput(input);
+    if (!input) throw new Error(`Planning input ${id} not found`);
+    return this.transformMock(input);
   }
 
-  /**
-   * Get planning input for a company
-   */
   async getPlanningInputByCompany(companyId: string): Promise<PlanningInput | null> {
-    await this.delay();
-    
-    const input = planningInputsData.find(p => p.companyId === companyId);
-    return input ? this.transformPlanningInput(input) : null;
-  }
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('planning_inputs')
+          .select('*')
+          .eq('company_id', companyId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-  /**
-   * Create new planning input (questionnaire)
-   */
-  async createPlanningInput(dto: CreatePlanningInputDTO): Promise<PlanningInput> {
-    await this.delay();
-    
-    // Check if company already has input
-    const existing = planningInputsData.find(p => p.companyId === dto.companyId);
-    if (existing) {
-      throw new Error(`Planning input already exists for company ${dto.companyId}`);
+        if (!error && data) return this.mapRow(data);
+        return null;
+      } catch { /* fall through */ }
     }
 
+    await this.delay();
+    const input = planningInputsData.find(p => p.companyId === companyId);
+    return input ? this.transformMock(input) : null;
+  }
+
+  async createPlanningInput(dto: CreatePlanningInputDTO): Promise<PlanningInput> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const insertData = {
+          company_id: dto.companyId,
+          intake_route: dto.intakeRoute || 'full',
+          revenue_goal: dto.revenueGoal || 0,
+          revenue_timeframe: dto.revenueTimeframe || 12,
+          product_ids: dto.productIds || [],
+          successful_initiative_types: dto.successfulInitiativeTypes || [],
+          failed_initiatives: dto.failedInitiatives || '',
+          ideal_customer_description: dto.idealCustomerDescription || '',
+          current_assets: dto.currentAssets || { emailListSize: 0, socialFollowing: 0, websiteMonthlyVisitors: 0, existingCustomers: 0 },
+          monthly_marketing_budget: dto.monthlyMarketingBudget || 0,
+          team_size: dto.teamSize || 1,
+          team_roles: dto.teamRoles || [],
+        };
+
+        const { data, error } = await supabase
+          .from('planning_inputs')
+          .insert(insertData)
+          .select()
+          .single();
+
+        if (!error && data) return this.mapRow(data);
+      } catch { /* fall through */ }
+    }
+
+    await this.delay();
     const newInput = {
-      id: `planninginput-${Date.now()}`,
+      id: `${Date.now()}`,
       ...dto,
-      completedAt: null as any,
+      completedAt: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-
-    planningInputsData.push(newInput as any);
-    return this.transformPlanningInput(newInput as any);
+    return this.transformMock(newInput as any);
   }
 
-  /**
-   * Update planning input (partial save during form fill)
-   */
-  async updatePlanningInput(
-    id: string,
-    dto: UpdatePlanningInputDTO
-  ): Promise<PlanningInput> {
-    await this.delay();
-    
-    const index = planningInputsData.findIndex(p => p.id === id);
-    if (index === -1) {
-      throw new Error(`Planning input ${id} not found`);
+  async updatePlanningInput(id: string, dto: UpdatePlanningInputDTO): Promise<PlanningInput> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const d = dto as any; const updateData: Record<string, unknown> = {};
+        if (d.intakeRoute !== undefined) updateData.intake_route = d.intakeRoute;
+        if (d.revenueGoal !== undefined) updateData.revenue_goal = d.revenueGoal;
+        if (d.revenueTimeframe !== undefined) updateData.revenue_timeframe = d.revenueTimeframe;
+        if (d.productIds !== undefined) updateData.product_ids = d.productIds;
+        if (d.successfulInitiativeTypes !== undefined) updateData.successful_initiative_types = d.successfulInitiativeTypes;
+        if (d.failedInitiatives !== undefined) updateData.failed_initiatives = d.failedInitiatives;
+        if (d.idealCustomerDescription !== undefined) updateData.ideal_customer_description = d.idealCustomerDescription;
+        if (d.currentAssets !== undefined) updateData.current_assets = d.currentAssets;
+        if (d.monthlyMarketingBudget !== undefined) updateData.monthly_marketing_budget = d.monthlyMarketingBudget;
+        if (d.teamSize !== undefined) updateData.team_size = d.teamSize;
+        if (d.teamRoles !== undefined) updateData.team_roles = d.teamRoles;
+
+        const { data, error } = await supabase
+          .from('planning_inputs')
+          .update(updateData)
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (!error && data) return this.mapRow(data);
+      } catch { /* fall through */ }
     }
 
-    const updated = {
-      ...planningInputsData[index],
-      ...dto,
-      updatedAt: new Date().toISOString(),
-    } as any;
-
-    planningInputsData[index] = updated;
-    return this.transformPlanningInput(updated);
+    await this.delay();
+    const index = planningInputsData.findIndex(p => p.id === id);
+    if (index === -1) throw new Error(`Planning input ${id} not found`);
+    const updated = { ...planningInputsData[index], ...dto, updatedAt: new Date().toISOString() };
+    return this.transformMock(updated as any);
   }
 
-  /**
-   * Mark planning input as completed
-   */
   async completePlanningInput(id: string): Promise<PlanningInput> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('planning_inputs')
+          .update({ completed_at: new Date().toISOString() })
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (!error && data) return this.mapRow(data);
+      } catch { /* fall through */ }
+    }
+
     await this.delay();
-    
     const index = planningInputsData.findIndex(p => p.id === id);
-    if (index === -1) {
-      throw new Error(`Planning input ${id} not found`);
-    }
-
-    const updated = {
-      ...planningInputsData[index],
-      completedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    planningInputsData[index] = updated;
-    return this.transformPlanningInput(updated);
+    if (index === -1) throw new Error(`Planning input ${id} not found`);
+    const updated = { ...planningInputsData[index], completedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    planningInputsData[index] = updated as any;
+    return this.transformMock(updated as any);
   }
 
-  /**
-   * Get completion percentage
-   * Checks how many fields are filled in
-   */
   async getCompletionPercentage(id: string): Promise<number> {
-    await this.delay();
-    
-    const input = planningInputsData.find(p => p.id === id) as any;
-    if (!input) {
-      throw new Error(`Planning input ${id} not found`);
-    }
-
-    const fields: string[] = [
-      'revenueGoal',
-      'revenueTimeframe',
-      'productIds',
-      'successfulInitiativeTypes',
-      'idealCustomerDescription',
-      'currentAssets',
-      'monthlyMarketingBudget',
-      'teamSize',
-    ];
-
-    const filledFields = fields.filter(field => input[field] != null && input[field] !== '').length;
-    return Math.round((filledFields / fields.length) * 100);
+    const input = await this.getPlanningInput(id);
+    const fields = ['revenueGoal', 'revenueTimeframe', 'productIds', 'successfulInitiativeTypes', 'idealCustomerDescription', 'currentAssets', 'monthlyMarketingBudget', 'teamSize'];
+    const filled = fields.filter(f => {
+      const val = (input as any)[f];
+      if (val == null) return false;
+      if (typeof val === 'string' && val === '') return false;
+      if (Array.isArray(val) && val.length === 0) return false;
+      if (typeof val === 'number' && val === 0) return false;
+      return true;
+    }).length;
+    return Math.round((filled / fields.length) * 100);
   }
 
-  /**
-   * Get inputs by route
-   */
-  async getPlanningInputsByRoute(
-    companyId: string,
-    route: 'quickstart' | 'full' | 'foundation'
-  ): Promise<PlanningInput[]> {
+  async getPlanningInputsByRoute(companyId: string, route: 'quickstart' | 'full' | 'foundation'): Promise<PlanningInput[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('planning_inputs')
+          .select('*')
+          .eq('company_id', companyId)
+          .eq('intake_route', route);
+
+        if (!error && data) return data.map(row => this.mapRow(row));
+      } catch { /* fall through */ }
+    }
+
     await this.delay();
-    
     return planningInputsData
       .filter(p => p.companyId === companyId && p.intakeRoute === route)
-      .map(p => this.transformPlanningInput(p));
+      .map(p => this.transformMock(p));
   }
 
-  /**
-   * Transform planning input data
-   */
-  private transformPlanningInput(data: typeof planningInputsData[0]): PlanningInput {
+  private mapRow(row: Record<string, unknown>): PlanningInput {
+    return {
+      id: row.id as string,
+      companyId: row.company_id as string,
+      intakeRoute: (row.intake_route as IntakeRoute) || 'full',
+      revenueGoal: Number(row.revenue_goal) || 0,
+      revenueTimeframe: ((row.revenue_timeframe as number) || 12) as any,
+      productIds: (row.product_ids as string[]) || [],
+      successfulInitiativeTypes: (row.successful_initiative_types as string[]) || [],
+      failedInitiatives: (row.failed_initiatives as string) || '',
+      idealCustomerDescription: (row.ideal_customer_description as string) || '',
+      currentAssets: (row.current_assets as any) || { emailListSize: 0, socialFollowing: 0, websiteMonthlyVisitors: 0, existingCustomers: 0 },
+      monthlyMarketingBudget: Number(row.monthly_marketing_budget) || 0,
+      teamSize: (row.team_size as number) || 1,
+      teamRoles: (row.team_roles as string[]) || [],
+      completedAt: row.completed_at ? new Date(row.completed_at as string) : undefined,
+      createdAt: new Date(row.created_at as string),
+      updatedAt: new Date(row.updated_at as string),
+    };
+  }
+
+  private transformMock(data: any): PlanningInput {
     return {
       id: data.id,
       companyId: data.companyId,
-      intakeRoute: data.intakeRoute as IntakeRoute,
-      revenueGoal: (data as any).revenueGoal,
-      revenueTimeframe: (data as any).revenueTimeframe,
-      productIds: (data as any).productIds || [],
-      successfulInitiativeTypes: (data as any).successfulInitiativeTypes || [],
-      failedInitiatives: (data as any).failedInitiatives || '',
-      idealCustomerDescription: (data as any).idealCustomerDescription || '',
-      currentAssets: (data as any).currentAssets,
-      monthlyMarketingBudget: (data as any).monthlyMarketingBudget,
-      teamSize: (data as any).teamSize,
-      teamRoles: (data as any).teamRoles || [],
-      completedAt: (data as any).completedAt ? new Date((data as any).completedAt) : undefined,
+      intakeRoute: (data.intakeRoute as IntakeRoute) || 'full',
+      revenueGoal: data.revenueGoal || 0,
+      revenueTimeframe: data.revenueTimeframe || 12,
+      productIds: data.productIds || [],
+      successfulInitiativeTypes: data.successfulInitiativeTypes || [],
+      failedInitiatives: data.failedInitiatives || '',
+      idealCustomerDescription: data.idealCustomerDescription || '',
+      currentAssets: data.currentAssets || { emailListSize: 0, socialFollowing: 0, websiteMonthlyVisitors: 0, existingCustomers: 0 },
+      monthlyMarketingBudget: data.monthlyMarketingBudget || 0,
+      teamSize: data.teamSize || 1,
+      teamRoles: data.teamRoles || [],
+      completedAt: data.completedAt ? new Date(data.completedAt) : undefined,
       createdAt: new Date(data.createdAt),
       updatedAt: new Date(data.updatedAt),
     };
   }
 
-  /**
-   * Simulate network delay
-   */
   private delay(ms: number = 50): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, Math.random() * ms));
   }

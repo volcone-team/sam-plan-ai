@@ -1,7 +1,6 @@
 'use client';
 
-import { COMPANY_ID } from '@/lib/constants';
-const companyId = COMPANY_ID;
+import { useCompanyId } from '@/hooks/use-auth';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -86,6 +85,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export function QuarterlyPlanner() {
+  const companyId = useCompanyId() || "";
   const router = useRouter();
   const [selectedQuarter, setSelectedQuarter] = useState(getCurrentQuarter());
   const [loading, setLoading] = useState(true);

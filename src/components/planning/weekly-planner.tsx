@@ -1,8 +1,7 @@
 'use client';
 import { formatDate, formatDateShort } from '@/lib/format-date';
 
-import { COMPANY_ID } from '@/lib/constants';
-const companyId = COMPANY_ID;
+import { useCompanyId } from '@/hooks/use-auth';
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -130,6 +129,7 @@ interface TaskWithInitiative extends Task {
 }
 
 export function WeeklyPlanner() {
+  const companyId = useCompanyId() || "";
   const router = useRouter();
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()));
   const [loading, setLoading] = useState(true);
@@ -153,19 +153,20 @@ export function WeeklyPlanner() {
     const prev = new Date(weekStart);
     prev.setDate(prev.getDate() - 7);
     setWeekStart(prev);
-  }, [weekStart]);
+  }, [weekStart, companyId]);
 
   const goToNextWeek = useCallback(() => {
     const next = new Date(weekStart);
     next.setDate(next.getDate() + 7);
     setWeekStart(next);
-  }, [weekStart]);
+  }, [weekStart, companyId]);
 
   const goToThisWeek = useCallback(() => {
     setWeekStart(getWeekStart(new Date()));
   }, []);
 
   useEffect(() => {
+    if (!companyId) return;
     const loadWeekData = async () => {
       try {
         setLoading(true);
@@ -235,7 +236,7 @@ export function WeeklyPlanner() {
     };
 
     loadWeekData();
-  }, [weekStart]);
+  }, [weekStart, companyId]);
 
   const handleStatusToggle = async (taskId: string, currentStatus: TaskStatus) => {
     const newStatus = cycleStatus(currentStatus);

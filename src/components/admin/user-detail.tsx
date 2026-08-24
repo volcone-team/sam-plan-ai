@@ -49,16 +49,16 @@ interface AdminCompany {
    ------------------------------------------------------------------ */
 
 const MOCK_USERS: AdminUser[] = [
-  { id: "user-1", companyId: "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d", firstName: "Sarah", lastName: "Mitchell", email: "sarah@elevatecoaching.com", role: "owner", isActive: true, lastActive: "2025-01-15" },
-  { id: "user-2", companyId: "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d", firstName: "Marcus", lastName: "Chen", email: "marcus@elevatecoaching.com", role: "operator", isActive: true, lastActive: "2025-01-14" },
-  { id: "user-3", companyId: "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d", firstName: "Alex", lastName: "Rodriguez", email: "alex@elevatecoaching.com", role: "team_member", isActive: true, lastActive: "2025-01-13" },
+  { id: "user-1", companyId: "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d", firstName: "Sarah", lastName: "Mitchell", email: "sarah@elevatecoaching.com", role: "owner", isActive: true, lastActive: "2025-01-15" },
+  { id: "user-2", companyId: "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d", firstName: "Marcus", lastName: "Chen", email: "marcus@elevatecoaching.com", role: "operator", isActive: true, lastActive: "2025-01-14" },
+  { id: "user-3", companyId: "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d", firstName: "Alex", lastName: "Rodriguez", email: "alex@elevatecoaching.com", role: "team_member", isActive: true, lastActive: "2025-01-13" },
   { id: "user-4", companyId: "comp-2nd-demo", firstName: "David", lastName: "Park", email: "david@growthagency.co", role: "owner", isActive: true, lastActive: "2025-01-15" },
   { id: "user-5", companyId: "comp-2nd-demo", firstName: "Lisa", lastName: "Wang", email: "lisa@growthagency.co", role: "operator", isActive: true, lastActive: "2025-01-12" },
 ];
 
 const MOCK_COMPANIES: AdminCompany[] = [
   {
-    id: "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    id: "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
     name: "Elevate Coaching",
     description: "A premium coaching and consulting firm",
     owner: "Sarah Mitchell",

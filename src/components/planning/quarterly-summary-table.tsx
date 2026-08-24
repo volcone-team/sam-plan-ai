@@ -1,8 +1,7 @@
 'use client';
 import { formatDate, formatDateShort } from '@/lib/format-date';
 
-import { COMPANY_ID } from '@/lib/constants';
-const companyId = COMPANY_ID;
+import { useCompanyId } from '@/hooks/use-auth';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -82,6 +81,7 @@ const STATUS_COLORS: Record<string, { dot: string; badge: string }> = {
 };
 
 export function QuarterlySummaryTable() {
+  const companyId = useCompanyId() || "";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [quartersData, setQuartersData] = useState<QuarterData[]>([]);
@@ -90,6 +90,7 @@ export function QuarterlySummaryTable() {
   const currentQuarter = getCurrentQuarter();
 
   useEffect(() => {
+    if (!companyId) return;
     const loadAllQuarters = async () => {
       try {
         setLoading(true);
@@ -149,7 +150,7 @@ export function QuarterlySummaryTable() {
     };
 
     loadAllQuarters();
-  }, []);
+  }, [companyId]);
 
   const handleExportCSV = () => {
     const headers = [

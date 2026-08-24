@@ -1,7 +1,6 @@
 'use client';
 
-import { COMPANY_ID } from '@/lib/constants';
-const companyId = COMPANY_ID;
+import { useCompanyId } from '@/hooks/use-auth';
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -39,6 +38,7 @@ const MONTH_SHORT = [
 ];
 
 export function ExpensesReport() {
+  const companyId = useCompanyId() || "";
   const router = useRouter();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
@@ -50,6 +50,7 @@ export function ExpensesReport() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!companyId) return;
     async function loadData() {
       setLoading(true);
       try {
@@ -87,7 +88,7 @@ export function ExpensesReport() {
       }
     }
     loadData();
-  }, []);
+  }, [companyId]);
 
   // Expenses by initiative
   const expensesByInitiative = useMemo(() => {

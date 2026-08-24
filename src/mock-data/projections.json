@@ -1,43 +1,43 @@
 [
   {
-    "id": "proj-good-monthly-2026-a0b1c2d3-e4f5-46a7-8b9c-0d1e2f3a4b5c",
-    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
-    "annualPlanId": "plan-annual-2026-7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
+    "id": "a0b1c2d3-e4f5-46a7-8b9c-0d1e2f3a4b5c",
+    "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "annualPlanId": "7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
     "scenario": "good",
     "period": "monthly",
     "byProduct": [
       {
-        "productId": "prod-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+        "productId": "d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
         "revenue": 156000
       },
       {
-        "productId": "prod-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+        "productId": "e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
         "revenue": 142500
       },
       {
-        "productId": "prod-f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
+        "productId": "f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
         "revenue": 108000
       },
       {
-        "productId": "prod-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+        "productId": "a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
         "revenue": 88500
       }
     ],
     "byInitiative": [
       {
-        "initiativeId": "init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
+        "initiativeId": "f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
         "revenue": 8000
       },
       {
-        "initiativeId": "init-linkedin-outreach-q1-a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c",
+        "initiativeId": "a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c",
         "revenue": 6000
       },
       {
-        "initiativeId": "init-email-nurture-q1-b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d",
+        "initiativeId": "b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d",
         "revenue": 3400
       },
       {
-        "initiativeId": "init-challenge-q2-d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f",
+        "initiativeId": "d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f",
         "revenue": 9000
       }
     ],
@@ -46,55 +46,55 @@
         "year": 2026,
         "month": 1,
         "revenue": 35000,
-        "expectedInitiatives": ["init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b", "init-linkedin-outreach-q1-a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c"]
+        "expectedInitiatives": ["f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b", "a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c"]
       },
       {
         "year": 2026,
         "month": 2,
         "revenue": 42000,
-        "expectedInitiatives": ["init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b", "init-email-nurture-q1-b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d"]
+        "expectedInitiatives": ["f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b", "b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d"]
       },
       {
         "year": 2026,
         "month": 3,
         "revenue": 45000,
-        "expectedInitiatives": ["init-email-nurture-q1-b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d", "init-linkedin-outreach-q1-a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c"]
+        "expectedInitiatives": ["b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d", "a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c"]
       },
       {
         "year": 2026,
         "month": 4,
         "revenue": 48000,
-        "expectedInitiatives": ["init-referral-partner-program-c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
+        "expectedInitiatives": ["c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
       },
       {
         "year": 2026,
         "month": 5,
         "revenue": 50000,
-        "expectedInitiatives": ["init-challenge-q2-d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f"]
+        "expectedInitiatives": ["d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f"]
       },
       {
         "year": 2026,
         "month": 6,
         "revenue": 52000,
-        "expectedInitiatives": ["init-vsl-intensives-e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
+        "expectedInitiatives": ["e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
       },
       {
         "year": 2026,
         "month": 7,
         "revenue": 54000,
-        "expectedInitiatives": ["init-vsl-intensives-e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
+        "expectedInitiatives": ["e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
       },
       {
         "year": 2026,
         "month": 8,
         "revenue": 55000,
-        "expectedInitiatives": ["init-referral-partner-program-c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
+        "expectedInitiatives": ["c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
       },
       {
         "year": 2026,
         "month": 9,
         "revenue": 56000,
-        "expectedInitiatives": ["init-referral-partner-program-c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
+        "expectedInitiatives": ["c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
       },
       {
         "year": 2026,
@@ -119,44 +119,44 @@
     "updatedAt": "2026-01-02T10:00:00Z"
   },
   {
-    "id": "proj-better-monthly-2026-b1c2d3e4-f5a6-47b8-9c0d-1e2f3a4b5c6d",
-    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
-    "annualPlanId": "plan-annual-2026-7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
+    "id": "b1c2d3e4-f5a6-47b8-9c0d-1e2f3a4b5c6d",
+    "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "annualPlanId": "7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
     "scenario": "better",
     "period": "monthly",
     "byProduct": [
       {
-        "productId": "prod-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+        "productId": "d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
         "revenue": 225000
       },
       {
-        "productId": "prod-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+        "productId": "e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
         "revenue": 210000
       },
       {
-        "productId": "prod-f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
+        "productId": "f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
         "revenue": 180000
       },
       {
-        "productId": "prod-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+        "productId": "a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
         "revenue": 135000
       }
     ],
     "byInitiative": [
       {
-        "initiativeId": "init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
+        "initiativeId": "f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
         "revenue": 12800
       },
       {
-        "initiativeId": "init-linkedin-outreach-q1-a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c",
+        "initiativeId": "a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c",
         "revenue": 12000
       },
       {
-        "initiativeId": "init-email-nurture-q1-b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d",
+        "initiativeId": "b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d",
         "revenue": 5100
       },
       {
-        "initiativeId": "init-challenge-q2-d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f",
+        "initiativeId": "d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f",
         "revenue": 15000
       }
     ],
@@ -165,55 +165,55 @@
         "year": 2026,
         "month": 1,
         "revenue": 50000,
-        "expectedInitiatives": ["init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b"]
+        "expectedInitiatives": ["f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b"]
       },
       {
         "year": 2026,
         "month": 2,
         "revenue": 60000,
-        "expectedInitiatives": ["init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b", "init-linkedin-outreach-q1-a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c"]
+        "expectedInitiatives": ["f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b", "a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c"]
       },
       {
         "year": 2026,
         "month": 3,
         "revenue": 70000,
-        "expectedInitiatives": ["init-email-nurture-q1-b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d"]
+        "expectedInitiatives": ["b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d"]
       },
       {
         "year": 2026,
         "month": 4,
         "revenue": 75000,
-        "expectedInitiatives": ["init-referral-partner-program-c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e", "init-challenge-q2-d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f"]
+        "expectedInitiatives": ["c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e", "d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f"]
       },
       {
         "year": 2026,
         "month": 5,
         "revenue": 78000,
-        "expectedInitiatives": ["init-challenge-q2-d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f"]
+        "expectedInitiatives": ["d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f"]
       },
       {
         "year": 2026,
         "month": 6,
         "revenue": 80000,
-        "expectedInitiatives": ["init-vsl-intensives-e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
+        "expectedInitiatives": ["e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
       },
       {
         "year": 2026,
         "month": 7,
         "revenue": 82000,
-        "expectedInitiatives": ["init-vsl-intensives-e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
+        "expectedInitiatives": ["e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
       },
       {
         "year": 2026,
         "month": 8,
         "revenue": 83000,
-        "expectedInitiatives": ["init-referral-partner-program-c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
+        "expectedInitiatives": ["c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
       },
       {
         "year": 2026,
         "month": 9,
         "revenue": 85000,
-        "expectedInitiatives": ["init-referral-partner-program-c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
+        "expectedInitiatives": ["c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
       },
       {
         "year": 2026,
@@ -238,44 +238,44 @@
     "updatedAt": "2026-01-02T10:00:00Z"
   },
   {
-    "id": "proj-best-monthly-2026-c2d3e4f5-a6b7-48c9-0d1e-2f3a4b5c6d7e",
-    "companyId": "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
-    "annualPlanId": "plan-annual-2026-7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
+    "id": "c2d3e4f5-a6b7-48c9-0d1e-2f3a4b5c6d7e",
+    "companyId": "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
+    "annualPlanId": "7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c",
     "scenario": "best",
     "period": "monthly",
     "byProduct": [
       {
-        "productId": "prod-d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
+        "productId": "d4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f7a",
         "revenue": 315000
       },
       {
-        "productId": "prod-e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
+        "productId": "e5f6a7b8-c9d0-4e1f-9a2b-3c4d5e6f7a8b",
         "revenue": 297000
       },
       {
-        "productId": "prod-f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
+        "productId": "f6a7b8c9-d0e1-4f2a-0b3c-4d5e6f7a8b9c",
         "revenue": 225000
       },
       {
-        "productId": "prod-a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
+        "productId": "a7b8c9d0-e1f2-4a3b-1c4d-5e6f7a8b9c0d",
         "revenue": 163000
       }
     ],
     "byInitiative": [
       {
-        "initiativeId": "init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
+        "initiativeId": "f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b",
         "revenue": 19200
       },
       {
-        "initiativeId": "init-linkedin-outreach-q1-a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c",
+        "initiativeId": "a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c",
         "revenue": 21000
       },
       {
-        "initiativeId": "init-email-nurture-q1-b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d",
+        "initiativeId": "b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d",
         "revenue": 8500
       },
       {
-        "initiativeId": "init-challenge-q2-d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f",
+        "initiativeId": "d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f",
         "revenue": 27000
       }
     ],
@@ -284,55 +284,55 @@
         "year": 2026,
         "month": 1,
         "revenue": 65000,
-        "expectedInitiatives": ["init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b"]
+        "expectedInitiatives": ["f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b"]
       },
       {
         "year": 2026,
         "month": 2,
         "revenue": 85000,
-        "expectedInitiatives": ["init-webinar-jan-2026-f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b", "init-linkedin-outreach-q1-a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c"]
+        "expectedInitiatives": ["f1a2b3c4-d5e6-47f8-9a0b-1c2d3e4f5a6b", "a2b3c4d5-e6f7-48a9-0b1c-2d3e4f5a6b7c"]
       },
       {
         "year": 2026,
         "month": 3,
         "revenue": 105000,
-        "expectedInitiatives": ["init-email-nurture-q1-b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d", "init-challenge-q2-d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f"]
+        "expectedInitiatives": ["b3c4d5e6-f7a8-49b0-1c2d-3e4f5a6b7c8d", "d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f"]
       },
       {
         "year": 2026,
         "month": 4,
         "revenue": 125000,
-        "expectedInitiatives": ["init-referral-partner-program-c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e", "init-vsl-intensives-e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
+        "expectedInitiatives": ["c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e", "e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
       },
       {
         "year": 2026,
         "month": 5,
         "revenue": 130000,
-        "expectedInitiatives": ["init-challenge-q2-d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f"]
+        "expectedInitiatives": ["d5e6f7a8-b9c0-41d2-3e4f-5a6b7c8d9e0f"]
       },
       {
         "year": 2026,
         "month": 6,
         "revenue": 135000,
-        "expectedInitiatives": ["init-vsl-intensives-e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
+        "expectedInitiatives": ["e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
       },
       {
         "year": 2026,
         "month": 7,
         "revenue": 138000,
-        "expectedInitiatives": ["init-vsl-intensives-e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
+        "expectedInitiatives": ["e6f7a8b9-c0d1-42e3-4f5a-6b7c8d9e0f1a"]
       },
       {
         "year": 2026,
         "month": 8,
         "revenue": 140000,
-        "expectedInitiatives": ["init-referral-partner-program-c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
+        "expectedInitiatives": ["c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
       },
       {
         "year": 2026,
         "month": 9,
         "revenue": 142000,
-        "expectedInitiatives": ["init-referral-partner-program-c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
+        "expectedInitiatives": ["c4d5e6f7-a8b9-40c1-2d3e-4f5a6b7c8d9e"]
       },
       {
         "year": 2026,

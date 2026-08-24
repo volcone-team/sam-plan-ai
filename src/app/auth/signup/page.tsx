@@ -41,12 +41,19 @@ export default function SignupPage() {
 
       const supabase = createClient();
 
+      // Where the user should land once their account is usable. If they filled
+      // the questionnaire before signing up, resume it; otherwise start it.
+      const requestedNext = new URLSearchParams(window.location.search).get('next');
+      const hasDraft = !!localStorage.getItem('sam-plan-data');
+      const destination =
+        requestedNext || (hasDraft ? '/onboarding/generating' : '/onboarding');
+
       // 1. Sign up with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(destination)}`,
           data: {
             first_name: formData.firstName,
             last_name: formData.lastName,
@@ -61,39 +68,15 @@ export default function SignupPage() {
       }
 
       if (authData.user) {
-        // 2. Create company
-        const { data: company, error: companyError } = await supabase
-          .from('companies')
-          .insert({ name: formData.companyName })
-          .select()
-          .single();
-
-        if (companyError) {
-          setError('Account created but failed to set up company. Please contact support.');
-          return;
-        }
-
-        // 3. Create profile linked to company
-        const { error: profileError } = await supabase.from('profiles').insert({
-          id: authData.user.id,
-          company_id: company.id,
-          email: formData.email,
-          first_name: formData.firstName,
-          last_name: formData.lastName,
-          role: 'owner',
-        });
-
-        if (profileError) {
-          setError('Account created but failed to set up profile. Please contact support.');
-          return;
-        }
-
+        // Company + profile are created automatically by database trigger (handle_new_user)
         // If email confirmation is enabled, show success message
         if (!authData.session) {
           setSuccess(true);
         } else {
-          // If auto-confirmed (e.g., in dev), redirect directly
-          router.push('/onboarding');
+          // Resume an in-progress questionnaire if there is one, otherwise
+          // start onboarding. Sending everyone to /onboarding unconditionally
+          // is what created the signup -> onboarding -> login loop.
+          router.push(destination);
         }
       }
     } catch {

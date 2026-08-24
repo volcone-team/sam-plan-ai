@@ -4,7 +4,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "@/components/brand-logo";
+import { Button } from "@/components/ui/button";
 import { planningService } from "@/services/planning.service";
+import { useAuth } from "@/hooks/use-auth";
 
 const GENERATION_MESSAGES = [
   "Analyzing your business...",
@@ -18,99 +20,195 @@ const GENERATION_MESSAGES = [
   "Finalizing your personalized revenue plan...",
 ] as const;
 
-/** Time each message is displayed (ms) */
-const MESSAGE_DURATION = 1200;
-/** Total generation time (ms) */
-const TOTAL_DURATION = GENERATION_MESSAGES.length * MESSAGE_DURATION;
+/** How long each status message is shown (ms) */
+const MESSAGE_DURATION = 1800;
+
+type Phase = "working" | "error";
 
 /**
- * AI Plan Generation loading experience.
+ * AI plan generation screen.
  *
- * On mount:
- * 1. Reads saved questionnaire data from localStorage
- * 2. Calls Planning Service to persist the intake (simulated save)
- * 3. Runs the animated loading experience
- * 4. Navigates to Year-at-a-Glance on completion
- *
- * Ready for future Anthropic integration — replace the timer
- * with a real streaming AI call.
+ * The redirect is driven by the API call completing, not a timer, so the
+ * user is never sent to an empty dashboard while generation is still running.
  */
 export default function GeneratingPage() {
   const router = useRouter();
+  const { userId, companyId, loading: authLoading } = useAuth();
+
   const [messageIndex, setMessageIndex] = useState(0);
-  const [isFadingOut, setIsFadingOut] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const savedRef = useRef(false);
+  const [isFadingOut, setIsFadingOut] = useState(false);
+  const [phase, setPhase] = useState<Phase>("working");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
-  // Save questionnaire data via Planning Service on mount
+  const startedRef = useRef(false);
+
+  const goToDashboard = useCallback(() => {
+    setIsFadingOut(true);
+    setTimeout(() => router.push("/year-at-a-glance"), 600);
+  }, [router]);
+
+  // Anonymous visitors finish the questionnaire before they have an account.
+  // Send them to signup and resume here afterwards.
+  // If there's no draft data, skip this screen entirely.
   useEffect(() => {
-    if (savedRef.current) return;
-    savedRef.current = true;
+    if (authLoading) return;
+    if (!userId) {
+      router.push("/auth/signup?next=/onboarding/generating");
+      return;
+    }
+    // No questionnaire data means user landed here directly (e.g. after signup
+    // via the login button). Skip the generating screen entirely.
+    if (!localStorage.getItem("sam-plan-data")) {
+      router.replace("/year-at-a-glance");
+    }
+  }, [authLoading, userId, router]);
 
-    async function savePlanningInput() {
+  // Persist answers, then generate the plan. Redirect only once done.
+  useEffect(() => {
+    if (authLoading || !userId || !companyId) return;
+    if (startedRef.current) return;
+    startedRef.current = true;
+
+    async function generate() {
+      const rawData = localStorage.getItem("sam-plan-data");
+
+      // Nothing to generate from - just move along.
+      if (!rawData) {
+        goToDashboard();
+        return;
+      }
+
+      const data = JSON.parse(rawData);
+
       try {
-        const rawData = localStorage.getItem("sam-plan-data");
-        if (!rawData) return;
+        // 1. Save the raw questionnaire answers.
+        const answers = {
+          revenueGoal: Number(data.annualRevenueGoal) || 0,
+          revenueTimeframe: (data.planningPeriod === "6-months"
+            ? 6
+            : data.planningPeriod === "3-months"
+              ? 3
+              : 12) as 3 | 6 | 12,
+          monthlyMarketingBudget: Number(data.monthlyMarketingBudget) || 0,
+          teamSize: Number(data.teamSize) || 1,
+          idealCustomerDescription: data.idealCustomer || "",
+          failedInitiatives: data.obstacleNotes || "",
+        };
 
-        const data = JSON.parse(rawData);
+        const existing = await planningService.getPlanningInputByCompany(companyId!);
+        const saved = existing
+          ? await planningService.updatePlanningInput(existing.id, answers)
+          : await planningService.createPlanningInput({
+              companyId: companyId!,
+              intakeRoute: "full",
+              productIds: [],
+              ...answers,
+            });
+        await planningService.completePlanningInput(saved.id);
 
-        // Use the planning service to simulate saving
-        // In production, this will be replaced with a real AI call
-        const companyId = "comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d";
+        // 2. Generate the plan. Read as text first so a non-JSON error
+        //    response (crash, gateway timeout) still yields a real message.
+        const res = await fetch("/api/generate-plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ questionnaire: data }),
+        });
 
-        // Check if input already exists, update or create
-        const existing = await planningService.getPlanningInputByCompany(companyId);
-        if (existing) {
-          await planningService.updatePlanningInput(existing.id, {
-            revenueGoal: data.annualRevenueGoal,
-            revenueTimeframe: data.planningPeriod === "12-months" ? 12 : data.planningPeriod === "6-months" ? 6 : 3,
-            monthlyMarketingBudget: data.monthlyMarketingBudget,
-            teamSize: data.teamSize,
-            idealCustomerDescription: data.idealCustomer,
-            failedInitiatives: data.obstacleNotes,
-          });
-          await planningService.completePlanningInput(existing.id);
+        const raw = await res.text();
+        let parsed: any = null;
+        try {
+          parsed = raw ? JSON.parse(raw) : null;
+        } catch {
+          /* response was not JSON */
         }
-      } catch {
-        // Non-blocking — plan generation continues regardless
+
+        if (!res.ok) {
+          const detail =
+            parsed?.error ||
+            (raw ? raw.slice(0, 300) : `Request failed with status ${res.status}`);
+          console.error("[onboarding] plan generation failed", {
+            status: res.status,
+            body: parsed ?? raw,
+          });
+          setErrorMessage(detail);
+          setPhase("error");
+          return;
+        }
+
+        // 3. Success - clear the draft so signup cannot loop back here.
+        localStorage.removeItem("sam-plan-data");
+        goToDashboard();
+      } catch (err) {
+        console.error("[onboarding] plan generation threw", err);
+        setErrorMessage(
+          err instanceof Error ? err.message : "Could not generate your plan."
+        );
+        setPhase("error");
       }
     }
 
-    savePlanningInput();
-  }, []);
+    generate();
+  }, [authLoading, userId, companyId, attempt, goToDashboard]);
 
-  const handleComplete = useCallback(() => {
-    setIsFadingOut(true);
-    setTimeout(() => {
-      router.push("/year-at-a-glance");
-    }, 600);
-  }, [router]);
-
-  // Message cycling with fade transitions
+  // Cycle the status messages, holding on the last one until the API returns.
   useEffect(() => {
+    if (phase !== "working") return;
+
     const interval = setInterval(() => {
       setIsTransitioning(true);
       setTimeout(() => {
-        setMessageIndex((prev) => {
-          const next = prev + 1;
-          if (next >= GENERATION_MESSAGES.length) {
-            clearInterval(interval);
-            return prev;
-          }
-          return next;
-        });
+        setMessageIndex((prev) =>
+          prev + 1 >= GENERATION_MESSAGES.length ? prev : prev + 1
+        );
         setIsTransitioning(false);
       }, 300);
     }, MESSAGE_DURATION);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [phase]);
 
-  // Completion timer
-  useEffect(() => {
-    const timeout = setTimeout(handleComplete, TOTAL_DURATION);
-    return () => clearTimeout(timeout);
-  }, [handleComplete]);
+  const handleRetry = () => {
+    setErrorMessage(null);
+    setPhase("working");
+    setMessageIndex(0);
+    startedRef.current = false;
+    setAttempt((n) => n + 1);
+  };
+
+  if (phase === "error") {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center px-4">
+        <div className="flex w-full max-w-md flex-col items-center text-center">
+          <div className="mb-10">
+            <BrandLogo width={160} height={54} />
+          </div>
+
+          <h1 className="text-xl font-semibold">We could not finish your plan</h1>
+          <p className="mt-2 text-sm text-[hsl(var(--foreground-muted))]">
+            Your answers are saved, so nothing is lost. You can try again.
+          </p>
+
+          {errorMessage && (
+            <p
+              role="alert"
+              className="mt-4 w-full rounded-[var(--radius-md)] border border-red-200 bg-red-50 px-3 py-2 text-left text-xs text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
+            >
+              {errorMessage}
+            </p>
+          )}
+
+          <div className="mt-6 flex w-full flex-col gap-2 sm:flex-row sm:justify-center">
+            <Button onClick={handleRetry}>Try again</Button>
+            <Button variant="outline" onClick={goToDashboard}>
+              Skip for now
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -120,23 +218,20 @@ export default function GeneratingPage() {
         isFadingOut ? "opacity-0" : "opacity-100"
       )}
     >
-      <div className="flex flex-col items-center text-center max-w-md">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 mb-12">
+      <div className="flex max-w-md flex-col items-center text-center">
+        <div className="mb-12 flex items-center gap-2.5">
           <BrandLogo width={160} height={54} />
         </div>
 
-        {/* Animated dots */}
         <div className="mb-10 flex items-center gap-1.5" aria-hidden="true">
           <span className="generating-dot h-2 w-2 rounded-[var(--radius-full)] bg-primary" />
           <span className="generating-dot h-2 w-2 rounded-[var(--radius-full)] bg-primary animation-delay-200" />
           <span className="generating-dot h-2 w-2 rounded-[var(--radius-full)] bg-primary animation-delay-400" />
         </div>
 
-        {/* Status message with fade */}
         <p
           className={cn(
-            "text-base text-[hsl(var(--foreground-muted))] min-h-[1.5rem]",
+            "min-h-[1.5rem] text-base text-[hsl(var(--foreground-muted))]",
             "transition-opacity duration-300 ease-[var(--ease-default)]",
             isTransitioning ? "opacity-0" : "opacity-100"
           )}
@@ -146,7 +241,10 @@ export default function GeneratingPage() {
           {GENERATION_MESSAGES[messageIndex]}
         </p>
 
-        {/* Accessible status for screen readers */}
+        <p className="mt-3 text-xs text-[hsl(var(--foreground-subtle))]">
+          This usually takes 20-40 seconds. Please keep this tab open.
+        </p>
+
         <span className="sr-only" role="status">
           Generating your plan. {GENERATION_MESSAGES[messageIndex]}
         </span>

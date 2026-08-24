@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Zap, ClipboardList, Clock } from "lucide-react";
+import { ArrowRight, Zap, ClipboardList, Clock } from "lucide-react";
+import { OnboardingBackLink } from "@/components/onboarding-back-link";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -21,13 +22,7 @@ export default function OnboardingPage() {
       {/* Header */}
       <header className="border-b border-border bg-background">
         <div className="mx-auto flex h-14 max-w-5xl items-center px-4 sm:px-6">
-          <Link
-            href="/"
-            className="flex items-center gap-2 text-sm text-[hsl(var(--foreground-muted))] hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Home
-          </Link>
+          <OnboardingBackLink />
         </div>
       </header>
 

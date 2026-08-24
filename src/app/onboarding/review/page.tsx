@@ -28,28 +28,87 @@ import {
 
 type Mode = "quickstart" | "full";
 
-function loadSavedData(): { data: QuestionnaireData; mode: Mode } {
-  if (typeof window === "undefined")
-    return { data: createEmptyQuestionnaireData(), mode: "full" };
+/** True when a record holds at least one real answer. */
+function hasAnswers(d: QuestionnaireData): boolean {
+  return Boolean(
+    d.annualRevenueGoal ||
+      d.priorYearRevenue ||
+      d.planningPeriod ||
+      d.products?.length ||
+      d.whatsWorked?.length ||
+      d.whatsWorkedNotes ||
+      d.idealCustomer ||
+      d.industry ||
+      d.businessType ||
+      d.biggestProblem ||
+      d.emailListSize ||
+      d.monthlyWebsiteVisitors ||
+      d.socialFollowing ||
+      d.existingCustomers ||
+      d.monthlyLeads ||
+      d.monthlyMarketingBudget ||
+      d.teamSize ||
+      d.hoursAvailablePerWeek ||
+      d.businessStage ||
+      d.obstacles?.length ||
+      d.obstacleNotes
+  );
+}
+
+function readMode(mode: Mode): QuestionnaireData | null {
   try {
-    const fullStored = localStorage.getItem("sam-questionnaire-full");
-    if (fullStored) {
-      return {
-        data: { ...createEmptyQuestionnaireData(), ...JSON.parse(fullStored) },
-        mode: "full",
-      };
-    }
-    const qsStored = localStorage.getItem("sam-questionnaire-quickstart");
-    if (qsStored) {
-      return {
-        data: { ...createEmptyQuestionnaireData(), ...JSON.parse(qsStored) },
-        mode: "quickstart",
-      };
-    }
+    const raw = localStorage.getItem(`sam-questionnaire-${mode}`);
+    if (!raw) return null;
+    return { ...createEmptyQuestionnaireData(), ...JSON.parse(raw) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Loads the questionnaire the user actually just completed.
+ *
+ * Honours the mode marker written on submit. Falls back to whichever
+ * record contains real answers, so a stale record from the other mode
+ * cannot shadow fresh data.
+ */
+function loadSavedData(): { data: QuestionnaireData; mode: Mode } {
+  const empty = { data: createEmptyQuestionnaireData(), mode: "full" as Mode };
+  if (typeof window === "undefined") return empty;
+
+  const full = readMode("full");
+  const quick = readMode("quickstart");
+
+  // 1. Prefer the mode the engine recorded on submit.
+  let marker: Mode | null = null;
+  try {
+    const m = localStorage.getItem("sam-questionnaire-mode");
+    if (m === "full" || m === "quickstart") marker = m;
   } catch {
     // ignore
   }
-  return { data: createEmptyQuestionnaireData(), mode: "full" };
+
+  const byMarker = marker === "quickstart" ? quick : marker === "full" ? full : null;
+  if (byMarker && hasAnswers(byMarker)) {
+    return { data: byMarker, mode: marker as Mode };
+  }
+
+  // 2. Otherwise use whichever record actually has answers.
+  if (full && hasAnswers(full)) return { data: full, mode: "full" };
+  if (quick && hasAnswers(quick)) return { data: quick, mode: "quickstart" };
+
+  return empty;
+}
+
+/** Which questionnaire keys exist, for the empty-state diagnostic. */
+function foundKeys(): string[] {
+  if (typeof window === "undefined") return [];
+  return (["full", "quickstart"] as Mode[])
+    .map((m) => {
+      const raw = localStorage.getItem(`sam-questionnaire-${m}`);
+      return raw ? `sam-questionnaire-${m} (${raw.length} chars)` : null;
+    })
+    .filter((v): v is string => v !== null);
 }
 
 /**
@@ -97,8 +156,7 @@ export default function ReviewPage() {
     ? data.planningPeriod.replace("-", " ").replace(/^\w/, (c) => c.toUpperCase())
     : "Not provided";
 
-  const hasAnyData =
-    data.annualRevenueGoal || data.products.length > 0 || data.whatsWorked.length > 0;
+  const hasAnyData = hasAnswers(data);
 
   if (!hasAnyData) {
     return (
@@ -109,9 +167,25 @@ export default function ReviewPage() {
           <p className="mt-2 text-sm text-[hsl(var(--foreground-muted))]">
             Please complete the questionnaire before reviewing.
           </p>
-          <Link href="/onboarding" className="mt-6">
-            <Button>Start Questionnaire</Button>
-          </Link>
+
+          {/* Diagnostic: shows whether answers were saved but unreadable. */}
+          {(() => {
+            const keys = foundKeys();
+            return keys.length > 0 ? (
+              <p className="mt-4 rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))] px-3 py-2 text-left text-xs text-[hsl(var(--foreground-muted))]">
+                Saved drafts found but empty: {keys.join(", ")}
+              </p>
+            ) : null;
+          })()}
+
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+            <Link href="/onboarding/full">
+              <Button variant="outline">Resume Full Plan</Button>
+            </Link>
+            <Link href="/onboarding">
+              <Button>Start Questionnaire</Button>
+            </Link>
+          </div>
         </div>
       </div>
     );

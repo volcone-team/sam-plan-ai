@@ -38,6 +38,7 @@ export function AddInitiativePanel({
   const [step, setStep] = useState<PanelStep>('pick-type');
   const [selectedType, setSelectedType] = useState<InitiativeType | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Form fields
   const [name, setName] = useState('');
@@ -73,6 +74,7 @@ export function AddInitiativePanel({
   ]);
 
   const resetForm = () => {
+    setSubmitError(null);
     setStep('pick-type');
     setSelectedType(null);
     setName('');
@@ -130,6 +132,7 @@ export function AddInitiativePanel({
     if (!selectedType || !name) return;
 
     setSubmitting(true);
+    setSubmitError(null);
     try {
       const dto: CreateInitiativeDTO = {
         companyId,
@@ -154,8 +157,8 @@ export function AddInitiativePanel({
       };
       await onSubmit(dto);
       handleClose();
-    } catch {
-      // Error handled by parent
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Could not save the initiative.');
     } finally {
       setSubmitting(false);
     }
@@ -287,6 +290,11 @@ export function AddInitiativePanel({
 
           {step === 'configure' && selectedType && (
             <form id="add-initiative-form" onSubmit={handleSubmit} className="space-y-5">
+              {submitError && (
+                <div role="alert" className="rounded-[var(--radius-md)] border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+                  {submitError}
+                </div>
+              )}
               {/* Name */}
               <div className="space-y-1.5">
                 <label htmlFor="init-name" className="text-sm font-medium text-[hsl(var(--foreground))]">

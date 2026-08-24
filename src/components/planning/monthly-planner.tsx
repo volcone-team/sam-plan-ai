@@ -1,8 +1,7 @@
 'use client';
 import { formatDate, formatDateShort } from '@/lib/format-date';
 
-import { COMPANY_ID } from '@/lib/constants';
-const companyId = COMPANY_ID;
+import { useCompanyId } from '@/hooks/use-auth';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -103,6 +102,7 @@ interface MonthProjections {
 type TrendStatus = 'on_track' | 'behind' | 'ahead';
 
 export function MonthlyPlanner() {
+  const companyId = useCompanyId() || "";
   const router = useRouter();
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [loading, setLoading] = useState(true);
@@ -116,6 +116,7 @@ export function MonthlyPlanner() {
   const [trendStatus, setTrendStatus] = useState<TrendStatus>('on_track');
 
   useEffect(() => {
+    if (!companyId) return;
     const loadMonthData = async () => {
       try {
         setLoading(true);
@@ -204,7 +205,7 @@ export function MonthlyPlanner() {
     };
 
     loadMonthData();
-  }, [selectedMonth]);
+  }, [selectedMonth, companyId]);
 
   if (loading) {
     return (

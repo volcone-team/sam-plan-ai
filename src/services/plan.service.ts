@@ -1,6 +1,9 @@
 /**
  * Plan Service
- * Manages the planning hierarchy: Annual → Quarterly → Monthly → Weekly
+ * Manages the planning hierarchy: Annual → Quarterly → Monthly → Weekly.
+ *
+ * Strategy: Try Supabase first. If not configured or query fails,
+ * fall back to mock JSON data.
  */
 
 import type {
@@ -12,301 +15,398 @@ import type {
   CreateAnnualPlanDTO,
   UpdateAnnualPlanDTO,
 } from '@/types';
+import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
 import plansData from '@/mock-data/plans.json';
 
 export class PlanService {
-  /**
-   * Get the annual plan for a year
-   */
   async getAnnualPlan(companyId: string, year: number): Promise<AnnualPlan> {
-    await this.delay();
-    
-    const plan = (plansData.annualPlans as any[]).find(
-      p => p.companyId === companyId && p.year === year
-    );
-    
-    if (!plan) {
-      throw new Error(`Annual plan for ${year} not found`);
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('annual_plans')
+          .select('*')
+          .eq('company_id', companyId)
+          .eq('year', year)
+          .single();
+
+        if (!error && data) {
+          return this.mapAnnualRow(data);
+        }
+      } catch { /* fall through */ }
     }
 
-    return this.transformAnnualPlan(plan);
+    await this.delay();
+    const plan = (plansData.annualPlans as any[]).find(p => p.companyId === companyId && p.year === year);
+    if (!plan) throw new Error(`Annual plan for ${year} not found`);
+    return this.transformAnnualMock(plan);
   }
 
-  /**
-   * Create annual plan
-   */
   async createAnnualPlan(dto: CreateAnnualPlanDTO): Promise<AnnualPlan> {
-    await this.delay();
-    
-    const newPlan = {
-      id: `plan-annual-${Date.now()}`,
-      ...dto,
-      status: 'draft' as PlanStatus,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const insertData = {
+          company_id: dto.companyId,
+          year: dto.year,
+          baseline_revenue: dto.baselineRevenue || 0,
+          stretch_revenue: dto.stretchRevenue || 0,
+          operating_budget: dto.operatingBudget || 0,
+          status: 'draft',
+          notes: dto.notes || '',
+        };
 
-    (plansData.annualPlans as any[]).push(newPlan);
-    return this.transformAnnualPlan(newPlan);
-  }
+        const { data, error } = await supabase
+          .from('annual_plans')
+          .insert(insertData)
+          .select()
+          .single();
 
-  /**
-   * Update annual plan
-   */
-  async updateAnnualPlan(
-    id: string,
-    dto: UpdateAnnualPlanDTO
-  ): Promise<AnnualPlan> {
-    await this.delay();
-    
-    const data = plansData.annualPlans as any[];
-    const index = data.findIndex(p => p.id === id);
-    if (index === -1) {
-      throw new Error(`Annual plan ${id} not found`);
+        if (!error && data) return this.mapAnnualRow(data);
+      } catch { /* fall through */ }
     }
 
-    const updated = {
-      ...data[index],
-      ...dto,
-      updatedAt: new Date().toISOString(),
-    };
-
-    data[index] = updated;
-    return this.transformAnnualPlan(updated);
+    await this.delay();
+    const newPlan = { id: `${Date.now()}`, ...dto, status: 'draft', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    return this.transformAnnualMock(newPlan);
   }
 
-  /**
-   * Get quarterly plans for a year
-   */
+  async updateAnnualPlan(id: string, dto: UpdateAnnualPlanDTO): Promise<AnnualPlan> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const updateData: Record<string, unknown> = {};
+        if (dto.baselineRevenue !== undefined) updateData.baseline_revenue = dto.baselineRevenue;
+        if (dto.stretchRevenue !== undefined) updateData.stretch_revenue = dto.stretchRevenue;
+        if (dto.operatingBudget !== undefined) updateData.operating_budget = dto.operatingBudget;
+        if (dto.status !== undefined) updateData.status = dto.status;
+        if (dto.notes !== undefined) updateData.notes = dto.notes;
+
+        const { data, error } = await supabase
+          .from('annual_plans')
+          .update(updateData)
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (!error && data) return this.mapAnnualRow(data);
+      } catch { /* fall through */ }
+    }
+
+    await this.delay();
+    const arr = plansData.annualPlans as any[];
+    const index = arr.findIndex(p => p.id === id);
+    if (index === -1) throw new Error(`Annual plan ${id} not found`);
+    const updated = { ...arr[index], ...dto, updatedAt: new Date().toISOString() };
+    return this.transformAnnualMock(updated);
+  }
+
   async getQuarterlyPlans(companyId: string, year: number): Promise<QuarterlyPlan[]> {
-    await this.delay();
-    
-    // Quarterly plans may not have companyId — link via annualPlanId
-    const annualPlan = (plansData.annualPlans as any[]).find(
-      p => p.companyId === companyId && p.year === year
-    );
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        // Get annual plan first to find its ID
+        const { data: annualPlan } = await supabase
+          .from('annual_plans')
+          .select('id')
+          .eq('company_id', companyId)
+          .eq('year', year)
+          .single();
 
-    if (!annualPlan) {
-      return [];
+        if (annualPlan) {
+          const { data, error } = await supabase
+            .from('quarterly_plans')
+            .select('*')
+            .eq('annual_plan_id', annualPlan.id)
+            .order('quarter', { ascending: true });
+
+          if (!error && data) {
+            return data.map(row => this.mapQuarterlyRow(row));
+          }
+        }
+      } catch { /* fall through */ }
     }
 
+    await this.delay();
+    const annualPlan = (plansData.annualPlans as any[]).find(p => p.companyId === companyId && p.year === year);
+    if (!annualPlan) return [];
     return (plansData.quarterlyPlans as any[])
       .filter(p => p.annualPlanId === annualPlan.id && p.year === year)
-      .map(p => this.transformQuarterlyPlan(p));
+      .map(p => this.transformQuarterlyMock(p));
   }
 
-  /**
-   * Get a specific quarterly plan
-   */
-  async getQuarterlyPlan(
-    companyId: string,
-    year: number,
-    quarter: number
-  ): Promise<QuarterlyPlan> {
-    await this.delay();
-    
-    const plan = (plansData.quarterlyPlans as any[]).find(
-      p => p.companyId === companyId && p.year === year && p.quarter === quarter
-    );
-    
-    if (!plan) {
-      throw new Error(`Q${quarter} ${year} plan not found`);
+  async getQuarterlyPlan(companyId: string, year: number, quarter: number): Promise<QuarterlyPlan> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data: annualPlan } = await supabase
+          .from('annual_plans')
+          .select('id')
+          .eq('company_id', companyId)
+          .eq('year', year)
+          .single();
+
+        if (annualPlan) {
+          const { data, error } = await supabase
+            .from('quarterly_plans')
+            .select('*')
+            .eq('annual_plan_id', annualPlan.id)
+            .eq('quarter', quarter)
+            .single();
+
+          if (!error && data) return this.mapQuarterlyRow(data);
+        }
+      } catch { /* fall through */ }
     }
 
-    return this.transformQuarterlyPlan(plan);
+    await this.delay();
+    const plan = (plansData.quarterlyPlans as any[]).find(p => p.year === year && p.quarter === quarter);
+    if (!plan) throw new Error(`Q${quarter} ${year} plan not found`);
+    return this.transformQuarterlyMock(plan);
   }
 
-  /**
-   * Get monthly plans for a quarter
-   */
-  async getMonthlyPlans(
-    companyId: string,
-    year: number,
-    quarter: number
-  ): Promise<MonthlyPlan[]> {
+  async getMonthlyPlans(companyId: string, year: number, quarter: number): Promise<MonthlyPlan[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        // Get quarterly plan for this quarter
+        const { data: annualPlan } = await supabase
+          .from('annual_plans')
+          .select('id')
+          .eq('company_id', companyId)
+          .eq('year', year)
+          .single();
+
+        if (annualPlan) {
+          const { data: qPlan } = await supabase
+            .from('quarterly_plans')
+            .select('id')
+            .eq('annual_plan_id', annualPlan.id)
+            .eq('quarter', quarter)
+            .single();
+
+          if (qPlan) {
+            const { data, error } = await supabase
+              .from('monthly_plans')
+              .select('*')
+              .eq('quarterly_plan_id', qPlan.id)
+              .order('month', { ascending: true });
+
+            if (!error && data) {
+              return data.map(row => this.mapMonthlyRow(row));
+            }
+          }
+        }
+      } catch { /* fall through */ }
+    }
+
     await this.delay();
-    
     return (plansData.monthlyPlans as any[])
-      .filter(
-        p =>
-          p.companyId === companyId &&
-          p.year === year &&
-          p.quarter === quarter
-      )
+      .filter(p => p.year === year)
       .sort((a, b) => a.month - b.month)
-      .map(p => this.transformMonthlyPlan(p));
+      .map(p => this.transformMonthlyMock(p));
   }
 
-  /**
-   * Get weekly plans for a month
-   */
-  async getWeeklyPlans(
-    companyId: string,
-    year: number,
-    month: number
-  ): Promise<WeeklyPlan[]> {
-    await this.delay();
-    
-    return (plansData.weeklyPlans as any[])
-      .filter(
-        p => p.companyId === companyId && p.year === year && p.month === month
-      )
-      .sort((a, b) => a.weekNumber - b.weekNumber)
-      .map(p => this.transformWeeklyPlan(p));
-  }
+  async getWeeklyPlans(companyId: string, year: number, month: number): Promise<WeeklyPlan[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0];
+        const endDate = new Date(year, month, 0).toISOString().split('T')[0];
 
-  /**
-   * Get a specific weekly plan
-   */
-  async getWeeklyPlan(
-    companyId: string,
-    weekStartDate: Date
-  ): Promise<WeeklyPlan | null> {
-    await this.delay();
-    
-    const plan = (plansData.weeklyPlans as any[]).find(
-      p =>
-        p.companyId === companyId &&
-        new Date(p.weekStartDate).getTime() === weekStartDate.getTime()
-    );
+        const { data, error } = await supabase
+          .from('weekly_plans')
+          .select('*')
+          .gte('week_start_date', startDate)
+          .lte('week_start_date', endDate)
+          .order('week_start_date', { ascending: true });
 
-    return plan ? this.transformWeeklyPlan(plan) : null;
-  }
-
-  /**
-   * Get the current week plan
-   */
-  async getCurrentWeekPlan(companyId: string): Promise<WeeklyPlan | null> {
-    await this.delay();
-    
-    const today = new Date();
-    const weekStart = this.getWeekStart(today);
-
-    return this.getWeeklyPlan(companyId, weekStart);
-  }
-
-  /**
-   * Get upcoming weeks (next 4-6 weeks)
-   */
-  async getUpcomingWeeks(companyId: string, count: number = 6): Promise<WeeklyPlan[]> {
-    await this.delay();
-    
-    const today = new Date();
-    const weekStart = this.getWeekStart(today);
-    const upcoming: WeeklyPlan[] = [];
-
-    for (let i = 0; i < count; i++) {
-      const weekDate = new Date(weekStart);
-      weekDate.setDate(weekDate.getDate() + i * 7);
-      
-      const plan = (plansData.weeklyPlans as any[]).find(
-        p =>
-          p.companyId === companyId &&
-          new Date(p.weekStartDate).getTime() === weekDate.getTime()
-      );
-
-      if (plan) {
-        upcoming.push(this.transformWeeklyPlan(plan));
-      }
+        if (!error && data) {
+          return data.map(row => this.mapWeeklyRow(row));
+        }
+      } catch { /* fall through */ }
     }
 
-    return upcoming;
+    await this.delay();
+    return (plansData.weeklyPlans as any[])
+      .map(p => this.transformWeeklyMock(p));
   }
 
-  /**
-   * Get plans by status
-   */
-  async getPlansByStatus(
-    companyId: string,
-    status: PlanStatus
-  ): Promise<AnnualPlan[]> {
+  async getWeeklyPlan(companyId: string, weekStartDate: Date): Promise<WeeklyPlan | null> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const dateStr = weekStartDate.toISOString().split('T')[0];
+        const { data, error } = await supabase
+          .from('weekly_plans')
+          .select('*')
+          .eq('week_start_date', dateStr)
+          .maybeSingle();
+
+        if (!error && data) {
+          return this.mapWeeklyRow(data);
+        }
+        return null;
+      } catch { /* fall through */ }
+    }
+
     await this.delay();
-    
+    const plan = (plansData.weeklyPlans as any[]).find(
+      p => new Date(p.weekStartDate).getTime() === weekStartDate.getTime()
+    );
+    return plan ? this.transformWeeklyMock(plan) : null;
+  }
+
+  async getCurrentWeekPlan(companyId: string): Promise<WeeklyPlan | null> {
+    return this.getWeeklyPlan(companyId, this.getWeekStart(new Date()));
+  }
+
+  async getUpcomingWeeks(companyId: string, count: number = 6): Promise<WeeklyPlan[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const startDate = this.getWeekStart(new Date()).toISOString().split('T')[0];
+        const { data, error } = await supabase
+          .from('weekly_plans')
+          .select('*')
+          .gte('week_start_date', startDate)
+          .order('week_start_date', { ascending: true })
+          .limit(count);
+
+        if (!error && data) {
+          return data.map(row => this.mapWeeklyRow(row));
+        }
+      } catch { /* fall through */ }
+    }
+
+    await this.delay();
+    return (plansData.weeklyPlans as any[]).map(p => this.transformWeeklyMock(p));
+  }
+
+  async getPlansByStatus(companyId: string, status: PlanStatus): Promise<AnnualPlan[]> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('annual_plans')
+          .select('*')
+          .eq('company_id', companyId)
+          .eq('status', status);
+
+        if (!error && data) {
+          return data.map(row => this.mapAnnualRow(row));
+        }
+      } catch { /* fall through */ }
+    }
+
+    await this.delay();
     return (plansData.annualPlans as any[])
       .filter(p => p.companyId === companyId && p.status === status)
-      .map(p => this.transformAnnualPlan(p));
+      .map(p => this.transformAnnualMock(p));
   }
 
-  /**
-   * Get week start date (Monday)
-   */
+  // --- Row mappers ---
+
+  private mapAnnualRow(row: Record<string, unknown>): AnnualPlan {
+    return {
+      id: row.id as string,
+      companyId: row.company_id as string,
+      year: row.year as number,
+      status: (row.status as PlanStatus) || 'draft',
+      baselineRevenue: Number(row.baseline_revenue) || 0,
+      stretchRevenue: Number(row.stretch_revenue) || 0,
+      operatingBudget: Number(row.operating_budget) || 0,
+      notes: (row.notes as string) || '',
+      createdAt: new Date(row.created_at as string),
+      updatedAt: new Date(row.updated_at as string),
+    };
+  }
+
+  private mapQuarterlyRow(row: Record<string, unknown>): QuarterlyPlan {
+    return {
+      id: row.id as string,
+      annualPlanId: row.annual_plan_id as string,
+      quarter: (row.quarter as number) as any,
+      year: row.year as number,
+      targetRevenue: Number(row.target_revenue) || 0,
+      notes: (row.notes as string) || '',
+      createdAt: new Date(row.created_at as string),
+      updatedAt: new Date(row.updated_at as string),
+    };
+  }
+
+  private mapMonthlyRow(row: Record<string, unknown>): MonthlyPlan {
+    return {
+      id: row.id as string,
+      quarterlyPlanId: row.quarterly_plan_id as string,
+      month: row.month as number,
+      year: row.year as number,
+      targetRevenue: Number(row.target_revenue) || 0,
+      notes: (row.notes as string) || '',
+      createdAt: new Date(row.created_at as string),
+      updatedAt: new Date(row.updated_at as string),
+    };
+  }
+
+  private mapWeeklyRow(row: Record<string, unknown>): WeeklyPlan {
+    return {
+      id: row.id as string,
+      monthlyPlanId: row.monthly_plan_id as string,
+      weekStartDate: new Date(row.week_start_date as string),
+      weekEndDate: new Date(row.week_end_date as string),
+      targetRevenue: Number(row.target_revenue) || 0,
+      topPriorities: (row.top_priorities as string[]) || [],
+      notes: (row.notes as string) || '',
+      createdAt: new Date(row.created_at as string),
+      updatedAt: new Date(row.updated_at as string),
+    };
+  }
+
+  // --- Mock transformers ---
+
+  private transformAnnualMock(data: any): AnnualPlan {
+    return {
+      id: data.id, companyId: data.companyId, year: data.year, status: data.status || 'draft',
+      baselineRevenue: data.baselineRevenue || 0, stretchRevenue: data.stretchRevenue || 0,
+      operatingBudget: data.operatingBudget || 0, notes: data.notes || '',
+      createdAt: new Date(data.createdAt), updatedAt: new Date(data.updatedAt),
+    };
+  }
+
+  private transformQuarterlyMock(data: any): QuarterlyPlan {
+    return {
+      id: data.id, annualPlanId: data.annualPlanId, quarter: data.quarter, year: data.year,
+      targetRevenue: data.targetRevenue || 0, notes: data.notes || '',
+      createdAt: new Date(data.createdAt), updatedAt: new Date(data.updatedAt),
+    };
+  }
+
+  private transformMonthlyMock(data: any): MonthlyPlan {
+    return {
+      id: data.id, quarterlyPlanId: data.quarterlyPlanId, month: data.month, year: data.year,
+      targetRevenue: data.targetRevenue || 0, notes: data.notes || '',
+      createdAt: new Date(data.createdAt), updatedAt: new Date(data.updatedAt),
+    };
+  }
+
+  private transformWeeklyMock(data: any): WeeklyPlan {
+    return {
+      id: data.id, monthlyPlanId: data.monthlyPlanId,
+      weekStartDate: new Date(data.weekStartDate), weekEndDate: new Date(data.weekEndDate),
+      targetRevenue: data.targetRevenue || 0, topPriorities: data.topPriorities || [],
+      notes: data.notes || '', createdAt: new Date(data.createdAt), updatedAt: new Date(data.updatedAt),
+    };
+  }
+
   private getWeekStart(date: Date): Date {
     const d = new Date(date);
     const day = d.getDay();
     const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-    return new Date(d.setDate(diff));
+    d.setDate(diff);
+    d.setHours(0, 0, 0, 0);
+    return d;
   }
 
-  /**
-   * Transform annual plan data
-   */
-  private transformAnnualPlan(data: any): AnnualPlan {
-    return {
-      id: data.id,
-      companyId: data.companyId,
-      year: data.year,
-      status: data.status,
-      baselineRevenue: data.baselineRevenue,
-      stretchRevenue: data.stretchRevenue,
-      operatingBudget: data.operatingBudget,
-      notes: data.notes,
-      createdAt: new Date(data.createdAt),
-      updatedAt: new Date(data.updatedAt),
-    };
-  }
-
-  /**
-   * Transform quarterly plan data
-   */
-  private transformQuarterlyPlan(data: any): QuarterlyPlan {
-    return {
-      id: data.id,
-      annualPlanId: (data as any).annualPlanId,
-      quarter: data.quarter,
-      year: data.year,
-      targetRevenue: (data as any).targetRevenue,
-      notes: data.notes,
-      createdAt: new Date(data.createdAt),
-      updatedAt: new Date(data.updatedAt),
-    };
-  }
-
-  /**
-   * Transform monthly plan data
-   */
-  private transformMonthlyPlan(data: any): MonthlyPlan {
-    return {
-      id: data.id,
-      quarterlyPlanId: (data as any).quarterlyPlanId,
-      month: data.month,
-      year: data.year,
-      targetRevenue: (data as any).targetRevenue,
-      notes: data.notes,
-      createdAt: new Date(data.createdAt),
-      updatedAt: new Date(data.updatedAt),
-    };
-  }
-
-  /**
-   * Transform weekly plan data
-   */
-  private transformWeeklyPlan(data: any): WeeklyPlan {
-    return {
-      id: data.id,
-      monthlyPlanId: (data as any).monthlyPlanId,
-      weekStartDate: new Date(data.weekStartDate),
-      weekEndDate: new Date(data.weekEndDate),
-      targetRevenue: (data as any).targetRevenue,
-      topPriorities: (data as any).topPriorities || [],
-      notes: data.notes,
-      createdAt: new Date(data.createdAt),
-      updatedAt: new Date(data.updatedAt),
-    };
-  }
-
-  /**
-   * Simulate network delay
-   */
   private delay(ms: number = 50): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, Math.random() * ms));
   }

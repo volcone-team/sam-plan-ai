@@ -1,5 +1,6 @@
 'use client';
 
+import { useCompanyId } from '@/hooks/use-auth';
 import { useEffect, useState } from 'react';
 import {
   Plus,
@@ -24,7 +25,6 @@ export interface InitiativeTasksProps {
   initiativeId: string;
 }
 
-const companyId = 'comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d';
 
 const statusConfig: Record<TaskStatus, { icon: typeof Circle; color: string; bgColor: string; label: string }> = {
   not_started: { icon: Circle, color: 'text-gray-400', bgColor: 'bg-gray-100', label: 'Not Started' },
@@ -53,6 +53,7 @@ interface TaskFormData {
 
 
 export function InitiativeTasks({ initiativeId }: InitiativeTasksProps) {
+  const companyId = useCompanyId() || "";
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);

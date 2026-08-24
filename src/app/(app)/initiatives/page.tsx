@@ -1,4 +1,5 @@
 'use client';
+import { useCompanyId } from '@/hooks/use-auth';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -10,10 +11,10 @@ import { initiativeTypeService } from '@/services/initiative-type.service';
 import { productService } from '@/services/product.service';
 import type { Initiative, InitiativeType, CreateInitiativeDTO } from '@/types';
 
-const ANNUAL_PLAN_ID = 'plan-annual-2026-7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c';
-const companyId = 'comp-8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d';
+const ANNUAL_PLAN_ID = '7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c';
 
 export default function InitiativesPage() {
+  const companyId = useCompanyId() || "";
   const router = useRouter();
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [initiativeTypes, setInitiativeTypes] = useState<Array<{ id: string; name: string }>>([]);
@@ -24,6 +25,7 @@ export default function InitiativesPage() {
   const [addPanelOpen, setAddPanelOpen] = useState(false);
 
   useEffect(() => {
+    if (!companyId) return;
     const loadData = async () => {
       try {
         setLoading(true);
@@ -60,7 +62,7 @@ export default function InitiativesPage() {
     };
 
     loadData();
-  }, []);
+  }, [companyId]);
 
   const handleInitiativeClick = (id: string) => {
     router.push(`/initiatives/${id}`);
