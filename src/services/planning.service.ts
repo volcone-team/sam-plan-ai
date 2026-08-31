@@ -13,7 +13,6 @@ import type {
   IntakeRoute,
 } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
-import planningInputsData from '@/mock-data/planning-inputs.json';
 
 export class PlanningService {
   async getPlanningInput(id: string): Promise<PlanningInput> {
@@ -30,10 +29,9 @@ export class PlanningService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const input = planningInputsData.find(p => p.id === id);
-    if (!input) throw new Error(`Planning input ${id} not found`);
-    return this.transformMock(input);
+    // Mock data removed - return empty
+    console.log("[planning] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async getPlanningInputByCompany(companyId: string): Promise<PlanningInput | null> {
@@ -53,9 +51,9 @@ export class PlanningService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const input = planningInputsData.find(p => p.companyId === companyId);
-    return input ? this.transformMock(input) : null;
+    // Mock data removed - return empty
+    console.log("[planning] No data in Supabase, returning empty");
+    return null as any;
   }
 
   async createPlanningInput(dto: CreatePlanningInputDTO): Promise<PlanningInput> {
@@ -87,15 +85,9 @@ export class PlanningService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const newInput = {
-      id: `${Date.now()}`,
-      ...dto,
-      completedAt: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    return this.transformMock(newInput as any);
+    // Mock data removed - return empty
+    console.log("[planning] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async updatePlanningInput(id: string, dto: UpdatePlanningInputDTO): Promise<PlanningInput> {
@@ -126,11 +118,9 @@ export class PlanningService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const index = planningInputsData.findIndex(p => p.id === id);
-    if (index === -1) throw new Error(`Planning input ${id} not found`);
-    const updated = { ...planningInputsData[index], ...dto, updatedAt: new Date().toISOString() };
-    return this.transformMock(updated as any);
+    // Mock data removed - return empty
+    console.log("[planning] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async completePlanningInput(id: string): Promise<PlanningInput> {
@@ -148,12 +138,9 @@ export class PlanningService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const index = planningInputsData.findIndex(p => p.id === id);
-    if (index === -1) throw new Error(`Planning input ${id} not found`);
-    const updated = { ...planningInputsData[index], completedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    planningInputsData[index] = updated as any;
-    return this.transformMock(updated as any);
+    // Mock data removed - return empty
+    console.log("[planning] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async getCompletionPercentage(id: string): Promise<number> {
@@ -184,10 +171,9 @@ export class PlanningService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return planningInputsData
-      .filter(p => p.companyId === companyId && p.intakeRoute === route)
-      .map(p => this.transformMock(p));
+    // Mock data removed - return empty
+    console.log("[planning] No data in Supabase, returning empty");
+    console.log("[planning] No data, returning []"); return [];
   }
 
   private mapRow(row: Record<string, unknown>): PlanningInput {
@@ -211,26 +197,7 @@ export class PlanningService {
     };
   }
 
-  private transformMock(data: any): PlanningInput {
-    return {
-      id: data.id,
-      companyId: data.companyId,
-      intakeRoute: (data.intakeRoute as IntakeRoute) || 'full',
-      revenueGoal: data.revenueGoal || 0,
-      revenueTimeframe: data.revenueTimeframe || 12,
-      productIds: data.productIds || [],
-      successfulInitiativeTypes: data.successfulInitiativeTypes || [],
-      failedInitiatives: data.failedInitiatives || '',
-      idealCustomerDescription: data.idealCustomerDescription || '',
-      currentAssets: data.currentAssets || { emailListSize: 0, socialFollowing: 0, websiteMonthlyVisitors: 0, existingCustomers: 0 },
-      monthlyMarketingBudget: data.monthlyMarketingBudget || 0,
-      teamSize: data.teamSize || 1,
-      teamRoles: data.teamRoles || [],
-      completedAt: data.completedAt ? new Date(data.completedAt) : undefined,
-      createdAt: new Date(data.createdAt),
-      updatedAt: new Date(data.updatedAt),
-    };
-  }
+
 
   private delay(ms: number = 50): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, Math.random() * ms));

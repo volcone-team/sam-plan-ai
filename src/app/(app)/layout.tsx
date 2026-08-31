@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { ImpersonationProvider } from "@/hooks/use-impersonation";
+import { ImpersonationBanner } from "@/components/impersonation-banner";
 import { Sidebar } from "@/components/sidebar";
 import { AppHeader } from "@/components/header";
 import { MobileNav } from "@/components/mobile-nav";
@@ -15,12 +17,15 @@ interface AppLayoutProps {
  */
 export default function AppLayout({ children }: AppLayoutProps) {
   return (
-    <AppShell
-      sidebar={<Sidebar />}
-      mobileNav={<MobileNav />}
-      header={<AppHeader />}
-    >
-      {children}
-    </AppShell>
+    <ImpersonationProvider>
+      <ImpersonationBanner />
+      <AppShell
+        sidebar={<Sidebar />}
+        mobileNav={<MobileNav />}
+        header={<AppHeader />}
+      >
+        {children}
+      </AppShell>
+    </ImpersonationProvider>
   );
 }

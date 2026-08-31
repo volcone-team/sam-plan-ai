@@ -30,11 +30,44 @@ function loadFromStorage(mode: QuestionnaireMode): QuestionnaireData {
 /**
  * Persists questionnaire data to localStorage.
  * Loads once on mount, auto-saves on every change with debounce.
+ * If localStorage is empty, attempts to load saved answers from the DB (for regeneration).
  */
 export function usePersistedData(mode: QuestionnaireMode) {
   const [data, setData] = useState<QuestionnaireData>(() => loadFromStorage(mode));
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInitialMount = useRef(true);
+  const dbLoadAttempted = useRef(false);
+
+  // If localStorage is empty, try loading from DB (pre-fill for regeneration)
+  useEffect(() => {
+    if (dbLoadAttempted.current) return;
+    dbLoadAttempted.current = true;
+
+    // Only load from DB if current data is empty
+    const hasData = data.annualRevenueGoal || data.products?.length || data.whatsWorked?.length;
+    if (hasData) {
+      console.log("[usePersistedData] localStorage has data, skipping DB load");
+      return;
+    }
+
+    async function loadFromDB() {
+      try {
+        console.log("[usePersistedData] No local data, trying DB...");
+        const res = await fetch("/api/plan/answers");
+        if (!res.ok) return;
+        const json = await res.json();
+        if (!json.answers) {
+          console.log("[usePersistedData] No saved answers in DB");
+          return;
+        }
+        console.log("[usePersistedData] Pre-filling from DB:", Object.keys(json.answers).length, "fields");
+        setData((prev) => ({ ...prev, ...json.answers }));
+      } catch (err) {
+        console.log("[usePersistedData] DB load failed:", err);
+      }
+    }
+    loadFromDB();
+  }, []);
 
   // Save to localStorage on every data change (debounced), skip initial
   useEffect(() => {

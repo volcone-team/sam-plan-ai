@@ -8,7 +8,6 @@
 
 import type { Task, TaskStatus, TaskPriority, CreateTaskDTO, UpdateTaskDTO } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
-import tasksData from '@/mock-data/tasks.json';
 
 export class TaskService {
   async getTasksByInitiative(initiativeId: string): Promise<Task[]> {
@@ -27,10 +26,30 @@ export class TaskService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return tasksData
-      .filter(t => t.initiativeId === initiativeId)
-      .map(t => this.transformMock(t));
+    // Mock data removed - return empty
+    console.log("[task] No data in Supabase, returning empty");
+    console.log("[task] No data, returning []"); return [];
+  }
+
+  async getTasksByCompany(companyId: string): Promise<Task[]> {
+    if (!companyId) { console.log("[task] getTasksByCompany - no companyId"); return []; }
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('company_id', companyId)
+          .order('due_date', { ascending: true });
+
+        if (!error && data) {
+          console.log("[task] getTasksByCompany:", data.length, "tasks");
+          return data.map(row => this.mapRow(row));
+        }
+      } catch (e) { console.error("[Supabase]", e); }
+    }
+    console.log("[task] getTasksByCompany - no data");
+    return [];
   }
 
   async getTask(id: string): Promise<Task> {
@@ -49,10 +68,9 @@ export class TaskService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const task = tasksData.find(t => t.id === id);
-    if (!task) throw new Error(`Task ${id} not found`);
-    return this.transformMock(task);
+    // Mock data removed - return empty
+    console.log("[task] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async getTasksByStatus(initiativeId: string, status: TaskStatus): Promise<Task[]> {
@@ -72,10 +90,9 @@ export class TaskService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return tasksData
-      .filter(t => t.initiativeId === initiativeId && t.status === status)
-      .map(t => this.transformMock(t));
+    // Mock data removed - return empty
+    console.log("[task] No data in Supabase, returning empty");
+    console.log("[task] No data, returning []"); return [];
   }
 
   async getTasksByPriority(initiativeId: string, priority: TaskPriority): Promise<Task[]> {
@@ -94,10 +111,9 @@ export class TaskService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return tasksData
-      .filter(t => t.initiativeId === initiativeId && t.priority === priority)
-      .map(t => this.transformMock(t));
+    // Mock data removed - return empty
+    console.log("[task] No data in Supabase, returning empty");
+    console.log("[task] No data, returning []"); return [];
   }
 
   async getBlockedTasks(initiativeId: string): Promise<Task[]> {
@@ -123,12 +139,9 @@ export class TaskService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const now = new Date();
-    return tasksData
-      .filter(t => t.initiativeId === initiativeId && t.priority === 'critical' && new Date(t.dueDate) > now && (t.status === 'not_started' || t.status === 'in_progress'))
-      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-      .map(t => this.transformMock(t));
+    // Mock data removed - return empty
+    console.log("[task] No data in Supabase, returning empty");
+    console.log("[task] No data, returning []"); return [];
   }
 
   async getOverdueTasks(initiativeId: string): Promise<Task[]> {
@@ -148,11 +161,9 @@ export class TaskService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const now = new Date();
-    return tasksData
-      .filter(t => t.initiativeId === initiativeId && new Date(t.dueDate) < now && t.status !== 'completed' && t.status !== 'cancelled')
-      .map(t => this.transformMock(t));
+    // Mock data removed - return empty
+    console.log("[task] No data in Supabase, returning empty");
+    console.log("[task] No data, returning []"); return [];
   }
 
   async getTasksByDueDate(initiativeId: string, startDate: Date, endDate: Date): Promise<Task[]> {
@@ -173,11 +184,9 @@ export class TaskService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return tasksData
-      .filter(t => t.initiativeId === initiativeId && new Date(t.dueDate) >= startDate && new Date(t.dueDate) <= endDate)
-      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-      .map(t => this.transformMock(t));
+    // Mock data removed - return empty
+    console.log("[task] No data in Supabase, returning empty");
+    console.log("[task] No data, returning []"); return [];
   }
 
   async getTasksByAssignee(initiativeId: string, userId: string): Promise<Task[]> {
@@ -196,10 +205,9 @@ export class TaskService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return tasksData
-      .filter(t => t.initiativeId === initiativeId && t.assignedToUserId === userId)
-      .map(t => this.transformMock(t));
+    // Mock data removed - return empty
+    console.log("[task] No data in Supabase, returning empty");
+    console.log("[task] No data, returning []"); return [];
   }
 
   async createTask(dto: CreateTaskDTO): Promise<Task> {
@@ -233,19 +241,9 @@ export class TaskService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const newTask = {
-      id: `${Date.now()}`,
-      ...dto,
-      dueDate: dto.dueDate instanceof Date ? dto.dueDate.toISOString() : dto.dueDate,
-      status: 'not_started' as TaskStatus,
-      actualHours: 0,
-      dependencyIds: dto.dependencyIds || [],
-      displayOrder: dto.displayOrder ?? 0,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    return this.transformMock(newTask as any);
+    // Mock data removed - return empty
+    console.log("[task] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async updateTask(id: string, dto: UpdateTaskDTO): Promise<Task> {
@@ -278,16 +276,32 @@ export class TaskService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const index = tasksData.findIndex(t => t.id === id);
-    if (index === -1) throw new Error(`Task ${id} not found`);
-    const updated = { ...tasksData[index], ...dto, updatedAt: new Date().toISOString() };
-    return this.transformMock(updated as any);
+    // Mock data removed - return empty
+    console.log("[task] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async updateTaskStatus(id: string, status: TaskStatus): Promise<Task> {
     const completedAt = status === 'completed' ? new Date() : undefined;
     return this.updateTask(id, { status, completedAt });
+  }
+
+  async deleteTask(id: string): Promise<void> {
+    if (isSupabaseConfigured()) {
+      const supabase = getSupabase();
+      const { error } = await supabase
+        .from('tasks')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        console.error("[task] deleteTask error:", error.message);
+        throw new Error(error.message);
+      }
+      console.log("[task] Deleted task:", id);
+      return;
+    }
+    console.log("[task] deleteTask - Supabase not configured");
   }
 
   async startTask(id: string): Promise<Task> { return this.updateTaskStatus(id, 'in_progress'); }
@@ -354,27 +368,7 @@ export class TaskService {
     };
   }
 
-  private transformMock(data: typeof tasksData[0]): Task {
-    return {
-      id: data.id,
-      initiativeId: data.initiativeId,
-      companyId: (data as any).companyId,
-      name: data.name,
-      description: data.description,
-      status: (data.status as TaskStatus) || 'not_started',
-      priority: (data.priority as TaskPriority) || 'medium',
-      dueDate: new Date(data.dueDate),
-      estimatedHours: data.estimatedHours,
-      estimatedHoursRange: (data as any).estimatedHoursRange,
-      assignedToUserId: data.assignedToUserId,
-      actualHours: data.actualHours,
-      completedAt: (data as any).completedAt ? new Date((data as any).completedAt) : undefined,
-      dependencyIds: data.dependencyIds || [],
-      displayOrder: (data as any).displayOrder || 0,
-      createdAt: new Date(data.createdAt),
-      updatedAt: new Date(data.updatedAt),
-    };
-  }
+
 
   private delay(ms: number = 50): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, Math.random() * ms));

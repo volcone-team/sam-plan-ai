@@ -3,345 +3,298 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Users,
-  Plus,
-  Trash2,
+  User,
   Eye,
-  X,
-  ArrowUpDown,
+  Search,
+  Loader2,
+  Trash2,
+  Building2,
+  Shield,
+  Crown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-/* ------------------------------------------------------------------
-   Types
-   ------------------------------------------------------------------ */
+import { useAuth } from "@/hooks/use-auth";
 
 interface AdminUser {
   id: string;
-  companyId: string;
+  email: string;
   firstName: string;
   lastName: string;
-  email: string;
-  role: "owner" | "operator" | "team_member" | "viewer";
+  companyId: string | null;
+  companyName: string | null;
+  role: string;
   isActive: boolean;
-  lastActive: string;
-}
-
-interface AdminCompany {
-  id: string;
-  name: string;
-  description: string;
-  owner: string;
-  users: number;
-  tier: "Starter" | "Pro" | "Mastery";
-  targetRevenue: number;
-  currency: string;
-  status: "active" | "inactive";
+  isAdmin: boolean;
+  adminLevel: string | null;
   createdAt: string;
-  fiscalYear: number;
-  planningYear: number;
-  priorYearRevenue: number;
-  baselineRevenue: number;
-  stretchRevenue: number;
-  operatingBudget: number;
 }
 
-/* ------------------------------------------------------------------
-   Mock Data
-   ------------------------------------------------------------------ */
+const ROLE_STYLES: Record<string, string> = {
+  owner: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+  operator: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
+  viewer: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+  team_member: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+};
 
-const MOCK_USERS: AdminUser[] = [
-  { id: "user-1", companyId: "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d", firstName: "Sarah", lastName: "Mitchell", email: "sarah@elevatecoaching.com", role: "owner", isActive: true, lastActive: "2025-01-15" },
-  { id: "user-2", companyId: "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d", firstName: "Marcus", lastName: "Chen", email: "marcus@elevatecoaching.com", role: "operator", isActive: true, lastActive: "2025-01-14" },
-  { id: "user-3", companyId: "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d", firstName: "Alex", lastName: "Rodriguez", email: "alex@elevatecoaching.com", role: "team_member", isActive: true, lastActive: "2025-01-13" },
-  { id: "user-4", companyId: "comp-2nd-demo", firstName: "David", lastName: "Park", email: "david@growthagency.co", role: "owner", isActive: true, lastActive: "2025-01-15" },
-  { id: "user-5", companyId: "comp-2nd-demo", firstName: "Lisa", lastName: "Wang", email: "lisa@growthagency.co", role: "operator", isActive: true, lastActive: "2025-01-12" },
-];
-
-const MOCK_COMPANIES: AdminCompany[] = [
-  {
-    id: "8a3f2c91-7e4d-4b2a-9d1f-6c5e8a2b3f4d",
-    name: "Elevate Coaching",
-    description: "A premium coaching and consulting firm",
-    owner: "Sarah Mitchell",
-    users: 3,
-    tier: "Pro",
-    targetRevenue: 495000,
-    currency: "USD",
-    status: "active",
-    createdAt: "2024-06-15",
-    fiscalYear: 2026,
-    planningYear: 2026,
-    priorYearRevenue: 450000,
-    baselineRevenue: 495000,
-    stretchRevenue: 900000,
-    operatingBudget: 346500,
-  },
-  {
-    id: "comp-2nd-demo",
-    name: "Growth Agency Co",
-    description: "Full-service digital growth agency",
-    owner: "David Park",
-    users: 2,
-    tier: "Starter",
-    targetRevenue: 200000,
-    currency: "USD",
-    status: "active",
-    createdAt: "2025-03-01",
-    fiscalYear: 2026,
-    planningYear: 2026,
-    priorYearRevenue: 150000,
-    baselineRevenue: 180000,
-    stretchRevenue: 280000,
-    operatingBudget: 120000,
-  },
-];
-
-const USERS_STORAGE_KEY = "sam-flow-admin-users-list";
-const COMPANIES_STORAGE_KEY = "sam-flow-admin-companies-list";
-
-/* ------------------------------------------------------------------
-   Helpers
-   ------------------------------------------------------------------ */
-
-function getRoleBadgeClasses(role: string): string {
-  switch (role) {
-    case "owner":
-      return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300";
-    case "operator":
-      return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
-    default:
-      return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
-  }
+function genPw(): string {
+  const c = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let pw = "";
+  for (let i = 0; i < 10; i++) pw += c[Math.floor(Math.random() * c.length)];
+  return pw;
 }
 
-function getRoleLabel(role: string): string {
-  switch (role) {
-    case "owner": return "Owner";
-    case "operator": return "Operator";
-    case "team_member": return "Team Member";
-    case "viewer": return "Viewer";
-    default: return role;
-  }
-}
-
-function getStatusBadgeClasses(isActive: boolean): string {
-  return isActive
-    ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
-    : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400";
-}
-
-function getInitials(firstName: string, lastName: string): string {
-  return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
-}
-
-function loadUsers(): AdminUser[] {
-  if (typeof window === "undefined") return MOCK_USERS;
-  try {
-    const stored = localStorage.getItem(USERS_STORAGE_KEY);
-    if (stored) return JSON.parse(stored);
-  } catch {}
-  return MOCK_USERS;
-}
-
-function saveUsers(users: AdminUser[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
-}
-
-function loadCompanies(): AdminCompany[] {
-  if (typeof window === "undefined") return MOCK_COMPANIES;
-  try {
-    const stored = localStorage.getItem(COMPANIES_STORAGE_KEY);
-    if (stored) return JSON.parse(stored);
-  } catch {}
-  return MOCK_COMPANIES;
-}
-
-/* ------------------------------------------------------------------
-   Component
-   ------------------------------------------------------------------ */
-
-type SortField = "name" | "lastActive";
-type SortDir = "asc" | "desc";
-
-export function UserManagement() {
+export function UserManagement({ filter = "all" }: { filter?: "all" | "internal" | "customers" } = {}) {
   const router = useRouter();
+  const { userId: currentUserId, adminLevel } = useAuth();
+  const isSuperAdmin = adminLevel === "super_admin";
   const [users, setUsers] = useState<AdminUser[]>([]);
-  const [companies, setCompanies] = useState<AdminCompany[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showAddForm, setShowAddForm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [total, setTotal] = useState(0);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [sortField, setSortField] = useState<SortField>("name");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [addForm, setAddForm] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    role: "team_member" as string,
-    companyId: "",
-  });
+  const [deleting, setDeleting] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addSuccess, setAddSuccess] = useState<string | null>(null);
+  const [addForm, setAddForm] = useState({ companyId: "", email: "", firstName: "", lastName: "", password: "", role: "operator" });
+  const [companiesList, setCompaniesList] = useState<{ id: string; name: string }[]>([]);
+
+  async function loadCompaniesForDropdown() {
+    try {
+      const res = await fetch("/api/admin/companies?limit=100");
+      if (res.ok) {
+        const data = await res.json();
+        setCompaniesList((data.companies || []).map((c: any) => ({ id: c.id, name: c.name })));
+      }
+    } catch {}
+  }
+
+  async function handleAddUser(e: React.FormEvent) {
+    e.preventDefault();
+    setAddError(null);
+    setAddSuccess(null);
+    setAddLoading(true);
+    try {
+      const res = await fetch("/api/admin/users/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(addForm),
+      });
+      const data = await res.json();
+      if (!res.ok) { setAddError(data.error || "Failed"); return; }
+      setAddSuccess("User " + data.user.email + " created (" + data.user.role + " at " + data.user.companyName + "). Password: " + addForm.password);
+      setAddForm({ companyId: "", email: "", firstName: "", lastName: "", password: genPw(), role: "operator" });
+      loadUsers(search);
+    } catch { setAddError("Network error"); }
+    finally { setAddLoading(false); }
+  }
+
+  async function loadUsers(searchTerm: string = "") {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      if (searchTerm) params.set("search", searchTerm);
+      if (filter !== "all") params.set("filter", filter);
+      params.set("limit", "50");
+
+      const res = await fetch(`/api/admin/users?${params}`);
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Failed to load users");
+        console.error("[UserManagement] API error:", data.error);
+        return;
+      }
+
+      console.log("[UserManagement] Loaded", data.users?.length, "users, total:", data.total);
+      setUsers(data.users || []);
+      setTotal(data.total || 0);
+    } catch (err: any) {
+      setError(err?.message || "Network error");
+      console.error("[UserManagement] Fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    setUsers(loadUsers());
-    setCompanies(loadCompanies());
-    setLoading(false);
+    loadUsers();
+    loadCompaniesForDropdown();
   }, []);
 
   useEffect(() => {
-    if (!loading) saveUsers(users);
-  }, [users, loading]);
+    const timeout = setTimeout(() => {
+      loadUsers(search);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [search]);
 
-  function getCompanyName(companyId: string): string {
-    const company = companies.find((c) => c.id === companyId);
-    return company?.name || "Unknown";
-  }
+  async function handleDeactivate(userId: string) {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, { method: "DELETE" });
+      const data = await res.json();
 
-  function toggleSort(field: SortField) {
-    if (sortField === field) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortField(field);
-      setSortDir("asc");
+      if (!res.ok) {
+        alert(data.error || "Failed to deactivate user");
+        console.error("[UserManagement] Deactivate error:", data.error);
+        return;
+      }
+
+      console.log("[UserManagement] Deactivated user:", userId);
+      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, isActive: false } : u));
+      setDeleteConfirmId(null);
+    } catch (err: any) {
+      alert(err?.message || "Network error");
+    } finally {
+      setDeleting(false);
     }
   }
 
-  const sortedUsers = [...users].sort((a, b) => {
-    if (sortField === "name") {
-      const nameA = `${a.firstName} ${a.lastName}`.toLowerCase();
-      const nameB = `${b.firstName} ${b.lastName}`.toLowerCase();
-      return sortDir === "asc" ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+  async function handleDeletePermanently(userId: string) {
+    setDeleting(true);
+    console.log("[UserManagement] Permanently deleting user:", userId);
+    try {
+      const res = await fetch(`/api/admin/users/${userId}?hard=true`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to delete user");
+        return;
+      }
+      console.log("[UserManagement] Deleted user permanently:", userId);
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
+      setDeleteConfirmId(null);
+    } catch (err: any) {
+      alert(err?.message || "Network error");
+    } finally {
+      setDeleting(false);
     }
-    // lastActive
-    return sortDir === "asc"
-      ? a.lastActive.localeCompare(b.lastActive)
-      : b.lastActive.localeCompare(a.lastActive);
-  });
-
-  function handleAddUser() {
-    if (!addForm.firstName.trim() || !addForm.email.trim() || !addForm.companyId) return;
-    const newUser: AdminUser = {
-      id: `user-${Date.now()}`,
-      companyId: addForm.companyId,
-      firstName: addForm.firstName,
-      lastName: addForm.lastName,
-      email: addForm.email,
-      role: addForm.role as AdminUser["role"],
-      isActive: true,
-      lastActive: new Date().toISOString().split("T")[0],
-    };
-    setUsers((prev) => [...prev, newUser]);
-    setAddForm({ firstName: "", lastName: "", email: "", role: "team_member", companyId: "" });
-    setShowAddForm(false);
   }
 
-  function handleDelete(id: string) {
-    setUsers((prev) => prev.filter((u) => u.id !== id));
-    setDeleteConfirmId(null);
+  async function handleRoleChange(userId: string, newRole: string) {
+    console.log("[UserManagement] Changing role:", userId, "->", newRole);
+    const snapshot = users;
+    setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, role: newRole } : u));
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/role`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: newRole }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        console.error("[UserManagement] Role change failed:", data.error);
+        setUsers(snapshot);
+        alert(data.error || "Failed to change role");
+        return;
+      }
+      console.log("[UserManagement] Role changed successfully");
+    } catch (err: any) {
+      setUsers(snapshot);
+      alert(err?.message || "Network error");
+    }
   }
 
-  if (loading) {
+  async function handleAdminLevelChange(userId: string, level: string | null) {
+    console.log("[UserManagement] Changing admin level:", userId, "->", level);
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/admin-level`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminLevel: level }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        console.error("[UserManagement] Admin level change failed:", data.error);
+        alert(data.error || "Failed to change admin level");
+        return;
+      }
+      console.log("[UserManagement] Admin level changed to:", level);
+      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, isAdmin: level !== null, adminLevel: level } : u));
+    } catch (err: any) {
+      alert(err?.message || "Network error");
+    }
+  }
+
+  if (loading && users.length === 0) {
     return (
       <div className="flex items-center justify-center py-12">
-        <p className="text-sm text-[hsl(var(--foreground-muted))]">Loading users…</p>
+        <Loader2 className="h-6 w-6 animate-spin text-[hsl(var(--primary))]" />
+        <span className="ml-2 text-sm text-[hsl(var(--foreground-muted))]">Loading users…</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-[var(--radius-lg)] border border-red-200 bg-red-50 p-6 text-center dark:border-red-900 dark:bg-red-950/30">
+        <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
+        <button
+          onClick={() => loadUsers(search)}
+          className="mt-3 text-sm font-medium text-red-600 hover:underline"
+        >
+          Try again
+        </button>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* Summary + Add button */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-100 dark:bg-purple-900/30">
-            <Users className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-[hsl(var(--foreground-muted))]">Total Users</p>
-            <p className="text-xl font-bold text-[hsl(var(--foreground))]">{users.length}</p>
-          </div>
-        </div>
-        <button
-          onClick={() => setShowAddForm(!showAddForm)}
-          className="inline-flex items-center gap-2 rounded-lg bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity"
-        >
-          <Plus className="h-4 w-4" />
-          Add User
-        </button>
+      {/* Add User */}
+      <div className="flex items-center justify-end mb-4">
+        <button onClick={() => { setShowAddForm(!showAddForm); if (!addForm.password) setAddForm(f => ({ ...f, password: genPw() })); }} className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Add User</button>
       </div>
 
-      {/* Add User Form */}
       {showAddForm && (
-        <div className="rounded-[var(--radius-lg)] border border-border bg-card p-5 space-y-4">
-          <h4 className="text-sm font-semibold text-[hsl(var(--foreground))]">Add New User</h4>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <input
-              type="text"
-              placeholder="First Name *"
-              value={addForm.firstName}
-              onChange={(e) => setAddForm((f) => ({ ...f, firstName: e.target.value }))}
-              className="rounded-md border border-border bg-card px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--foreground-muted))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]"
-            />
-            <input
-              type="text"
-              placeholder="Last Name"
-              value={addForm.lastName}
-              onChange={(e) => setAddForm((f) => ({ ...f, lastName: e.target.value }))}
-              className="rounded-md border border-border bg-card px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--foreground-muted))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]"
-            />
-            <input
-              type="email"
-              placeholder="Email *"
-              value={addForm.email}
-              onChange={(e) => setAddForm((f) => ({ ...f, email: e.target.value }))}
-              className="rounded-md border border-border bg-card px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--foreground-muted))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]"
-            />
-            <select
-              value={addForm.role}
-              onChange={(e) => setAddForm((f) => ({ ...f, role: e.target.value }))}
-              className="rounded-md border border-border bg-card px-3 py-2 text-sm text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]"
-            >
-              <option value="owner">Owner</option>
-              <option value="operator">Operator</option>
-              <option value="team_member">Team Member</option>
-              <option value="viewer">Viewer</option>
-            </select>
-            <select
-              value={addForm.companyId}
-              onChange={(e) => setAddForm((f) => ({ ...f, companyId: e.target.value }))}
-              className="rounded-md border border-border bg-card px-3 py-2 text-sm text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]"
-            >
-              <option value="">Assign to Company *</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleAddUser}
-              disabled={!addForm.firstName.trim() || !addForm.email.trim() || !addForm.companyId}
-              className="inline-flex items-center gap-1.5 rounded-md bg-[hsl(var(--primary))] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Plus className="h-3.5 w-3.5" /> Add User
-            </button>
-            <button
-              onClick={() => setShowAddForm(false)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-[hsl(var(--foreground-muted))] hover:bg-[hsl(var(--background))]"
-            >
-              <X className="h-3.5 w-3.5" /> Cancel
-            </button>
-          </div>
+        <div className="mb-6 rounded-[var(--radius-lg)] border border-border bg-card p-5">
+          <h4 className="text-sm font-semibold mb-4">Add User to Company</h4>
+          {addError && <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{addError}</div>}
+          {addSuccess && <div className="mb-3 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{addSuccess}</div>}
+          <form onSubmit={handleAddUser} className="space-y-3">
+            <div><label className="mb-1 block text-xs font-medium">Company *</label><select required value={addForm.companyId} onChange={(e) => setAddForm(f => ({ ...f, companyId: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"><option value="">Select company...</option>{companiesList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="mb-1 block text-xs font-medium">First Name *</label><input type="text" required value={addForm.firstName} onChange={(e) => setAddForm(f => ({ ...f, firstName: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" /></div>
+              <div><label className="mb-1 block text-xs font-medium">Last Name</label><input type="text" value={addForm.lastName} onChange={(e) => setAddForm(f => ({ ...f, lastName: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" /></div>
+            </div>
+            <div><label className="mb-1 block text-xs font-medium">Email *</label><input type="email" required value={addForm.email} onChange={(e) => setAddForm(f => ({ ...f, email: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" /></div>
+            <div><label className="mb-1 block text-xs font-medium">Role *</label><select value={addForm.role} onChange={(e) => setAddForm(f => ({ ...f, role: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"><option value="owner">Owner</option><option value="operator">Operator</option><option value="team_member">Team Member</option><option value="viewer">Viewer</option></select></div>
+            <div><label className="mb-1 block text-xs font-medium">Password *</label><div className="flex gap-2"><input type="text" required value={addForm.password} onChange={(e) => setAddForm(f => ({ ...f, password: e.target.value }))} className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm font-mono" /><button type="button" onClick={() => setAddForm(f => ({ ...f, password: genPw() }))} className="rounded-md border border-border px-3 py-2 text-xs">Generate</button></div></div>
+            <div className="flex gap-2 pt-2">
+              <button type="submit" disabled={addLoading} className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{addLoading ? "Creating..." : "Create User"}</button>
+              <button type="button" onClick={() => setShowAddForm(false)} className="rounded-md border border-border px-4 py-2 text-sm font-medium">Cancel</button>
+            </div>
+          </form>
         </div>
       )}
+
+      {/* Search */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[hsl(var(--foreground-muted))]" />
+          <input
+            type="text"
+            placeholder="Search by name or email…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-[var(--radius-md)] border border-border bg-card pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+          />
+        </div>
+        <span className="text-sm text-[hsl(var(--foreground-muted))]">
+          {total} {total === 1 ? "user" : "users"}
+        </span>
+      </div>
 
       {/* Users Table */}
       {users.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-[var(--radius-lg)] border border-dashed border-border bg-card p-12 text-center">
-          <Users className="h-10 w-10 text-[hsl(var(--foreground-muted))]" />
-          <h3 className="mt-3 text-base font-semibold text-[hsl(var(--foreground))]">No users</h3>
+          <User className="h-10 w-10 text-[hsl(var(--foreground-muted))]" />
+          <h3 className="mt-3 text-base font-semibold">No users found</h3>
           <p className="mt-1.5 text-sm text-[hsl(var(--foreground-muted))]">
-            No users registered yet. Add one to get started.
+            {search ? "No users match your search." : "No users have signed up yet."}
           </p>
         </div>
       ) : (
@@ -349,75 +302,115 @@ export function UserManagement() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-border">
-                  <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">
-                    <button
-                      onClick={() => toggleSort("name")}
-                      className="inline-flex items-center gap-1 hover:text-[hsl(var(--foreground))]"
-                    >
-                      User
-                      <ArrowUpDown className="h-3.5 w-3.5" />
-                    </button>
-                  </th>
-                  <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">Email</th>
+                <tr className="border-b border-border bg-[hsl(var(--background-muted))]">
+                  <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">User</th>
                   <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">Company</th>
                   <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">Role</th>
                   <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">Status</th>
-                  <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">
-                    <button
-                      onClick={() => toggleSort("lastActive")}
-                      className="inline-flex items-center gap-1 hover:text-[hsl(var(--foreground))]"
-                    >
-                      Last Active
-                      <ArrowUpDown className="h-3.5 w-3.5" />
-                    </button>
-                  </th>
+                  <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">Joined</th>
                   <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {sortedUsers.map((user) => (
-                  <tr key={user.id} className="hover:bg-[hsl(var(--background))] transition-colors">
+                {users.map((u) => (
+                  <tr key={u.id} className="hover:bg-[hsl(var(--background))] transition-colors">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--primary))] text-xs font-medium text-white">
-                          {getInitials(user.firstName, user.lastName)}
+                          {(u.firstName || u.email).charAt(0).toUpperCase()}
                         </div>
-                        <span className="font-medium text-[hsl(var(--foreground))]">
-                          {user.firstName} {user.lastName}
-                        </span>
+                        <div>
+                          <p className="font-medium text-[hsl(var(--foreground))]">
+                            {u.firstName} {u.lastName}
+                            {u.isAdmin && (
+                              <span className={cn("ml-1.5 inline-flex items-center gap-0.5 text-xs", u.adminLevel === "super_admin" ? "text-purple-600" : "text-amber-600")}>
+                                <Crown className="h-3 w-3" /> {u.adminLevel === "super_admin" ? "Super Admin" : "Admin"}
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-xs text-[hsl(var(--foreground-muted))]">{u.email}</p>
+                        </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-[hsl(var(--foreground-muted))]">{user.email}</td>
-                    <td className="px-4 py-3 text-[hsl(var(--foreground-muted))]">{getCompanyName(user.companyId)}</td>
                     <td className="px-4 py-3">
-                      <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium", getRoleBadgeClasses(user.role))}>
-                        {getRoleLabel(user.role)}
-                      </span>
+                      {u.companyName ? (
+                        <button
+                          onClick={() => router.push(`/admin/companies/${u.companyId}`)}
+                          className="inline-flex items-center gap-1 text-[hsl(var(--foreground))] hover:text-[hsl(var(--primary))] transition-colors"
+                        >
+                          <Building2 className="h-3.5 w-3.5" />
+                          {u.companyName}
+                        </button>
+                      ) : (
+                        <span className="text-[hsl(var(--foreground-muted))]">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium", getStatusBadgeClasses(user.isActive))}>
-                        {user.isActive ? "Active" : "Inactive"}
+                      <select
+                        value={u.role}
+                        onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                        className={cn("rounded-full px-2.5 py-1 text-xs font-medium capitalize border-0 cursor-pointer focus:ring-2 focus:ring-[hsl(var(--ring))]", ROLE_STYLES[u.role] || ROLE_STYLES.viewer)}
+                        title="Change access role"
+                      >
+                        <option value="owner">Owner</option>
+                        <option value="operator">Operator</option>
+                        <option value="team_member">Team Member</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={cn(
+                        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
+                        u.isActive
+                          ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                          : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+                      )}>
+                        {u.isActive ? "Active" : "Inactive"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-[hsl(var(--foreground-muted))]">{user.lastActive}</td>
+                    <td className="px-4 py-3 text-[hsl(var(--foreground-muted))]">
+                      {new Date(u.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => router.push(`/admin/users/${user.id}`)}
+                          onClick={() => router.push(`/admin/users/${u.id}`)}
                           className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-[hsl(var(--foreground))] hover:bg-[hsl(var(--background))] transition-colors"
                           title="View details"
                         >
                           <Eye className="h-3.5 w-3.5" />
-                          View
                         </button>
-                        {deleteConfirmId === user.id ? (
+                        {isSuperAdmin && u.id !== currentUserId && (
+                          <select
+                            value={u.adminLevel || "none"}
+                            onChange={(e) => handleAdminLevelChange(u.id, e.target.value === "none" ? null : e.target.value)}
+                            className="rounded-md border border-border bg-background px-2 py-1.5 text-xs font-medium cursor-pointer"
+                            title="Admin access"
+                          >
+                            <option value="none">Not Admin</option>
+                            <option value="admin">Admin</option>
+                            <option value="super_admin">Super Admin</option>
+                          </select>
+                        )}
+                        {deleteConfirmId === u.id ? (
                           <div className="flex items-center gap-1">
+                            {u.isActive && (
+                              <button
+                                onClick={() => handleDeactivate(u.id)}
+                                disabled={deleting}
+                                className="inline-flex items-center rounded-md bg-amber-500 px-2 py-1.5 text-xs font-medium text-white hover:bg-amber-600 disabled:opacity-50"
+                                title="Deactivate (reversible)"
+                              >
+                                {deleting ? "…" : "Deactivate"}
+                              </button>
+                            )}
                             <button
-                              onClick={() => handleDelete(user.id)}
-                              className="inline-flex items-center rounded-md bg-red-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-red-700"
+                              onClick={() => handleDeletePermanently(u.id)}
+                              disabled={deleting}
+                              className="inline-flex items-center rounded-md bg-red-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                              title="Delete permanently (irreversible)"
                             >
-                              Confirm
+                              {deleting ? "…" : "Delete"}
                             </button>
                             <button
                               onClick={() => setDeleteConfirmId(null)}
@@ -428,9 +421,9 @@ export function UserManagement() {
                           </div>
                         ) : (
                           <button
-                            onClick={() => setDeleteConfirmId(user.id)}
-                            className="inline-flex items-center gap-1 rounded-md border border-red-300 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors"
-                            title="Delete user"
+                            onClick={() => setDeleteConfirmId(u.id)}
+                            className="inline-flex items-center rounded-md border border-red-300 px-2 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors"
+                            title="Remove user"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>

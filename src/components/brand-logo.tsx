@@ -13,8 +13,8 @@ interface BrandLogoProps {
 /**
  * Brand logo that swaps between light and dark versions
  * based on the current theme.
- * - Light mode: shows logo-dark.jpg (dark logo on light background)
- * - Dark mode: shows logo-light.jpg (light logo on dark background)
+ * - Light mode: shows logo-light.png (dark logo on light background)
+ * - Dark mode: shows logo-dark.png (light logo on dark background)
  */
 export function BrandLogo({ width = 120, height = 40, className }: BrandLogoProps) {
   const { resolvedTheme } = useTheme();
@@ -23,7 +23,7 @@ export function BrandLogo({ width = 120, height = 40, className }: BrandLogoProp
     <>
       {/* Light logo for light mode (light background) */}
       <Image
-        src="/logo-light.jpg"
+        src="/logo-light.png"
         alt="SAM Plan AI"
         width={width}
         height={height}
@@ -35,7 +35,7 @@ export function BrandLogo({ width = 120, height = 40, className }: BrandLogoProp
       />
       {/* Dark logo for dark mode (dark background) */}
       <Image
-        src="/logo-dark.jpg"
+        src="/logo-dark.png"
         alt="SAM Plan AI"
         width={width}
         height={height}

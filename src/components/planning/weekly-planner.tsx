@@ -26,6 +26,7 @@ import { planService } from '@/services/plan.service';
 import { initiativeService } from '@/services/initiative.service';
 import { taskService } from '@/services/task.service';
 import { resultService } from '@/services/result.service';
+import { updateInitiativeStatusFromTasks } from '@/lib/update-initiative-status';
 import type { WeeklyPlan, Initiative, Task, TaskStatus, Result } from '@/types';
 
 
@@ -200,6 +201,8 @@ export function WeeklyPlanner() {
         });
         setInitiatives(weekInitiatives);
 
+        console.log("[WeeklyPlanner] Loaded", weekInitiatives.length, "initiatives for week");
+
         // Load tasks for all active initiatives, filter those due this week
         const allTasks: TaskWithInitiative[] = [];
         for (const init of weekInitiatives) {
@@ -219,6 +222,7 @@ export function WeeklyPlanner() {
           if (pDiff !== 0) return pDiff;
           return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
         });
+        console.log("[WeeklyPlanner] Found", allTasks.length, "tasks due this week");
         setTasks(allTasks);
 
         // Calculate actuals from results
@@ -240,13 +244,26 @@ export function WeeklyPlanner() {
 
   const handleStatusToggle = async (taskId: string, currentStatus: TaskStatus) => {
     const newStatus = cycleStatus(currentStatus);
+    console.log("[WeeklyPlanner] Task status toggle:", taskId, currentStatus, "→", newStatus);
+    // Optimistic update
+    setTasks(prev =>
+      prev.map(t => (t.id === taskId ? { ...t, status: newStatus, completedAt: newStatus === 'completed' ? new Date() : t.completedAt } : t))
+    );
     try {
       await taskService.updateTaskStatus(taskId, newStatus);
+      console.log("[WeeklyPlanner] Status updated successfully");
+      // Auto-update parent initiative status
+      const changedTask = tasks.find(t => t.id === taskId);
+      if (changedTask && (changedTask as any).initiativeId) {
+        updateInitiativeStatusFromTasks((changedTask as any).initiativeId);
+      }
+    } catch (err: any) {
+      // Revert on failure (e.g. RLS blocked a viewer)
+      console.error('[WeeklyPlanner] Failed, reverting:', err?.message || err);
       setTasks(prev =>
-        prev.map(t => (t.id === taskId ? { ...t, status: newStatus } : t))
+        prev.map(t => (t.id === taskId ? { ...t, status: currentStatus } : t))
       );
-    } catch (err) {
-      console.error('Failed to update task status:', err);
+      alert(err?.message || "You do not have permission to update this task.");
     }
   };
 

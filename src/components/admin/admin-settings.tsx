@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { CheckCircle, Settings, ToggleLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RoleManagement } from "./role-management";
-import { InternalTeamManagement } from "./internal-team-management";
 
 /* ------------------------------------------------------------------
    Types
@@ -169,7 +168,7 @@ export function AdminSettings() {
   const [flags, setFlags] = useState<FeatureFlag[]>(DEFAULT_FLAGS);
   const [settings, setSettings] = useState<PlatformSettings>(DEFAULT_PLATFORM_SETTINGS);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'flags' | 'platform' | 'roles' | 'team'>('flags');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'flags' | 'platform' | 'roles'>('flags');
 
   // Load from localStorage
   useEffect(() => {
@@ -226,7 +225,6 @@ export function AdminSettings() {
           { key: 'flags', label: 'Feature Flags', icon: ToggleLeft },
           { key: 'platform', label: 'Platform Settings', icon: Settings },
           { key: 'roles', label: 'Role Management', icon: Settings },
-          { key: 'team', label: 'Internal Team', icon: Settings },
         ] as const).map(tab => (
           <button
             key={tab.key}
@@ -408,13 +406,6 @@ export function AdminSettings() {
       {activeSettingsTab === 'roles' && (
       <section aria-label="Role Management">
         <RoleManagement />
-      </section>
-      )}
-
-      {/* Internal Team */}
-      {activeSettingsTab === 'team' && (
-      <section aria-label="Internal Team">
-        <InternalTeamManagement />
       </section>
       )}
     </div>

@@ -15,6 +15,7 @@ import {
   CreditCard,
   TrendingUp,
   Settings,
+  Shield,
   Menu,
   X,
 } from "lucide-react";
@@ -29,7 +30,8 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
-  { label: "Users", href: "/admin/users", icon: Users },
+  { label: "Customer Users", href: "/admin/users", icon: Users },
+  { label: "Internal Users", href: "/admin/internal-users", icon: Shield },
   { label: "Companies", href: "/admin/companies", icon: Building2 },
   { label: "Questionnaire", href: "/admin/questionnaire", icon: ClipboardList },
   { label: "Initiative Library", href: "/admin/initiatives", icon: Rocket },

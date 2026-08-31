@@ -1,6 +1,7 @@
 'use client';
 
 import { useCompanyId } from '@/hooks/use-auth';
+import { usePermissions } from '@/hooks/use-permission';
 import { useEffect, useState } from 'react';
 import {
   Plus,
@@ -54,6 +55,12 @@ interface TaskFormData {
 
 export function InitiativeTasks({ initiativeId }: InitiativeTasksProps) {
   const companyId = useCompanyId() || "";
+  const { canCreate, canEdit, canDelete, canComplete } = usePermissions({
+    canCreate: 'tasks.create',
+    canEdit: 'tasks.edit',
+    canDelete: 'tasks.delete',
+    canComplete: 'tasks.complete',
+  });
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
@@ -79,11 +86,15 @@ export function InitiativeTasks({ initiativeId }: InitiativeTasksProps) {
   };
 
   const handleStatusChange = async (taskId: string, newStatus: TaskStatus) => {
+    const snapshot = tasks;
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
     try {
       await taskService.updateTaskStatus(taskId, newStatus);
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
-    } catch (err) {
-      console.error('Failed to update status:', err);
+      console.log("[InitiativeTasks] Status updated:", taskId, newStatus);
+    } catch (err: any) {
+      console.error('[InitiativeTasks] Status update failed, reverting:', err?.message || err);
+      setTasks(snapshot);
+      alert(err?.message || "You do not have permission to update this task.");
     }
   };
 
@@ -124,12 +135,20 @@ export function InitiativeTasks({ initiativeId }: InitiativeTasksProps) {
   };
 
   const handleDeleteTask = async (taskId: string) => {
+    console.log("[InitiativeTasks] Deleting task:", taskId);
+    // Snapshot for potential revert
+    const snapshot = tasks;
+    // Optimistic removal
+    setTasks(prev => prev.filter(t => t.id !== taskId));
+    setDeleteConfirmId(null);
     try {
-      // Remove from local state (mock service mutates array)
-      setTasks(prev => prev.filter(t => t.id !== taskId));
-      setDeleteConfirmId(null);
-    } catch (err) {
-      console.error('Failed to delete task:', err);
+      await taskService.deleteTask(taskId);
+      console.log("[InitiativeTasks] Task deleted successfully");
+    } catch (err: any) {
+      // Revert on failure (e.g. RLS blocked a viewer)
+      console.error('[InitiativeTasks] Delete failed, reverting:', err?.message || err);
+      setTasks(snapshot);
+      alert(err?.message || "You do not have permission to delete this task.");
     }
   };
 
@@ -149,6 +168,7 @@ export function InitiativeTasks({ initiativeId }: InitiativeTasksProps) {
         <h2 className="text-lg font-semibold text-[hsl(var(--foreground))]">
           Tasks ({tasks.length})
         </h2>
+        {canCreate && (
         <button
           onClick={() => setShowAddForm(true)}
           className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 transition-opacity"
@@ -156,6 +176,7 @@ export function InitiativeTasks({ initiativeId }: InitiativeTasksProps) {
           <Plus className="h-4 w-4" />
           Add Task
         </button>
+        )}
       </div>
 
       {/* Add task form */}
@@ -193,6 +214,9 @@ export function InitiativeTasks({ initiativeId }: InitiativeTasksProps) {
               onDelete={() => setDeleteConfirmId(task.id)}
               onConfirmDelete={() => handleDeleteTask(task.id)}
               onCancelDelete={() => setDeleteConfirmId(null)}
+              canEdit={canEdit}
+              canDelete={canDelete}
+              canComplete={canComplete}
             />
           ))}
         </div>
@@ -219,6 +243,9 @@ interface TaskRowProps {
   onDelete: () => void;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canComplete?: boolean;
 }
 
 function TaskRow({
@@ -234,6 +261,9 @@ function TaskRow({
   onDelete,
   onConfirmDelete,
   onCancelDelete,
+  canEdit = true,
+  canDelete = true,
+  canComplete = true,
 }: TaskRowProps) {
   const config = statusConfig[task.status];
   const Icon = config.icon;
@@ -250,6 +280,7 @@ function TaskRow({
         {/* Status icon - clickable for quick status cycle */}
         <button
           onClick={() => {
+            if (!canComplete) return;
             const nextStatus: Record<TaskStatus, TaskStatus> = {
               not_started: 'in_progress',
               in_progress: 'completed',
@@ -259,8 +290,9 @@ function TaskRow({
             };
             onStatusChange(nextStatus[task.status]);
           }}
-          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${config.bgColor} hover:ring-2 hover:ring-[hsl(var(--primary))] transition-all`}
-          title={`Status: ${config.label}. Click to change.`}
+          disabled={!canComplete}
+          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${config.bgColor} transition-all ${canComplete ? 'hover:ring-2 hover:ring-[hsl(var(--primary))]' : 'cursor-default opacity-70'}`}
+          title={canComplete ? `Status: ${config.label}. Click to change.` : `Status: ${config.label}`}
         >
           <Icon className={`h-4 w-4 ${config.color}`} />
         </button>
@@ -306,12 +338,16 @@ function TaskRow({
 
         {/* Actions */}
         <div className="flex items-center gap-1 shrink-0">
+          {canEdit && (
           <button onClick={onEdit} className="p-1.5 rounded hover:bg-[hsl(var(--background-muted))] text-[hsl(var(--foreground-muted))] hover:text-[hsl(var(--foreground))]" title="Edit">
             <Pencil className="h-3.5 w-3.5" />
           </button>
+          )}
+          {canDelete && (
           <button onClick={onDelete} className="p-1.5 rounded hover:bg-red-50 text-[hsl(var(--foreground-muted))] hover:text-red-600" title="Delete">
             <Trash2 className="h-3.5 w-3.5" />
           </button>
+          )}
           <button onClick={onToggleExpand} className="p-1.5 rounded hover:bg-[hsl(var(--background-muted))] text-[hsl(var(--foreground-muted))]">
             {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </button>

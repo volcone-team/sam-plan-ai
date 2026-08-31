@@ -712,3 +712,25 @@ body {
 .dark .hero-blob-dark {
   opacity: 0.3;
 }
+
+/* ============================================================
+   GLOBAL CURSOR FIX
+   Ensure all interactive elements show pointer cursor
+   ============================================================ */
+button,
+[role="button"],
+input[type="submit"],
+input[type="reset"],
+input[type="button"],
+select,
+summary,
+a[href],
+label[for],
+.cursor-pointer {
+  cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}

@@ -15,7 +15,6 @@ import type {
   UpdateResultDTO,
 } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
-import resultsData from '@/mock-data/results.json';
 
 export class ResultService {
   async getResultsByInitiative(initiativeId: string): Promise<InitiativeResult[]> {
@@ -34,10 +33,9 @@ export class ResultService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return resultsData
-      .filter((r: any) => r.initiativeId === initiativeId)
-      .map(r => this.transformMock(r) as InitiativeResult);
+    // Mock data removed - return empty
+    console.log("[result] No data in Supabase, returning empty");
+    console.log("[result] No data, returning []"); return [];
   }
 
   async getResultsByProduct(productId: string): Promise<EvergreenResult[]> {
@@ -57,13 +55,13 @@ export class ResultService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return resultsData
-      .filter((r: any) => r.productId === productId && !r.initiativeId)
-      .map(r => this.transformMock(r) as EvergreenResult);
+    // Mock data removed - return empty
+    console.log("[result] No data in Supabase, returning empty");
+    console.log("[result] No data, returning []"); return [];
   }
 
   async getResultsByWeek(companyId: string, weekStartDate: Date): Promise<Result[]> {
+    if (!companyId) { console.log("[result] getResultsByWeek - no companyId"); return []; }
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
@@ -80,13 +78,13 @@ export class ResultService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return resultsData
-      .filter(r => new Date(r.weekStartDate).getTime() === weekStartDate.getTime())
-      .map(r => this.transformMock(r));
+    // Mock data removed - return empty
+    console.log("[result] No data in Supabase, returning empty");
+    console.log("[result] No data, returning []"); return [];
   }
 
   async getResultsByMonth(companyId: string, year: number, month: number): Promise<Result[]> {
+    if (!companyId) { console.log("[result] getResultsByMonth - no companyId"); return []; }
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
@@ -106,13 +104,9 @@ export class ResultService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return resultsData
-      .filter(r => {
-        const d = new Date(r.weekStartDate);
-        return d.getFullYear() === year && d.getMonth() === month - 1;
-      })
-      .map(r => this.transformMock(r));
+    // Mock data removed - return empty
+    console.log("[result] No data in Supabase, returning empty");
+    console.log("[result] Not found in Supabase"); throw new Error("Not found");
   }
 
   async getResultsByDateRange(startDate: Date, endDate: Date): Promise<Result[]> {
@@ -132,14 +126,9 @@ export class ResultService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return resultsData
-      .filter(r => {
-        const d = new Date(r.weekStartDate);
-        return d >= startDate && d <= endDate;
-      })
-      .sort((a, b) => new Date(a.weekStartDate).getTime() - new Date(b.weekStartDate).getTime())
-      .map(r => this.transformMock(r));
+    // Mock data removed - return empty
+    console.log("[result] No data in Supabase, returning empty");
+    console.log("[result] No data, returning []"); return [];
   }
 
   async createInitiativeResult(dto: CreateInitiativeResultDTO): Promise<InitiativeResult> {
@@ -171,18 +160,9 @@ export class ResultService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const newResult = {
-      id: `${Date.now()}`,
-      ...dto,
-      weekStartDate: dto.weekStartDate instanceof Date ? dto.weekStartDate.toISOString() : dto.weekStartDate,
-      weekEndDate: dto.weekEndDate instanceof Date ? dto.weekEndDate.toISOString() : dto.weekEndDate,
-      metrics: dto.metrics || {},
-      source: 'manual' as const,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    return this.transformMock(newResult as any) as InitiativeResult;
+    // Mock data removed - return empty
+    console.log("[result] No data in Supabase, returning empty");
+    console.log("[result] Not found in Supabase"); throw new Error("Not found");
   }
 
   async createEvergreenResult(dto: CreateEvergreenResultDTO): Promise<EvergreenResult> {
@@ -214,19 +194,9 @@ export class ResultService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const newResult = {
-      id: `${Date.now()}`,
-      ...dto,
-      initiativeId: null,
-      weekStartDate: dto.weekStartDate instanceof Date ? dto.weekStartDate.toISOString() : dto.weekStartDate,
-      weekEndDate: dto.weekEndDate instanceof Date ? dto.weekEndDate.toISOString() : dto.weekEndDate,
-      metrics: dto.metrics || {},
-      source: 'manual' as const,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    return this.transformMock(newResult as any) as EvergreenResult;
+    // Mock data removed - return empty
+    console.log("[result] No data in Supabase, returning empty");
+    console.log("[result] Not found in Supabase"); throw new Error("Not found");
   }
 
   async updateResult(id: string, dto: UpdateResultDTO): Promise<Result> {
@@ -252,11 +222,9 @@ export class ResultService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const index = resultsData.findIndex(r => r.id === id);
-    if (index === -1) throw new Error(`Result ${id} not found`);
-    const updated = { ...resultsData[index], ...dto, updatedAt: new Date().toISOString() };
-    return this.transformMock(updated as any);
+    // Mock data removed - return empty
+    console.log("[result] No data in Supabase, returning empty");
+    console.log("[result] Not found in Supabase"); throw new Error("Not found");
   }
 
   async getTotalRevenueByInitiative(initiativeId: string): Promise<number> {

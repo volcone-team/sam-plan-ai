@@ -1,8 +1,12 @@
 "use client";
 
+import { useParams } from "next/navigation";
 import { CompanyDetail } from "@/components/admin/company-detail";
 
 export default function AdminCompanyDetailPage() {
+  const params = useParams();
+  const companyId = params.id as string;
+
   return (
     <div>
       <div className="mb-6">
@@ -13,7 +17,7 @@ export default function AdminCompanyDetailPage() {
           View and manage company information
         </p>
       </div>
-      <CompanyDetail />
+      <CompanyDetail companyId={companyId} />
     </div>
   );
 }

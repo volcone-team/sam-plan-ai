@@ -18,6 +18,7 @@ interface TeamMember {
 const ROLE_CONFIG = {
   owner: { label: 'Owner', icon: Crown, color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' },
   operator: { label: 'Operator', icon: Shield, color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' },
+  team_member: { label: 'Team Member', icon: Shield, color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' },
   viewer: { label: 'Viewer', icon: Eye, color: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' },
 };
 
@@ -29,7 +30,7 @@ function generatePassword(): string {
 }
 
 export function TeamMembers() {
-  const { userId } = useAuth();
+  const { userId, role: authRole } = useAuth();
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -41,7 +42,7 @@ export function TeamMembers() {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState(generatePassword());
-  const [role, setRole] = useState<'operator' | 'viewer'>('operator');
+  const [role, setRole] = useState<'operator' | 'team_member' | 'viewer'>('operator');
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [addSuccess, setAddSuccess] = useState<string | null>(null);
@@ -133,7 +134,8 @@ export function TeamMembers() {
     setTimeout(() => setCopiedPassword(false), 2000);
   };
 
-  const currentUserRole = members.find((m) => m.id === userId)?.role;
+  // Determine ownership: use auth hook role (reliable), fallback to members list
+  const currentUserRole = authRole || members.find((m) => m.id === userId)?.role;
   const isOwner = currentUserRole === 'owner';
 
   if (loading) {
@@ -253,10 +255,11 @@ export function TeamMembers() {
               <label className="mb-1 block text-xs font-medium">Role</label>
               <select
                 value={role}
-                onChange={(e) => setRole(e.target.value as 'operator' | 'viewer')}
+                onChange={(e) => setRole(e.target.value as 'operator' | 'team_member' | 'viewer')}
                 className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
               >
-                <option value="operator">Operator — Can edit initiatives, tasks, and settings</option>
+                <option value="operator">Operator — Full edit access to plans, initiatives, and tasks</option>
+                <option value="team_member">Team Member — Can complete tasks and log results</option>
                 <option value="viewer">Viewer — Read-only access to the dashboard</option>
               </select>
             </div>

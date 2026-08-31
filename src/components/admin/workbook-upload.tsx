@@ -47,7 +47,33 @@ export function WorkbookUpload() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setWorkbook(loadWorkbook());
+    // Try API first, fall back to localStorage
+    async function loadFromAPI() {
+      try {
+        console.log("[WorkbookUpload] Loading from API...");
+        const res = await fetch("/api/admin/workbook");
+        if (res.ok) {
+          const json = await res.json();
+          if (json.workbook) {
+            console.log("[WorkbookUpload] Loaded from DB:", json.workbook.fileName, "sheets:", json.workbook.totalSheets);
+            setWorkbook({
+              fileName: json.workbook.fileName,
+              uploadedAt: json.workbook.uploadedAt,
+              sheets: json.workbook.sheets,
+              totalSheets: json.workbook.totalSheets,
+            });
+            return;
+          }
+        }
+      } catch (err) {
+        console.log("[WorkbookUpload] API load failed, using localStorage:", err);
+      }
+      // Fallback to localStorage
+      const local = loadWorkbook();
+      if (local) console.log("[WorkbookUpload] Loaded from localStorage:", local.fileName);
+      setWorkbook(local);
+    }
+    loadFromAPI();
   }, []);
 
   async function handleFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
@@ -91,6 +117,26 @@ export function WorkbookUpload() {
         totalSheets: sheets.length,
       };
 
+      // Save to Supabase via API
+      console.log("[WorkbookUpload] Saving to API:", file.name, "sheets:", sheets.length);
+      try {
+        const res = await fetch("/api/admin/workbook", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileName: file.name, sheets }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          console.error("[WorkbookUpload] API save error:", json.error);
+          setError("Saved locally but failed to sync: " + json.error);
+        } else {
+          console.log("[WorkbookUpload] Saved to DB:", json.workbook?.id);
+        }
+      } catch (apiErr) {
+        console.error("[WorkbookUpload] API call failed:", apiErr);
+        // Non-fatal — still save locally
+      }
+
       saveWorkbook(data);
       setWorkbook(data);
     } catch (err) {
@@ -129,8 +175,16 @@ export function WorkbookUpload() {
   }
 
   function handleDelete() {
+    console.log("[WorkbookUpload] Deleting workbook...");
     deleteWorkbook();
     setWorkbook(null);
+    // Also delete from DB
+    fetch("/api/admin/workbook", { method: "DELETE" })
+      .then(res => {
+        if (res.ok) console.log("[WorkbookUpload] Deleted from DB");
+        else console.error("[WorkbookUpload] DB delete failed");
+      })
+      .catch(err => console.error("[WorkbookUpload] DB delete error:", err));
     setExpandedSheet(null);
   }
 

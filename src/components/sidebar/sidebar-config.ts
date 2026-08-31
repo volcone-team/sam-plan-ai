@@ -14,6 +14,7 @@ import {
   HelpCircle,
   Settings,
   Eye,
+  RotateCcw,
 } from "lucide-react";
 
 export interface NavItem {
@@ -63,7 +64,10 @@ export const navigationGroups: NavGroup[] = [
   },
   {
     label: "Account",
-    items: [{ label: "Settings", href: "/settings", icon: Settings }],
+    items: [
+      { label: "Plan History", href: "/plan-history", icon: RotateCcw },
+      { label: "Settings", href: "/settings", icon: Settings },
+    ],
   },
 ];
 

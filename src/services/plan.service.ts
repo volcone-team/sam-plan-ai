@@ -16,10 +16,10 @@ import type {
   UpdateAnnualPlanDTO,
 } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
-import plansData from '@/mock-data/plans.json';
 
 export class PlanService {
-  async getAnnualPlan(companyId: string, year: number): Promise<AnnualPlan> {
+  async getAnnualPlan(companyId: string, year: number): Promise<AnnualPlan | null> {
+    if (!companyId) { console.log("[plan] getAnnualPlan - no companyId"); return null; }
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
@@ -36,10 +36,8 @@ export class PlanService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const plan = (plansData.annualPlans as any[]).find(p => p.companyId === companyId && p.year === year);
-    if (!plan) throw new Error(`Annual plan for ${year} not found`);
-    return this.transformAnnualMock(plan);
+    console.log("[plan] getAnnualPlan - no plan found for year", year);
+    return null;
   }
 
   async createAnnualPlan(dto: CreateAnnualPlanDTO): Promise<AnnualPlan> {
@@ -66,9 +64,9 @@ export class PlanService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const newPlan = { id: `${Date.now()}`, ...dto, status: 'draft', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    return this.transformAnnualMock(newPlan);
+    // Mock data removed - return empty
+    console.log("[plan] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async updateAnnualPlan(id: string, dto: UpdateAnnualPlanDTO): Promise<AnnualPlan> {
@@ -93,15 +91,13 @@ export class PlanService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const arr = plansData.annualPlans as any[];
-    const index = arr.findIndex(p => p.id === id);
-    if (index === -1) throw new Error(`Annual plan ${id} not found`);
-    const updated = { ...arr[index], ...dto, updatedAt: new Date().toISOString() };
-    return this.transformAnnualMock(updated);
+    // Mock data removed - return empty
+    console.log("[plan] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async getQuarterlyPlans(companyId: string, year: number): Promise<QuarterlyPlan[]> {
+    if (!companyId) { console.log("[plan] getQuarterlyPlans - no companyId"); return []; }
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
@@ -127,12 +123,9 @@ export class PlanService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const annualPlan = (plansData.annualPlans as any[]).find(p => p.companyId === companyId && p.year === year);
-    if (!annualPlan) return [];
-    return (plansData.quarterlyPlans as any[])
-      .filter(p => p.annualPlanId === annualPlan.id && p.year === year)
-      .map(p => this.transformQuarterlyMock(p));
+    // Mock data removed - return empty
+    console.log("[plan] No data in Supabase, returning empty");
+    return [];
   }
 
   async getQuarterlyPlan(companyId: string, year: number, quarter: number): Promise<QuarterlyPlan> {
@@ -159,13 +152,13 @@ export class PlanService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const plan = (plansData.quarterlyPlans as any[]).find(p => p.year === year && p.quarter === quarter);
-    if (!plan) throw new Error(`Q${quarter} ${year} plan not found`);
-    return this.transformQuarterlyMock(plan);
+    // Mock data removed - return empty
+    console.log("[plan] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async getMonthlyPlans(companyId: string, year: number, quarter: number): Promise<MonthlyPlan[]> {
+    if (!companyId) { console.log("[plan] getMonthlyPlans - no companyId"); return []; }
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
@@ -200,11 +193,9 @@ export class PlanService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return (plansData.monthlyPlans as any[])
-      .filter(p => p.year === year)
-      .sort((a, b) => a.month - b.month)
-      .map(p => this.transformMonthlyMock(p));
+    // Mock data removed - return empty
+    console.log("[plan] No data in Supabase, returning empty");
+    return [];
   }
 
   async getWeeklyPlans(companyId: string, year: number, month: number): Promise<WeeklyPlan[]> {
@@ -227,12 +218,13 @@ export class PlanService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return (plansData.weeklyPlans as any[])
-      .map(p => this.transformWeeklyMock(p));
+    // Mock data removed - return empty
+    console.log("[plan] No data in Supabase, returning empty");
+    return [];
   }
 
   async getWeeklyPlan(companyId: string, weekStartDate: Date): Promise<WeeklyPlan | null> {
+    if (!companyId) { console.log("[plan] getWeeklyPlan - no companyId"); return null as any; }
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
@@ -250,11 +242,9 @@ export class PlanService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const plan = (plansData.weeklyPlans as any[]).find(
-      p => new Date(p.weekStartDate).getTime() === weekStartDate.getTime()
-    );
-    return plan ? this.transformWeeklyMock(plan) : null;
+    // Mock data removed - return empty
+    console.log("[plan] No data in Supabase, returning empty");
+    return null as any;
   }
 
   async getCurrentWeekPlan(companyId: string): Promise<WeeklyPlan | null> {
@@ -279,8 +269,9 @@ export class PlanService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return (plansData.weeklyPlans as any[]).map(p => this.transformWeeklyMock(p));
+    // Mock data removed - return empty
+    console.log("[plan] No data in Supabase, returning empty");
+    return [];
   }
 
   async getPlansByStatus(companyId: string, status: PlanStatus): Promise<AnnualPlan[]> {
@@ -299,10 +290,9 @@ export class PlanService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return (plansData.annualPlans as any[])
-      .filter(p => p.companyId === companyId && p.status === status)
-      .map(p => this.transformAnnualMock(p));
+    // Mock data removed - return empty
+    console.log("[plan] No data in Supabase, returning empty");
+    return [];
   }
 
   // --- Row mappers ---

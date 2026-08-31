@@ -22,6 +22,7 @@ import {
 import { initiativeService } from '@/services/initiative.service';
 import { taskService } from '@/services/task.service';
 import { planService } from '@/services/plan.service';
+import { updateInitiativeStatusFromTasks } from '@/lib/update-initiative-status';
 import type { Initiative, Task, TaskStatus, WeeklyPlan } from '@/types';
 
 
@@ -177,6 +178,7 @@ export function DailyPlanner() {
           const pDiff = (priorityOrder[a.priority] ?? 3) - (priorityOrder[b.priority] ?? 3);
           return pDiff;
         });
+        console.log("[DailyPlanner] Found", allTasks.length, "tasks for today");
         setTasks(allTasks);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load daily data';
@@ -191,13 +193,24 @@ export function DailyPlanner() {
 
   const handleStatusToggle = async (taskId: string, currentStatus: TaskStatus) => {
     const newStatus = cycleStatus(currentStatus);
+    console.log("[DailyPlanner] Task status toggle:", taskId, currentStatus, "→", newStatus);
+    // Optimistic update
+    setTasks(prev =>
+      prev.map(t => (t.id === taskId ? { ...t, status: newStatus, completedAt: newStatus === 'completed' ? new Date() : t.completedAt } : t))
+    );
     try {
       await taskService.updateTaskStatus(taskId, newStatus);
+      console.log("[DailyPlanner] Status updated successfully");
+      const changedTask = tasks.find(t => t.id === taskId);
+      if (changedTask && (changedTask as any).initiativeId) {
+        updateInitiativeStatusFromTasks((changedTask as any).initiativeId);
+      }
+    } catch (err: any) {
+      console.error('[DailyPlanner] Failed, reverting:', err?.message || err);
       setTasks(prev =>
-        prev.map(t => (t.id === taskId ? { ...t, status: newStatus } : t))
+        prev.map(t => (t.id === taskId ? { ...t, status: currentStatus } : t))
       );
-    } catch (err) {
-      console.error('Failed to update task status:', err);
+      alert(err?.message || "You do not have permission to update this task.");
     }
   };
 

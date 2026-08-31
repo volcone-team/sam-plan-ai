@@ -13,7 +13,6 @@ import type {
   UpdateExpenseDTO,
 } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
-import expensesData from '@/mock-data/expenses.json';
 
 export class ExpenseService {
   async getAllExpenses(): Promise<Expense[]> {
@@ -31,8 +30,9 @@ export class ExpenseService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return expensesData.map(e => this.transformMock(e));
+    // Mock data removed - return empty
+    console.log("[expense] No data in Supabase, returning empty");
+    return [];
   }
 
   async getExpensesByInitiative(initiativeId: string): Promise<Expense[]> {
@@ -51,10 +51,8 @@ export class ExpenseService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return expensesData
-      .filter(e => e.initiativeId === initiativeId)
-      .map(e => this.transformMock(e));
+    console.log("[expense] getTotalExpenses - no data, returning 0");
+    console.log("[expense] getExpensesByInitiative - no data"); return [];
   }
 
   async getExpense(id: string): Promise<Expense> {
@@ -73,10 +71,9 @@ export class ExpenseService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const expense = expensesData.find(e => e.id === id);
-    if (!expense) throw new Error(`Expense ${id} not found`);
-    return this.transformMock(expense);
+    // Mock data removed - return empty
+    console.log("[expense] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async getExpensesByCategory(initiativeId: string, category: ExpenseCategory): Promise<Expense[]> {
@@ -95,10 +92,9 @@ export class ExpenseService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return expensesData
-      .filter(e => e.initiativeId === initiativeId && e.category === category)
-      .map(e => this.transformMock(e));
+    // Mock data removed - return empty
+    console.log("[expense] No data in Supabase, returning empty");
+    console.log("[expense] getExpensesByCategory - no data"); return [];
   }
 
   async getExpensesByDateRange(startDate: Date, endDate: Date): Promise<Expense[]> {
@@ -118,14 +114,9 @@ export class ExpenseService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return expensesData
-      .filter(e => {
-        const d = new Date(e.date);
-        return d >= startDate && d <= endDate;
-      })
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-      .map(e => this.transformMock(e));
+    // Mock data removed - return empty
+    console.log("[expense] No data in Supabase, returning empty");
+    console.log("[expense] getExpensesByDateRange - no data"); return [];
   }
 
   async getTotalSpendByInitiative(initiativeId: string): Promise<number> {
@@ -148,10 +139,9 @@ export class ExpenseService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return expensesData
-      .filter(e => e.category === category)
-      .reduce((sum, e) => sum + e.amount, 0);
+    // Mock data removed - return empty
+    console.log("[expense] No data in Supabase, returning empty");
+    console.log("[expense] getTotalSpendByCategory - no data"); return 0;
   }
 
   async getSpendingBreakdown(): Promise<Array<{ category: ExpenseCategory; total: number; count: number }>> {
@@ -180,12 +170,8 @@ export class ExpenseService {
       } catch { /* fall through */ }
     }
 
-    const breakdown = categories.map(category => ({
-      category,
-      total: expensesData.filter(e => e.category === category).reduce((sum, e) => sum + e.amount, 0),
-      count: expensesData.filter(e => e.category === category).length,
-    }));
-    return breakdown.filter(b => b.total > 0);
+    console.log("[expense] getSpendingBreakdown - no data, returning empty");
+    return [];
   }
 
   async getTotalExpenses(): Promise<number> {
@@ -202,8 +188,9 @@ export class ExpenseService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return expensesData.reduce((sum, e) => sum + e.amount, 0);
+    // Mock data removed - return empty
+    console.log("[expense] No data in Supabase, returning empty");
+    console.log("[expense] getTotalExpenses - no data"); return 0;
   }
 
   async createExpense(dto: CreateExpenseDTO): Promise<Expense> {
@@ -233,16 +220,9 @@ export class ExpenseService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const newExpense = {
-      id: `${Date.now()}`,
-      ...dto,
-      date: dto.date instanceof Date ? dto.date.toISOString() : dto.date,
-      source: 'manual',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    return this.transformMock(newExpense as any);
+    // Mock data removed - return empty
+    console.log("[expense] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async updateExpense(id: string, dto: UpdateExpenseDTO): Promise<Expense> {
@@ -268,11 +248,9 @@ export class ExpenseService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const index = expensesData.findIndex(e => e.id === id);
-    if (index === -1) throw new Error(`Expense ${id} not found`);
-    const updated = { ...expensesData[index], ...dto, updatedAt: new Date().toISOString() };
-    return this.transformMock(updated as any);
+    // Mock data removed - return empty
+    console.log("[expense] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async deleteExpense(id: string): Promise<void> {
@@ -284,19 +262,33 @@ export class ExpenseService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const index = expensesData.findIndex(e => e.id === id);
-    if (index === -1) throw new Error(`Expense ${id} not found`);
-    expensesData.splice(index, 1);
+    // Mock data removed - return empty
+    console.log("[expense] No data in Supabase, returning empty");
+    console.log("[expense] No data"); return;
   }
 
   async getAverageSpendPerInitiative(initiativeIds: string[]): Promise<number> {
-    const totals = await Promise.all(initiativeIds.map(id => this.getTotalSpendByInitiative(id)));
-    const sum = totals.reduce((a, b) => a + b, 0);
-    return initiativeIds.length > 0 ? sum / initiativeIds.length : 0;
+    if (!initiativeIds.length) return 0;
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('expenses')
+          .select('amount')
+          .in('initiative_id', initiativeIds);
+
+        if (!error && data) {
+          const total = data.reduce((sum, e) => sum + Number(e.amount), 0);
+          console.log("[expense] getAverageSpendPerInitiative:", total / initiativeIds.length);
+          return initiativeIds.length > 0 ? total / initiativeIds.length : 0;
+        }
+      } catch { /* fall through */ }
+    }
+    console.log("[expense] getAverageSpendPerInitiative - no data, returning 0");
+    return 0;
   }
 
-  async getHighestSpendCategory(): Promise<{ category: ExpenseCategory; total: number } | null> {
+    async getHighestSpendCategory(): Promise<{ category: ExpenseCategory; total: number } | null> {
     const breakdown = await this.getSpendingBreakdown();
     return breakdown.length > 0 ? breakdown.reduce((a, b) => (a.total > b.total ? a : b)) : null;
   }
@@ -326,18 +318,9 @@ export class ExpenseService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const map = new Map<number, number>();
-    expensesData.forEach(e => {
-      const d = new Date(e.date);
-      if (d.getFullYear() === year) {
-        const month = d.getMonth() + 1;
-        map.set(month, (map.get(month) || 0) + e.amount);
-      }
-    });
-    return Array.from(map)
-      .map(([month, total]) => ({ month, total }))
-      .sort((a, b) => a.month - b.month);
+    // Mock data removed - return empty
+    console.log("[expense] No data in Supabase, returning empty");
+    console.log("[expense] getMonthlySpenDTrend - no data"); return [];
   }
 
   private mapRow(row: Record<string, unknown>): Expense {
@@ -356,21 +339,7 @@ export class ExpenseService {
     };
   }
 
-  private transformMock(data: any): Expense {
-    return {
-      id: data.id,
-      companyId: data.companyId,
-      initiativeId: data.initiativeId,
-      category: data.category as ExpenseCategory,
-      description: data.description || '',
-      amount: data.amount,
-      date: new Date(data.date),
-      source: data.source || 'manual',
-      sourceDetails: data.sourceDetails,
-      createdAt: new Date(data.createdAt),
-      updatedAt: new Date(data.updatedAt),
-    };
-  }
+
 
   private delay(ms: number = 50): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, Math.random() * ms));

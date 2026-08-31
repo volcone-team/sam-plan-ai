@@ -15,7 +15,6 @@ import type {
   UpdateBenchmarkDTO,
 } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
-import benchmarksData from '@/mock-data/benchmarks.json';
 
 export class BenchmarkService {
   async getAllBenchmarks(): Promise<Benchmark[]> {
@@ -33,8 +32,9 @@ export class BenchmarkService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return benchmarksData.map(b => this.transformMock(b));
+    // Mock data removed - return empty
+    console.log("[benchmark] No data in Supabase, returning empty");
+    return [];
   }
 
   async getBenchmarksByInitiativeType(initiativeTypeId: string): Promise<Benchmark[]> {
@@ -53,10 +53,9 @@ export class BenchmarkService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return benchmarksData
-      .filter(b => b.initiativeTypeId === initiativeTypeId)
-      .map(b => this.transformMock(b));
+    // Mock data removed - return empty
+    console.log("[benchmark] No data in Supabase, returning empty");
+    console.log("[benchmark] No data, returning []"); return [];
   }
 
   async getConversionBenchmarks(initiativeTypeId: string): Promise<ConversionBenchmark[]> {
@@ -76,10 +75,9 @@ export class BenchmarkService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return benchmarksData
-      .filter(b => b.initiativeTypeId === initiativeTypeId && 'fieldName' in b)
-      .map(b => this.transformMock(b) as ConversionBenchmark);
+    // Mock data removed - return empty
+    console.log("[benchmark] No data in Supabase, returning empty");
+    console.log("[benchmark] No data, returning []"); return [];
   }
 
   async getCostBenchmarks(initiativeTypeId: string): Promise<CostBenchmark[]> {
@@ -99,10 +97,9 @@ export class BenchmarkService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return benchmarksData
-      .filter(b => b.initiativeTypeId === initiativeTypeId && 'costMetric' in b)
-      .map(b => this.transformMock(b) as CostBenchmark);
+    // Mock data removed - return empty
+    console.log("[benchmark] No data in Supabase, returning empty");
+    console.log("[benchmark] No data, returning []"); return [];
   }
 
   async getBenchmark(id: string): Promise<Benchmark> {
@@ -119,10 +116,9 @@ export class BenchmarkService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const benchmark = benchmarksData.find(b => b.id === id);
-    if (!benchmark) throw new Error(`Benchmark ${id} not found`);
-    return this.transformMock(benchmark);
+    // Mock data removed - return empty
+    console.log("[benchmark] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async getBenchmarkByMetric(initiativeTypeId: string, fieldName: string): Promise<ConversionBenchmark | null> {
@@ -142,11 +138,9 @@ export class BenchmarkService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const b = benchmarksData.find(
-      b => b.initiativeTypeId === initiativeTypeId && (b as any).fieldName === fieldName
-    );
-    return b ? this.transformMock(b) as ConversionBenchmark : null;
+    // Mock data removed - return empty
+    console.log("[benchmark] No data in Supabase, returning empty");
+    return null as any;
   }
 
   async getBenchmarkByCostMetric(initiativeTypeId: string, costMetric: string): Promise<CostBenchmark | null> {
@@ -167,11 +161,9 @@ export class BenchmarkService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const b = benchmarksData.find(
-      b => b.initiativeTypeId === initiativeTypeId && (b as any).costMetric === costMetric
-    );
-    return b ? this.transformMock(b) as CostBenchmark : null;
+    // Mock data removed - return empty
+    console.log("[benchmark] No data in Supabase, returning empty");
+    return null as any;
   }
 
   async getBenchmarksBySource(source: 'first_party' | 'partner_shared' | 'published' | 'industry_report'): Promise<Benchmark[]> {
@@ -190,10 +182,9 @@ export class BenchmarkService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return benchmarksData
-      .filter(b => b.source === source)
-      .map(b => this.transformMock(b));
+    // Mock data removed - return empty
+    console.log("[benchmark] No data in Supabase, returning empty");
+    console.log("[benchmark] No data, returning []"); return [];
   }
 
   async createConversionBenchmark(dto: CreateConversionBenchmarkDTO): Promise<ConversionBenchmark> {
@@ -223,9 +214,9 @@ export class BenchmarkService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const newB = { id: `${Date.now()}`, ...dto, isActive: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    return this.transformMock(newB as any) as ConversionBenchmark;
+    // Mock data removed - return empty
+    console.log("[benchmark] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async createCostBenchmark(dto: CreateCostBenchmarkDTO): Promise<CostBenchmark> {
@@ -255,9 +246,9 @@ export class BenchmarkService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const newB = { id: `${Date.now()}`, ...dto, isActive: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    return this.transformMock(newB as any) as CostBenchmark;
+    // Mock data removed - return empty
+    console.log("[benchmark] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async updateBenchmark(id: string, dto: UpdateBenchmarkDTO): Promise<Benchmark> {
@@ -285,11 +276,9 @@ export class BenchmarkService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const index = benchmarksData.findIndex(b => b.id === id);
-    if (index === -1) throw new Error(`Benchmark ${id} not found`);
-    const updated = { ...benchmarksData[index], ...dto, updatedAt: new Date().toISOString() };
-    return this.transformMock(updated as any);
+    // Mock data removed - return empty
+    console.log("[benchmark] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async getConservativeEstimate(initiativeTypeId: string, fieldName: string): Promise<number | null> {

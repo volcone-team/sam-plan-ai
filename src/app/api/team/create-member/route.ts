@@ -23,9 +23,9 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!["operator", "viewer"].includes(role)) {
+    if (!["operator", "team_member", "viewer"].includes(role)) {
       return NextResponse.json(
-        { error: "Role must be 'operator' or 'viewer'." },
+        { error: "Role must be 'operator', 'team_member', or 'viewer'." },
         { status: 400 }
       );
     }

@@ -1,5 +1,6 @@
 'use client';
 import { useCompanyId } from '@/hooks/use-auth';
+import { usePermissions } from '@/hooks/use-permission';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -15,6 +16,10 @@ const ANNUAL_PLAN_ID = '7a8b9c0d-e1f2-43a4-9b5c-6d7e8f9a0b1c';
 
 export default function InitiativesPage() {
   const companyId = useCompanyId() || "";
+  const { canCreate, canDelete } = usePermissions({
+    canCreate: 'initiatives.create',
+    canDelete: 'initiatives.delete',
+  });
   const router = useRouter();
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [initiativeTypes, setInitiativeTypes] = useState<Array<{ id: string; name: string }>>([]);
@@ -88,6 +93,7 @@ export default function InitiativesPage() {
         title="Initiatives"
         description="Manage your revenue-driving initiatives"
         actions={
+          canCreate ? (
           <button
             onClick={() => setAddPanelOpen(true)}
             className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2.5 text-sm font-medium text-[hsl(var(--primary-foreground))] transition-colors hover:bg-[hsl(var(--primary))]/90"
@@ -95,6 +101,7 @@ export default function InitiativesPage() {
             <Plus className="h-4 w-4" />
             Add Initiative
           </button>
+          ) : null
         }
       />
       <InitiativesList
@@ -104,7 +111,7 @@ export default function InitiativesPage() {
         loading={loading}
         error={error}
         onInitiativeClick={handleInitiativeClick}
-        onRemoveInitiative={handleRemoveInitiative}
+        onRemoveInitiative={canDelete ? handleRemoveInitiative : undefined}
       />
 
       <AddInitiativePanel

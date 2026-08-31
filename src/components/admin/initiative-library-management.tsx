@@ -523,16 +523,31 @@ export function InitiativeLibraryManagement() {
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Load initiative types on mount
+  // Load initiative types from admin API
   useEffect(() => {
     async function load() {
       try {
-        const data = await initiativeTypeService.getAllInitiativeTypes();
-        // Also include inactive types for admin
-        const allData = await loadAllIncludingInactive();
-        setTypes(allData.length > 0 ? allData : data);
-      } catch {
-        setTypes([]);
+        console.log("[InitiativeLibrary] Loading from /api/admin/initiative-types...");
+        const res = await fetch("/api/admin/initiative-types");
+        const data = await res.json();
+
+        if (!res.ok) {
+          console.error("[InitiativeLibrary] API error:", data.error);
+          // Fallback to service
+          const fallback = await initiativeTypeService.getAllInitiativeTypes();
+          setTypes(fallback);
+        } else {
+          console.log("[InitiativeLibrary] Loaded", data.types?.length, "types from API");
+          setTypes((data.types || []).map((t: any) => ({
+            ...t,
+            createdAt: new Date(t.createdAt),
+            updatedAt: new Date(t.updatedAt),
+          })));
+        }
+      } catch (err) {
+        console.error("[InitiativeLibrary] Fetch error:", err);
+        const fallback = await initiativeTypeService.getAllInitiativeTypes();
+        setTypes(fallback);
       } finally {
         setLoading(false);
         setMounted(true);
@@ -540,13 +555,6 @@ export function InitiativeLibraryManagement() {
     }
     load();
   }, []);
-
-  // Persist to localStorage whenever types change (after mount)
-  useEffect(() => {
-    if (mounted && types.length > 0) {
-      saveToLocalStorage(types);
-    }
-  }, [types, mounted]);
 
   const filteredTypes = types.filter((t) => {
     if (tierFilter === "all") return true;
@@ -562,75 +570,116 @@ export function InitiativeLibraryManagement() {
 
   const handleSave = useCallback(async (id: string, data: FormData) => {
     try {
-      await initiativeTypeService.updateInitiativeType(id, {
-        name: data.name,
-        description: data.description,
-        benchmarks: data.benchmarks,
-        difficulty: data.difficulty,
-        aiContext: {
-          description: data.aiContext.description,
-          sizingGuidance: data.aiContext.sizingGuidance,
-          recommendationWeights: data.aiContext.recommendationWeights,
-        },
-        isActive: data.isActive,
+      console.log("[InitiativeLibrary] Saving type:", id, "name:", data.name);
+      const res = await fetch(`/api/admin/initiative-types/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: data.name,
+          channel: data.channel,
+          description: data.description,
+          benchmarks: data.benchmarks,
+          difficulty: data.difficulty,
+          aiContext: {
+            description: data.aiContext.description,
+            sizingGuidance: data.aiContext.sizingGuidance,
+            recommendationWeights: data.aiContext.recommendationWeights,
+          },
+          tier: data.tier,
+          isActive: data.isActive,
+        }),
       });
+      const json = await res.json();
+      if (!res.ok) {
+        console.error("[InitiativeLibrary] Save error:", json.error);
+        return;
+      }
+      console.log("[InitiativeLibrary] Saved successfully:", json.type?.name);
       // Update local state
       setTypes((prev) =>
         prev.map((t) =>
           t.id === id
-            ? { ...t, name: data.name, channel: data.channel, description: data.description, tier: data.tier, isActive: data.isActive, benchmarks: data.benchmarks, difficulty: data.difficulty, aiContext: { description: data.aiContext.description, sizingGuidance: data.aiContext.sizingGuidance, recommendationWeights: data.aiContext.recommendationWeights }, updatedAt: new Date() }
+            ? { ...t, ...json.type, createdAt: new Date(json.type.createdAt), updatedAt: new Date(json.type.updatedAt) }
             : t
         )
       );
       setExpandedId(null);
     } catch (err) {
-      console.error("Failed to save:", err);
+      console.error("[InitiativeLibrary] Save failed:", err);
     }
   }, []);
 
   const handleCreate = useCallback(async (data: FormData) => {
     try {
-      const created = await initiativeTypeService.createInitiativeType({
-        name: data.name,
-        channel: data.channel,
-        description: data.description,
-        benchmarks: data.benchmarks,
-        projectTemplate: { tasks: [], totalEstimatedHours: 0 },
-        difficulty: data.difficulty,
-        aiContext: {
-          description: data.aiContext.description,
-          sizingGuidance: data.aiContext.sizingGuidance,
-          recommendationWeights: data.aiContext.recommendationWeights,
-        },
-        tier: data.tier,
+      console.log("[InitiativeLibrary] Creating type:", data.name, "channel:", data.channel);
+      const res = await fetch("/api/admin/initiative-types", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: data.name,
+          channel: data.channel,
+          description: data.description,
+          benchmarks: data.benchmarks,
+          projectTemplate: { tasks: [], totalEstimatedHours: 0 },
+          difficulty: data.difficulty,
+          aiContext: {
+            description: data.aiContext.description,
+            sizingGuidance: data.aiContext.sizingGuidance,
+            recommendationWeights: data.aiContext.recommendationWeights,
+          },
+          tier: data.tier,
+        }),
       });
-      setTypes((prev) => [...prev, created]);
+      const json = await res.json();
+      if (!res.ok) {
+        console.error("[InitiativeLibrary] Create error:", json.error);
+        return;
+      }
+      console.log("[InitiativeLibrary] Created:", json.type?.id, json.type?.name);
+      setTypes((prev) => [...prev, { ...json.type, createdAt: new Date(json.type.createdAt), updatedAt: new Date(json.type.updatedAt) }]);
       setShowAddForm(false);
     } catch (err) {
-      console.error("Failed to create:", err);
+      console.error("[InitiativeLibrary] Create failed:", err);
     }
   }, []);
 
   const handleDelete = useCallback(async (id: string) => {
     try {
-      // Remove from service (in-memory mock)
-      await initiativeTypeService.updateInitiativeType(id, { isActive: false });
+      console.log("[InitiativeLibrary] Deleting type:", id);
+      const res = await fetch(`/api/admin/initiative-types/${id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok) {
+        console.error("[InitiativeLibrary] Delete error:", json.error);
+        return;
+      }
+      console.log("[InitiativeLibrary] Deleted (deactivated):", id);
       setTypes((prev) => prev.filter((t) => t.id !== id));
       setDeleteConfirmId(null);
       if (expandedId === id) setExpandedId(null);
     } catch (err) {
-      console.error("Failed to delete:", err);
+      console.error("[InitiativeLibrary] Delete failed:", err);
     }
   }, [expandedId]);
 
   const handleToggleActive = useCallback(async (id: string, isActive: boolean) => {
     try {
-      await initiativeTypeService.updateInitiativeType(id, { isActive });
+      console.log("[InitiativeLibrary] Toggle active:", id, "->", isActive);
+      const res = await fetch(`/api/admin/initiative-types/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        console.error("[InitiativeLibrary] Toggle error:", json.error);
+        return;
+      }
+      console.log("[InitiativeLibrary] Toggled:", id, "active:", isActive);
       setTypes((prev) =>
         prev.map((t) => (t.id === id ? { ...t, isActive, updatedAt: new Date() } : t))
       );
     } catch (err) {
-      console.error("Failed to toggle:", err);
+      console.error("[InitiativeLibrary] Toggle failed:", err);
     }
   }, []);
 

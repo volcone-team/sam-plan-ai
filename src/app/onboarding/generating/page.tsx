@@ -108,7 +108,18 @@ export default function GeneratingPage() {
             });
         await planningService.completePlanningInput(saved.id);
 
-        // 2. Generate the plan. Read as text first so a non-JSON error
+        // 2. Reset old plan data before regenerating
+        console.log("[generating] Resetting old plan data...");
+        const resetRes = await fetch("/api/plan/reset", { method: "DELETE" });
+        if (resetRes.ok) {
+          console.log("[generating] Plan reset successful");
+        } else {
+          const resetData = await resetRes.json().catch(() => ({}));
+          console.warn("[generating] Plan reset partial/failed:", resetData.error || resetRes.status);
+          // Non-fatal: continue with generation even if reset partially fails
+        }
+
+        // 3. Generate the plan. Read as text first so a non-JSON error
         //    response (crash, gateway timeout) still yields a real message.
         const res = await fetch("/api/generate-plan", {
           method: "POST",

@@ -14,7 +14,6 @@ import type {
   InitiativeKind,
 } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
-import initiativesData from '@/mock-data/initiatives.json';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -23,6 +22,10 @@ export class InitiativeService {
    * Get all initiatives for a company
    */
   async getInitiativesByCompany(companyId: string): Promise<Initiative[]> {
+    if (!companyId) {
+      console.log("[initiative] getInitiativesByCompany - no companyId, returning []");
+      return [];
+    }
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
@@ -40,10 +43,9 @@ export class InitiativeService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    return initiativesData
-      .filter(i => i.companyId === companyId)
-      .map(i => this.transformMockData(i));
+    // Mock data removed - return empty
+    console.log("[initiative] No data in Supabase, returning empty");
+    console.log("[initiative] No data, returning []"); return [];
   }
 
   /**
@@ -67,10 +69,9 @@ export class InitiativeService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    const initiative = initiativesData.find(i => i.id === id);
-    if (!initiative) throw new Error(`Initiative ${id} not found`);
-    return this.transformMockData(initiative);
+    // Mock data removed - return empty
+    console.log("[initiative] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   /**
@@ -95,10 +96,9 @@ export class InitiativeService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    return initiativesData
-      .filter(i => i.companyId === companyId && i.status === status)
-      .map(i => this.transformMockData(i));
+    // Mock data removed - return empty
+    console.log("[initiative] No data in Supabase, returning empty");
+    console.log("[initiative] No data, returning []"); return [];
   }
 
   /**
@@ -123,11 +123,9 @@ export class InitiativeService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    const activeStatuses: InitiativeStatus[] = ['planned', 'in_progress', 'launched'];
-    return initiativesData
-      .filter(i => i.companyId === companyId && activeStatuses.includes(i.status as InitiativeStatus))
-      .map(i => this.transformMockData(i));
+    // Mock data removed - return empty
+    console.log("[initiative] No data in Supabase, returning empty");
+    console.log("[initiative] No data, returning []"); return [];
   }
 
   /**
@@ -151,10 +149,9 @@ export class InitiativeService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    return initiativesData
-      .filter(i => i.companyId === companyId && i.initiativeTypeId === initiativeTypeId)
-      .map(i => this.transformMockData(i));
+    // Mock data removed - return empty
+    console.log("[initiative] No data in Supabase, returning empty");
+    console.log("[initiative] No data, returning []"); return [];
   }
 
   /**
@@ -178,10 +175,9 @@ export class InitiativeService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    return initiativesData
-      .filter(i => i.companyId === companyId && i.kind === kind)
-      .map(i => this.transformMockData(i));
+    // Mock data removed - return empty
+    console.log("[initiative] No data in Supabase, returning empty");
+    console.log("[initiative] No data, returning []"); return [];
   }
 
   /**
@@ -205,16 +201,19 @@ export class InitiativeService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    return initiativesData
-      .filter(i => i.companyId === companyId && i.productId === productId)
-      .map(i => this.transformMockData(i));
+    // Mock data removed - return empty
+    console.log("[initiative] No data in Supabase, returning empty");
+    console.log("[initiative] No data, returning []"); return [];
   }
 
   /**
    * Get initiatives within a date range
    */
   async getInitiativesByDateRange(companyId: string, startDate: Date, endDate: Date): Promise<Initiative[]> {
+    if (!companyId) {
+      console.log("[initiative] getInitiativesByDateRange - no companyId, returning []");
+      return [];
+    }
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
@@ -236,17 +235,9 @@ export class InitiativeService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    return initiativesData
-      .filter(i => {
-        if (i.companyId !== companyId) return false;
-        const activation = new Date(i.activationDate);
-        const event = i.eventDate ? new Date(i.eventDate) : null;
-        if (i.kind === 'evergreen') return activation <= endDate;
-        if (event) return activation <= endDate && event >= startDate;
-        return activation <= endDate;
-      })
-      .map(i => this.transformMockData(i));
+    // Mock data removed - return empty
+    console.log("[initiative] No data in Supabase, returning empty");
+    return [];
   }
 
   /**
@@ -326,16 +317,9 @@ export class InitiativeService {
       return this.mapRowToInitiative(data);
     }
 
-    await this.delay();
-    const newInit = {
-      id: `${Date.now()}`,
-      ...dto,
-      status: 'planned' as InitiativeStatus,
-      actualSpend: 0,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    return this.transformMockData(newInit as any);
+    // Mock data removed - return empty
+    console.log("[initiative] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async updateInitiative(id: string, dto: UpdateInitiativeDTO): Promise<Initiative> {
@@ -374,11 +358,9 @@ export class InitiativeService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    const index = initiativesData.findIndex(i => i.id === id);
-    if (index === -1) throw new Error(`Initiative ${id} not found`);
-    const updated = { ...initiativesData[index], ...dto, updatedAt: new Date().toISOString() };
-    return this.transformMockData(updated as any);
+    // Mock data removed - return empty
+    console.log("[initiative] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async updateInitiativeStatus(id: string, status: InitiativeStatus): Promise<Initiative> {
@@ -418,15 +400,9 @@ export class InitiativeService {
       return;
     }
 
-    await this.delay();
-    const index = initiativesData.findIndex(i => i.id === id);
-    if (index === -1) throw new Error(`Initiative ${id} not found`);
-    initiativesData.splice(index, 1);
-  }
-
-  calculateROI(revenue: number, spend: number): number | null {
-    if (spend === 0) return null;
-    return ((revenue - spend) / spend) * 100;
+    // Mock data removed - return empty
+    console.log("[initiative] No data in Supabase, returning empty");
+    console.log("[initiative] No data"); return;
   }
 
   /**
@@ -459,31 +435,6 @@ export class InitiativeService {
     } as Initiative;
   }
 
-  /**
-   * Transform mock JSON to Initiative
-   */
-  private transformMockData(data: typeof initiativesData[0]): Initiative {
-    return {
-      id: data.id,
-      companyId: data.companyId,
-      annualPlanId: (data as any).annualPlanId || '',
-      initiativeTypeId: data.initiativeTypeId,
-      productId: data.productId,
-      name: data.name,
-      description: data.description,
-      kind: data.kind as InitiativeKind,
-      status: data.status as InitiativeStatus,
-      activationDate: new Date(data.activationDate),
-      eventDate: data.eventDate ? new Date(data.eventDate) : undefined,
-      trafficInput: (data as any).trafficInput,
-      revenueScenarios: data.revenueScenarios,
-      plannedBudget: data.plannedBudget,
-      actualSpend: data.actualSpend,
-      displayOrder: (data as any).displayOrder || 0,
-      createdAt: new Date(data.createdAt),
-      updatedAt: new Date(data.updatedAt),
-    } as Initiative;
-  }
 
   private delay(ms: number = 50): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, Math.random() * ms));

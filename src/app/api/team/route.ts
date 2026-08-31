@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 /**
@@ -25,30 +26,45 @@ export async function GET() {
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
+      console.log("[team] GET - No user session");
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    console.log("[team] GET - User:", user.email);
+
+    // Use service role to bypass RLS for reliable lookup
+    const adminClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
     // Get current user's company
-    const { data: profile } = await supabase
+    const { data: profile, error: profileErr } = await adminClient
       .from("profiles")
-      .select("company_id")
+      .select("company_id, role")
       .eq("id", user.id)
       .single();
 
-    if (!profile?.company_id) {
+    if (profileErr || !profile?.company_id) {
+      console.log("[team] GET - No profile/company:", profileErr?.message);
       return NextResponse.json({ error: "No company found." }, { status: 400 });
     }
 
+    console.log("[team] GET - Company:", profile.company_id, "| Role:", profile.role);
+
     // Get all members of this company
-    const { data: members, error } = await supabase
+    const { data: members, error } = await adminClient
       .from("profiles")
       .select("id, email, first_name, last_name, role, is_active, created_at")
       .eq("company_id", profile.company_id)
       .order("created_at", { ascending: true });
 
     if (error) {
+      console.error("[team] GET - Query error:", error.message);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    console.log("[team] GET - Found", members?.length || 0, "members");
 
     return NextResponse.json({
       members: (members || []).map((m) => ({
@@ -62,7 +78,7 @@ export async function GET() {
       })),
     });
   } catch (err: any) {
-    console.error("[team] Error:", err?.message || err);
+    console.error("[team] GET Error:", err?.message || err);
     return NextResponse.json({ error: err?.message || "Internal error" }, { status: 500 });
   }
 }

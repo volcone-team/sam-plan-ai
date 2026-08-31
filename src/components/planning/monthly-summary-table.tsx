@@ -19,7 +19,7 @@ import { initiativeService } from '@/services/initiative.service';
 import { exportToCSV } from '@/lib/csv-export';
 import type { Initiative, Projection } from '@/types';
 
-const YEAR = 2026;
+const YEAR = new Date().getFullYear();
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',

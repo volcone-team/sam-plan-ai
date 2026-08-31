@@ -21,7 +21,7 @@ import { resultService } from '@/services/result.service';
 import { QuarterlySummaryTable } from './quarterly-summary-table';
 import type { QuarterlyPlan, Initiative, Projection } from '@/types';
 
-const YEAR = 2026;
+const YEAR = new Date().getFullYear();
 
 const QUARTER_MONTHS: Record<number, number[]> = {
   1: [1, 2, 3],

@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuth } from '@/hooks/use-auth';
+import { useTheme } from 'next-themes';
 
 import { useState, useEffect } from 'react';
 import { Save, CheckCircle } from 'lucide-react';
@@ -18,7 +19,8 @@ interface ProfileFormData {
 }
 
 export function UserProfile() {
-  const { userId, firstName, lastName, email, loading: authLoading } = useAuth();
+  const { userId, firstName, lastName, email, role: authRole, loading: authLoading } = useAuth();
+  const { theme: currentTheme, setTheme } = useTheme();
   const [formData, setFormData] = useState<ProfileFormData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -28,52 +30,30 @@ export function UserProfile() {
     if (authLoading) return;
 
     async function loadUser() {
-      // Theme is a local UI preference only.
-      let theme: ProfileFormData['theme'] = 'system';
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) theme = (JSON.parse(saved).theme as ProfileFormData['theme']) ?? 'system';
-      } catch { /* ignore malformed cache */ }
+      // Theme's source of truth is next-themes (falls back to 'system').
+      const theme = (currentTheme as ProfileFormData['theme']) || 'system';
 
-      // Identity always comes from the signed-in user's profile row.
-      let role = 'Owner';
-      if (userId) {
-        try {
-          const me: User = await userService.getUser(userId);
-          setFormData({
-            firstName: me.firstName || firstName || '',
-            lastName: me.lastName || lastName || '',
-            email: me.email || email || '',
-            role: me.role || role,
-            theme,
-          });
-          setLoading(false);
-          return;
-        } catch {
-          // Fall back to the auth/profile values we already have.
-        }
-      }
-
+      // Role comes from the shared auth context (reads profiles.role once).
+      // Do NOT default to Owner — that misrepresented viewers/operators.
+      const resolvedRole = authRole || 'viewer';
       setFormData({
         firstName: firstName || '',
         lastName: lastName || '',
         email: email || '',
-        role,
+        role: resolvedRole,
         theme,
       });
       setLoading(false);
     }
 
     loadUser();
-  }, [authLoading, userId, firstName, lastName, email]);
+  }, [authLoading, userId, firstName, lastName, email, authRole, currentTheme]);
 
   const handleSave = async () => {
     if (!formData) return;
     setSaveError(null);
 
-    // Theme stays local; name changes are persisted to the profile row.
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ theme: formData.theme }));
-
+    // Theme is applied live via next-themes (which persists it itself).
     if (userId) {
       try {
         await userService.updateUser(userId, {
@@ -169,19 +149,23 @@ export function UserProfile() {
           />
         </div>
 
-        {/* Role */}
+        {/* Access Role (set by company owner, not editable here) */}
         <div className="space-y-2">
-          <label className="text-sm font-medium">Role</label>
-          <select
-            value={formData.role}
-            onChange={e => handleChange('role', e.target.value)}
-            className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))] focus:ring-1 focus:ring-[hsl(var(--primary))]"
-          >
-            <option value="Founder">Founder</option>
-            <option value="Operator">Operator</option>
-            <option value="Marketing Director">Marketing Director</option>
-            <option value="Team Member">Team Member</option>
-          </select>
+          <label className="text-sm font-medium">Access Role</label>
+          <div className="flex items-center gap-2 rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))] px-3 py-2 text-sm">
+            <span className="capitalize font-medium">{formData.role.replace('_', ' ')}</span>
+            <span className="text-xs text-[hsl(var(--foreground-muted))]">
+              {formData.role === 'owner' && '— Full access + team management'}
+              {formData.role === 'operator' && '— Can edit plans, initiatives, and tasks'}
+              {formData.role === 'team_member' && '— Can complete tasks and log results'}
+              {formData.role === 'viewer' && '— Read-only access'}
+            </span>
+          </div>
+          {formData.role !== 'owner' && (
+            <p className="text-xs text-[hsl(var(--foreground-muted))]">
+              Contact your company owner to change your access role.
+            </p>
+          )}
         </div>
       </div>
 
@@ -196,7 +180,12 @@ export function UserProfile() {
                 name="theme"
                 value={theme}
                 checked={formData.theme === theme}
-                onChange={e => handleChange('theme', e.target.value)}
+                onChange={e => {
+                  const next = e.target.value as ProfileFormData['theme'];
+                  console.log('[UserProfile] Theme changed to:', next);
+                  handleChange('theme', next);
+                  setTheme(next); // apply immediately via next-themes
+                }}
                 className="h-4 w-4 accent-[hsl(var(--primary))]"
               />
               <span className="text-sm capitalize">{theme}</span>

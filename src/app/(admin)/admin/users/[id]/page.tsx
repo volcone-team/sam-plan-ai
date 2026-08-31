@@ -1,8 +1,12 @@
 "use client";
 
+import { useParams } from "next/navigation";
 import { UserDetail } from "@/components/admin/user-detail";
 
 export default function AdminUserDetailPage() {
+  const params = useParams();
+  const userId = params.id as string;
+
   return (
     <div>
       <div className="mb-6">
@@ -13,7 +17,7 @@ export default function AdminUserDetailPage() {
           View and manage user profile
         </p>
       </div>
-      <UserDetail />
+      <UserDetail userId={userId} />
     </div>
   );
 }

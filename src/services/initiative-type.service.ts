@@ -12,7 +12,6 @@ import type {
   UpdateInitiativeTypeDTO,
 } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
-import initiativeTypesData from '@/mock-data/initiative-types.json';
 
 export class InitiativeTypeService {
   /**
@@ -35,11 +34,9 @@ export class InitiativeTypeService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return initiativeTypesData
-      .filter((t: any) => t.isActive !== false)
-      .sort((a: any, b: any) => a.tier !== b.tier ? a.tier - b.tier : (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
-      .map((t: any) => this.transformMockData(t));
+    // Mock data removed - return empty
+    console.log("[initiative_type] No data in Supabase, returning empty");
+    console.log("[initiative-type] No data, returning []"); return [];
   }
 
   /**
@@ -62,11 +59,9 @@ export class InitiativeTypeService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return initiativeTypesData
-      .filter((t: any) => t.tier === tier && t.isActive !== false)
-      .sort((a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
-      .map((t: any) => this.transformMockData(t));
+    // Mock data removed - return empty
+    console.log("[initiative_type] No data in Supabase, returning empty");
+    console.log("[initiative-type] No data, returning []"); return [];
   }
 
   async getTier1InitiativeTypes(): Promise<InitiativeType[]> {
@@ -100,10 +95,9 @@ export class InitiativeTypeService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const type = initiativeTypesData.find((t: any) => t.id === id);
-    if (!type) throw new Error(`Initiative type ${id} not found`);
-    return this.transformMockData(type);
+    // Mock data removed - return empty
+    console.log("[initiative_type] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   /**
@@ -126,11 +120,9 @@ export class InitiativeTypeService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return initiativeTypesData
-      .filter((t: any) => t.channel === channel && t.isActive !== false)
-      .sort((a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
-      .map((t: any) => this.transformMockData(t));
+    // Mock data removed - return empty
+    console.log("[initiative_type] No data in Supabase, returning empty");
+    console.log("[initiative-type] No data, returning []"); return [];
   }
 
   async getActiveInitiativeTypes(): Promise<InitiativeType[]> {
@@ -170,16 +162,9 @@ export class InitiativeTypeService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const newType = {
-      id: `${Date.now()}`,
-      ...dto,
-      owner: 'user' as const,
-      isActive: true,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    return this.transformMockData(newType);
+    // Mock data removed - return empty
+    console.log("[initiative_type] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   /**
@@ -214,11 +199,9 @@ export class InitiativeTypeService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const index = initiativeTypesData.findIndex((t: any) => t.id === id);
-    if (index === -1) throw new Error(`Initiative type ${id} not found`);
-    const updated = { ...(initiativeTypesData[index] as any), ...dto, updatedAt: new Date().toISOString() };
-    return this.transformMockData(updated);
+    // Mock data removed - return empty
+    console.log("[initiative_type] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async deactivateInitiativeType(id: string): Promise<InitiativeType> {
@@ -247,27 +230,7 @@ export class InitiativeTypeService {
     };
   }
 
-  /**
-   * Transform mock JSON to InitiativeType
-   */
-  private transformMockData(data: any): InitiativeType {
-    return {
-      id: data.id,
-      name: data.name,
-      channel: data.channel,
-      description: data.description,
-      owner: data.owner || 'system',
-      benchmarks: data.benchmarks,
-      projectTemplate: data.projectTemplate,
-      difficulty: data.difficulty,
-      aiContext: data.aiContext,
-      tier: data.tier || 1,
-      displayOrder: data.displayOrder ?? 0,
-      isActive: data.isActive !== false,
-      createdAt: new Date(data.createdAt),
-      updatedAt: new Date(data.updatedAt),
-    };
-  }
+  
 
   private delay(ms: number = 50): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, Math.random() * ms));

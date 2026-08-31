@@ -24,7 +24,7 @@ import { resultService } from '@/services/result.service';
 import { MonthlySummaryTable } from './monthly-summary-table';
 import type { MonthlyPlan, Initiative, Projection, Result } from '@/types';
 
-const YEAR = 2026;
+const YEAR = new Date().getFullYear();
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',

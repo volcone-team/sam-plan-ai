@@ -15,10 +15,10 @@ import type {
   UpdateProjectionDTO,
 } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
-import projectionsData from '@/mock-data/projections.json';
 
 export class ProjectionService {
   async getProjectionsByCompany(companyId: string): Promise<Projection[]> {
+    if (!companyId) { console.log("[projection] getProjectionsByCompany - no companyId"); return []; }
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
@@ -33,10 +33,9 @@ export class ProjectionService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return projectionsData
-      .filter(p => p.companyId === companyId)
-      .map(p => this.transformMock(p));
+    // Mock data removed - return empty
+    console.log("[projection] No data in Supabase, returning empty");
+    console.log("[projection] No data, returning []"); return [];
   }
 
   async getProjectionsByScenario(companyId: string, scenario: ScenarioType): Promise<Projection[]> {
@@ -55,10 +54,9 @@ export class ProjectionService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    return projectionsData
-      .filter(p => p.companyId === companyId && p.scenario === scenario)
-      .map(p => this.transformMock(p));
+    // Mock data removed - return empty
+    console.log("[projection] No data in Supabase, returning empty");
+    console.log("[projection] No data, returning []"); return [];
   }
 
   async getProjection(id: string): Promise<Projection> {
@@ -75,10 +73,9 @@ export class ProjectionService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const projection = projectionsData.find(p => p.id === id);
-    if (!projection) throw new Error(`Projection ${id} not found`);
-    return this.transformMock(projection);
+    // Mock data removed - return empty
+    console.log("[projection] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async getProjectionSummary(companyId: string, period: 'monthly' | 'quarterly' | 'annual'): Promise<ProjectionSummary> {
@@ -155,9 +152,9 @@ export class ProjectionService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const newProj = { id: `${Date.now()}`, ...dto, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    return this.transformMock(newProj as any);
+    // Mock data removed - return empty
+    console.log("[projection] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async updateProjection(id: string, dto: UpdateProjectionDTO): Promise<Projection> {
@@ -182,11 +179,9 @@ export class ProjectionService {
       } catch { /* fall through */ }
     }
 
-    await this.delay();
-    const index = projectionsData.findIndex(p => p.id === id);
-    if (index === -1) throw new Error(`Projection ${id} not found`);
-    const updated = { ...projectionsData[index], ...dto, updatedAt: new Date().toISOString() };
-    return this.transformMock(updated as any);
+    // Mock data removed - return empty
+    console.log("[projection] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   async getVariance(companyId: string, scenario: ScenarioType, actualRevenue: number): Promise<number> {

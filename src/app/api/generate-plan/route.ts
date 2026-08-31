@@ -193,7 +193,74 @@ Generate a complete revenue plan as JSON.`;
     const startMonth = now.getMonth() + 1; // 1-indexed
     const startYear = now.getFullYear();
 
-    const systemPrompt = buildSystemPrompt(startMonth, planMonths, startYear);
+    // 5b. Load initiative types from DB to feed into the prompt
+    let initiativeTypesContext = "";
+    try {
+      const { data: initTypes } = await supabase
+        .from("initiative_types")
+        .select("name, channel, description, benchmarks, difficulty, ai_context, tier")
+        .eq("is_active", true)
+        .order("tier", { ascending: true });
+
+      if (initTypes && initTypes.length > 0) {
+        console.log("[generate-plan] Loaded", initTypes.length, "initiative types from DB");
+        initiativeTypesContext = "\n\nAVAILABLE INITIATIVE TYPES (pick from these when creating initiatives):\n" +
+          initTypes.map((t: any) => {
+            const benchmarks = t.benchmarks || {};
+            const diff = t.difficulty || {};
+            const ai = t.ai_context || {};
+            return `- ${t.name} (channel: ${t.channel}, tier: ${t.tier})\n` +
+              `  Description: ${t.description || ai.description || ""}\n` +
+              `  Sizing: ${ai.sizingGuidance || ""}\n` +
+              (benchmarks.conservative ? `  Benchmarks: conservative=${JSON.stringify(benchmarks.conservative)}, moderate=${JSON.stringify(benchmarks.moderate)}, aggressive=${JSON.stringify(benchmarks.aggressive)}\n` : "") +
+              `  Difficulty: effort=${diff.effortToImplement || 5}/10, skill=${diff.skillExpertiseRequired || 5}/10, time-to-results=${diff.timeToResults || 5}/10, cost=${diff.costToRun || 5}/10`;
+          }).join("\n");
+      } else {
+        console.log("[generate-plan] No initiative types in DB, using defaults");
+      }
+    } catch (err) {
+      console.log("[generate-plan] Failed to load initiative types:", err);
+    }
+
+    // 5c. Load workbook data (benchmarks/context from admin-uploaded Excel)
+    let workbookContext = "";
+    try {
+      const { data: workbook } = await supabase
+        .from("workbook_data")
+        .select("sheets, file_name")
+        .order("uploaded_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (workbook && workbook.sheets) {
+        console.log("[generate-plan] Loaded workbook:", workbook.file_name, "| sheets:", (workbook.sheets as any[]).length);
+        const sheets = workbook.sheets as any[];
+        // Inject each sheet as context (limit to avoid token overflow)
+        const sheetSummaries = sheets.slice(0, 5).map((sheet: any) => {
+          const maxRows = 20; // Cap rows to avoid blowing the prompt
+          const rows = (sheet.rows || []).slice(0, maxRows);
+          const headers = sheet.headers || [];
+          let table = `Sheet: "${sheet.name}" (${sheet.rowCount || rows.length} rows)\n`;
+          table += `Headers: ${headers.join(" | ")}\n`;
+          rows.forEach((row: string[]) => {
+            table += row.join(" | ") + "\n";
+          });
+          if ((sheet.rows || []).length > maxRows) {
+            table += `... (${(sheet.rows || []).length - maxRows} more rows)\n`;
+          }
+          return table;
+        });
+
+        workbookContext = "\n\nADMIN WORKBOOK DATA (use this as grounding data for benchmarks, conversion rates, and context):\n" +
+          sheetSummaries.join("\n---\n");
+      } else {
+        console.log("[generate-plan] No workbook data found");
+      }
+    } catch (err) {
+      console.log("[generate-plan] Failed to load workbook (table may not exist):", err);
+    }
+
+    const systemPrompt = buildSystemPrompt(startMonth, planMonths, startYear) + initiativeTypesContext + workbookContext;
 
     const response = await anthropic.messages.create({
       model: MODEL,

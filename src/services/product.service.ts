@@ -8,13 +8,13 @@
 
 import type { Product, CreateProductDTO, UpdateProductDTO } from '@/types';
 import { isSupabaseConfigured, getSupabase, camelToSnake } from '@/lib/supabase/db';
-import productsData from '@/mock-data/products.json';
 
 export class ProductService {
   /**
    * Get all products for a company
    */
   async getProductsByCompany(companyId: string): Promise<Product[]> {
+    if (!companyId) { console.log("[product] getProductsByCompany - no companyId"); return []; }
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
@@ -30,11 +30,9 @@ export class ProductService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    return productsData
-      .filter(p => p.companyId === companyId)
-      .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
-      .map(p => this.transformMockData(p));
+    // Mock data removed - return empty
+    console.log("[product] No data in Supabase, returning empty");
+    console.log("[product] No data, returning []"); return [];
   }
 
   /**
@@ -56,10 +54,9 @@ export class ProductService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    const product = productsData.find(p => p.id === id);
-    if (!product) throw new Error(`Product ${id} not found`);
-    return this.transformMockData(product);
+    // Mock data removed - return empty
+    console.log("[product] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   /**
@@ -82,11 +79,9 @@ export class ProductService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    return productsData
-      .filter(p => p.companyId === companyId && p.isActive)
-      .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
-      .map(p => this.transformMockData(p));
+    // Mock data removed - return empty
+    console.log("[product] No data in Supabase, returning empty");
+    console.log("[product] No data, returning []"); return [];
   }
 
   /**
@@ -112,11 +107,9 @@ export class ProductService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    return productsData
-      .filter(p => p.companyId === companyId && p.revenueType === revenueType)
-      .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
-      .map(p => this.transformMockData(p));
+    // Mock data removed - return empty
+    console.log("[product] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   /**
@@ -142,11 +135,9 @@ export class ProductService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    return productsData
-      .filter(p => p.companyId === companyId && p.ticketTier === tier)
-      .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))
-      .map(p => this.transformMockData(p));
+    // Mock data removed - return empty
+    console.log("[product] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   /**
@@ -181,16 +172,9 @@ export class ProductService {
       return this.mapRowToProduct(data);
     }
 
-    await this.delay();
-    const newProduct = {
-      id: `${Date.now()}`,
-      ...dto,
-      isActive: true,
-      displayOrder: dto.displayOrder ?? 0,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    return this.transformMockData(newProduct as typeof productsData[0]);
+    // Mock data removed - return empty
+    console.log("[product] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   /**
@@ -215,11 +199,9 @@ export class ProductService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    const index = productsData.findIndex(p => p.id === id);
-    if (index === -1) throw new Error(`Product ${id} not found`);
-    const updated = { ...productsData[index], ...dto, updatedAt: new Date().toISOString() };
-    return this.transformMockData(updated as typeof productsData[0]);
+    // Mock data removed - return empty
+    console.log("[product] No data in Supabase, returning empty");
+    throw new Error("Not found");
   }
 
   /**
@@ -243,17 +225,9 @@ export class ProductService {
       return;
     }
 
-    await this.delay();
-    const index = productsData.findIndex(p => p.id === id);
-    if (index === -1) throw new Error(`Product ${id} not found`);
-    productsData.splice(index, 1);
-  }
-
-  /**
-   * Archive a product
-   */
-  async archiveProduct(id: string): Promise<Product> {
-    return this.updateProduct(id, { isActive: false });
+    // Mock data removed - return empty
+    console.log("[product] No data in Supabase, returning empty");
+    console.log("[product] No data"); return;
   }
 
   /**
@@ -276,11 +250,9 @@ export class ProductService {
       } catch (e) { console.error("[Supabase]", e); }
     }
 
-    await this.delay();
-    return productsData
-      .filter(p => p.companyId === companyId && p.isActive)
-      .sort((a, b) => a.price - b.price)
-      .map(p => this.transformMockData(p));
+    // Mock data removed - return empty
+    console.log("[product] No data in Supabase, returning empty");
+    console.log("[product] No data, returning []"); return [];
   }
 
   /**
@@ -302,24 +274,7 @@ export class ProductService {
     };
   }
 
-  /**
-   * Transform mock JSON to Product type
-   */
-  private transformMockData(data: typeof productsData[0]): Product {
-    return {
-      id: data.id,
-      companyId: data.companyId,
-      name: data.name,
-      description: data.description,
-      price: data.price,
-      revenueType: (data.revenueType as Product['revenueType']) || 'one-time',
-      ticketTier: (data.ticketTier as Product['ticketTier']) || 'mid',
-      displayOrder: data.displayOrder ?? 0,
-      isActive: data.isActive ?? true,
-      createdAt: new Date(data.createdAt),
-      updatedAt: new Date(data.updatedAt),
-    };
-  }
+  
 
   private delay(ms: number = 50): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, Math.random() * ms));

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCompanyId } from '@/hooks/use-auth';
+import { usePermissions } from '@/hooks/use-permission';
 import { useEffect, useState, useCallback } from 'react';
 import {
   Plus,
@@ -87,6 +88,11 @@ const emptyForm: ProductFormData = {
 
 export default function ProductsPage() {
   const companyId = useCompanyId() || "";
+  const { canCreate, canEdit, canDelete } = usePermissions({
+    canCreate: 'products.create',
+    canEdit: 'products.edit',
+    canDelete: 'products.delete',
+  });
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -228,6 +234,7 @@ export default function ProductsPage() {
         title="Products"
         description="Manage your products and revenue offerings"
         actions={
+          canCreate ? (
           <button
             onClick={() => setShowAddForm(true)}
             className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2.5 text-sm font-medium text-[hsl(var(--primary-foreground))] transition-colors hover:bg-[hsl(var(--primary))]/90"
@@ -235,6 +242,7 @@ export default function ProductsPage() {
             <Plus className="h-4 w-4" />
             Add Product
           </button>
+          ) : null
         }
       />
 
@@ -533,6 +541,7 @@ export default function ProductsPage() {
                     {product.name}
                   </h3>
                   <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    {canEdit && (
                     <button
                       onClick={() => handleStartEdit(product)}
                       className="rounded p-1 text-[hsl(var(--foreground-muted))] transition-colors hover:bg-[hsl(var(--background))] hover:text-[hsl(var(--foreground))]"
@@ -540,6 +549,8 @@ export default function ProductsPage() {
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
+                    )}
+                    {canDelete && (
                     <button
                       onClick={() => setDeletingId(product.id)}
                       className="rounded p-1 text-[hsl(var(--foreground-muted))] transition-colors hover:bg-red-50 hover:text-red-600"
@@ -547,6 +558,7 @@ export default function ProductsPage() {
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
+                    )}
                   </div>
                 </div>
 

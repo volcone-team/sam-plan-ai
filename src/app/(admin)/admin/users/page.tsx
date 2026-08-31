@@ -7,13 +7,13 @@ export default function AdminUsersPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-[hsl(var(--foreground))]">
-          User Management
+          Customer Users
         </h1>
         <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">
-          Manage platform users, roles, and access
+          Manage customer accounts, roles, and access
         </p>
       </div>
-      <UserManagement />
+      <UserManagement filter="customers" />
     </div>
   );
 }

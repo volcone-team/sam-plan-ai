@@ -2,6 +2,7 @@
 import { formatDate, formatDateShort } from '@/lib/format-date';
 
 import { useCompanyId } from '@/hooks/use-auth';
+import { useRouter } from 'next/navigation';
 
 import { useEffect, useState } from 'react';
 import {
@@ -16,6 +17,7 @@ import {
   CheckCircle2,
   ListTodo,
   BarChart3,
+  RefreshCw,
 } from 'lucide-react';
 import { planService } from '@/services/plan.service';
 import { projectionService } from '@/services/projection.service';
@@ -27,7 +29,7 @@ import { RevenueChart } from './revenue-chart';
 import { InitiativeTimeline } from './initiative-timeline';
 import type { AnnualPlan, QuarterlyPlan, Initiative, Task, Result } from '@/types';
 
-const YEAR = 2026;
+const YEAR = new Date().getFullYear();
 
 interface MonthlyData {
   month: number;
@@ -64,6 +66,9 @@ function formatCurrency(value: number): string {
 
 export function YearAtAGlance() {
   const companyId = useCompanyId() || "";
+  const router = useRouter();
+  const [showRegenConfirm, setShowRegenConfirm] = useState(false);
+  const [weekStats, setWeekStats] = useState<{ total: number; completed: number; hours: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [annualPlan, setAnnualPlan] = useState<AnnualPlan | null>(null);
@@ -226,6 +231,41 @@ export function YearAtAGlance() {
     loadData();
   }, [companyId]);
 
+  // Load weekly check-in stats
+  useEffect(() => {
+    if (!companyId) return;
+    async function loadWeekStats() {
+      try {
+        const now = new Date();
+        const day = now.getDay();
+        const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+        const weekStart = new Date(now);
+        weekStart.setDate(diff);
+        weekStart.setHours(0, 0, 0, 0);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        weekEnd.setHours(23, 59, 59, 999);
+
+        const tasks = await taskService.getTasksByCompany(companyId);
+        const thisWeek = tasks.filter(t => {
+          const due = new Date(t.dueDate);
+          return due >= weekStart && due <= weekEnd;
+        });
+
+        if (thisWeek.length > 0) {
+          const completed = thisWeek.filter(t => t.status === 'completed').length;
+          const hours = thisWeek.reduce((sum, t) => sum + (t.estimatedHours || 0), 0);
+          console.log("[YearAtAGlance] Week stats:", thisWeek.length, "tasks |", completed, "done |", hours, "hrs");
+          setWeekStats({ total: thisWeek.length, completed, hours });
+        }
+      } catch {
+        // Non-fatal
+      }
+    }
+    loadWeekStats();
+  }, [companyId]);
+
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -236,15 +276,107 @@ export function YearAtAGlance() {
 
   if (error) {
     return (
-      <div className="rounded-[var(--radius-lg)] border border-destructive/50 bg-destructive/5 p-6 text-center">
-        <AlertCircle className="h-8 w-8 text-destructive mx-auto mb-3" />
-        <p className="text-sm text-destructive">{error}</p>
+      <div className="rounded-[var(--radius-lg)] border border-border bg-card p-10 text-center">
+        <AlertCircle className="h-8 w-8 text-[hsl(var(--foreground-muted))] mx-auto mb-3" />
+        <h3 className="text-base font-semibold mb-1">No plan generated yet</h3>
+        <p className="text-sm text-[hsl(var(--foreground-muted))] mb-4">
+          Complete the questionnaire to generate your personalized revenue plan.
+        </p>
+        <a
+          href="/onboarding"
+          className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+        >
+          Generate Your Plan
+        </a>
       </div>
     );
   }
 
+  // No annual plan and no projections means the plan was never generated.
+  const hasPlan = !!annualPlan || monthlyData.some(m => m.good || m.better || m.best);
+  if (!hasPlan) {
+    return (
+      <div className="rounded-[var(--radius-lg)] border border-border bg-card p-10 text-center">
+        <AlertCircle className="h-8 w-8 text-[hsl(var(--foreground-muted))] mx-auto mb-3" />
+        <h3 className="text-base font-semibold mb-1">No plan generated yet</h3>
+        <p className="text-sm text-[hsl(var(--foreground-muted))] mb-4">
+          Complete the questionnaire to generate your personalized revenue plan.
+        </p>
+        <a
+          href="/onboarding"
+          className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+        >
+          Generate Your Plan
+        </a>
+      </div>
+    );
+  }
+
+  const handleRegenerate = () => {
+    console.log("[YearAtAGlance] User confirmed regeneration");
+    setShowRegenConfirm(false);
+    localStorage.removeItem("sam-questionnaire-full");
+    localStorage.removeItem("sam-questionnaire-quickstart");
+    localStorage.removeItem("sam-questionnaire-mode");
+    router.push("/onboarding/full");
+  };
+
   return (
     <div className="space-y-6">
+      {/* Regenerate confirmation modal */}
+      {showRegenConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-sm rounded-[var(--radius-lg)] border border-border bg-card p-6 shadow-xl">
+            <h3 className="text-lg font-semibold">Regenerate Your Plan?</h3>
+            <p className="mt-2 text-sm text-[hsl(var(--foreground-muted))]">
+              This will replace your current initiatives, tasks, and projections. Your products will be kept.
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button onClick={() => setShowRegenConfirm(false)} className="rounded-[var(--radius-md)] border border-border px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--background-muted))]">
+                Cancel
+              </button>
+              <button onClick={handleRegenerate} className="rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90">
+                Regenerate Plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Action bar */}
+      <div className="flex items-center justify-end">
+        <button
+          onClick={() => setShowRegenConfirm(true)}
+          className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm font-medium text-[hsl(var(--foreground-muted))] hover:text-[hsl(var(--foreground))] hover:border-[hsl(var(--primary))] transition-colors"
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+          Regenerate Plan
+        </button>
+      </div>
+
+      {/* Weekly Check-in Card */}
+      {weekStats && weekStats.total > 0 && (
+        <div className="rounded-[var(--radius-lg)] border border-border bg-card p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[hsl(var(--primary)/0.1)]">
+              <ListTodo className="h-5 w-5 text-[hsl(var(--primary))]" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">This Week</p>
+              <p className="text-xs text-[hsl(var(--foreground-muted))]">
+                {weekStats.completed}/{weekStats.total} tasks done · {weekStats.hours}h planned
+              </p>
+            </div>
+          </div>
+          <a
+            href="/planner/weekly"
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--background-muted))] transition-colors"
+          >
+            View Week
+          </a>
+        </div>
+      )}
+
       {/* Annual Revenue Targets */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <TargetCard
@@ -330,6 +462,17 @@ export function YearAtAGlance() {
           </div>
         </div>
       )}
+
+      {/* Action bar */}
+      <div className="flex items-center justify-end">
+        <button
+          onClick={() => { console.log("[YearAtAGlance] Regenerate clicked"); setShowRegenConfirm(true); }}
+          className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm font-medium text-[hsl(var(--foreground-muted))] hover:text-[hsl(var(--foreground))] hover:border-[hsl(var(--primary))] transition-colors"
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+          Regenerate Plan
+        </button>
+      </div>
 
       {/* Upcoming Tasks */}
       {upcomingTasks.length > 0 && (
