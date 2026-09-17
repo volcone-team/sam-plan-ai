@@ -61,7 +61,7 @@ export async function GET() {
     // Get products for this company (to map back to questionnaire format)
     const { data: products } = await supabase
       .from("products")
-      .select("name, price, revenue_type")
+      .select("id, name, price, revenue_type")
       .eq("company_id", profile.company_id)
       .eq("is_active", true)
       .order("display_order", { ascending: true });
@@ -75,6 +75,7 @@ export async function GET() {
       annualRevenueGoal: Number(input.revenue_goal) || 0,
       planningPeriod: input.revenue_timeframe === 3 ? "3-months" : input.revenue_timeframe === 6 ? "6-months" : "12-months",
       products: (products || []).map((p: any) => ({
+        id: p.id,
         name: p.name,
         price: Number(p.price) || 0,
         type: p.revenue_type === "recurring" ? "membership" : "service",

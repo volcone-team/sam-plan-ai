@@ -4,7 +4,8 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 // Claude needs more than the default serverless budget to produce a full plan.
-export const maxDuration = 60;
+// NOTE: Vercel Hobby caps functions at 10s regardless of this value; Pro honours it.
+export const maxDuration = 300;
 
 // Model is env-overridable so it can be rotated without a code change.
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5-20250929";
@@ -83,10 +84,12 @@ Guidelines:
 - If they have budget, include paid ads or challenges
 - Spread initiatives across the ${planMonths} months, not front-loaded
 - Revenue projections array must have exactly ${planMonths} entries
+- Keep output COMPACT: max 4 tasks per initiative, short descriptions (one sentence). Do not add fields beyond the schema.
 `;
 }
 
 export async function POST(request: Request) {
+  console.log("[generate-plan] === Request received ===");
   try {
     // 1. Auth check
     const cookieStore = await cookies();
@@ -143,9 +146,14 @@ export async function POST(request: Request) {
     }
 
     // 5. Call Claude
-    if (!process.env.ANTHROPIC_API_KEY) {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey || !apiKey.startsWith("sk-ant-")) {
+      console.error(
+        "[generate-plan] ANTHROPIC_API_KEY missing or malformed.",
+        "present:", !!apiKey, "| length:", apiKey?.length || 0
+      );
       return NextResponse.json(
-        { error: "ANTHROPIC_API_KEY is not set on the server." },
+        { error: "ANTHROPIC_API_KEY is not set or is malformed on the server." },
         { status: 500 }
       );
     }
@@ -212,8 +220,7 @@ Generate a complete revenue plan as JSON.`;
             return `- ${t.name} (channel: ${t.channel}, tier: ${t.tier})\n` +
               `  Description: ${t.description || ai.description || ""}\n` +
               `  Sizing: ${ai.sizingGuidance || ""}\n` +
-              (benchmarks.conservative ? `  Benchmarks: conservative=${JSON.stringify(benchmarks.conservative)}, moderate=${JSON.stringify(benchmarks.moderate)}, aggressive=${JSON.stringify(benchmarks.aggressive)}\n` : "") +
-              `  Difficulty: effort=${diff.effortToImplement || 5}/10, skill=${diff.skillExpertiseRequired || 5}/10, time-to-results=${diff.timeToResults || 5}/10, cost=${diff.costToRun || 5}/10`;
+              `  Difficulty: effort=${diff.effortToImplement || 5}/10, cost=${diff.costToRun || 5}/10`;
           }).join("\n");
       } else {
         console.log("[generate-plan] No initiative types in DB, using defaults");
@@ -236,8 +243,8 @@ Generate a complete revenue plan as JSON.`;
         console.log("[generate-plan] Loaded workbook:", workbook.file_name, "| sheets:", (workbook.sheets as any[]).length);
         const sheets = workbook.sheets as any[];
         // Inject each sheet as context (limit to avoid token overflow)
-        const sheetSummaries = sheets.slice(0, 5).map((sheet: any) => {
-          const maxRows = 20; // Cap rows to avoid blowing the prompt
+        const sheetSummaries = sheets.slice(0, 3).map((sheet: any) => {
+          const maxRows = 8; // Keep the prompt small - large context made generation exceed the time limit
           const rows = (sheet.rows || []).slice(0, maxRows);
           const headers = sheet.headers || [];
           let table = `Sheet: "${sheet.name}" (${sheet.rowCount || rows.length} rows)\n`;
@@ -253,6 +260,12 @@ Generate a complete revenue plan as JSON.`;
 
         workbookContext = "\n\nADMIN WORKBOOK DATA (use this as grounding data for benchmarks, conversion rates, and context):\n" +
           sheetSummaries.join("\n---\n");
+        // Hard cap so a large workbook can never blow up generation time.
+        const WORKBOOK_CHAR_CAP = 4000;
+        if (workbookContext.length > WORKBOOK_CHAR_CAP) {
+          workbookContext = workbookContext.slice(0, WORKBOOK_CHAR_CAP) + "\n... (workbook truncated)";
+        }
+        console.log("[generate-plan] Workbook context:", workbookContext.length, "chars");
       } else {
         console.log("[generate-plan] No workbook data found");
       }
@@ -262,12 +275,22 @@ Generate a complete revenue plan as JSON.`;
 
     const systemPrompt = buildSystemPrompt(startMonth, planMonths, startYear) + initiativeTypesContext + workbookContext;
 
+    console.log("[generate-plan] System prompt size:", systemPrompt.length, "chars");
+    const claudeStart = Date.now();
     const response = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 4096,
+      max_tokens: 16000,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     });
+    console.log(
+      "[generate-plan] Claude responded in", Date.now() - claudeStart, "ms",
+      "| stop_reason:", response.stop_reason,
+      "| output tokens:", response.usage?.output_tokens
+    );
+    if (response.stop_reason === "max_tokens") {
+      console.error("[generate-plan] Output hit the token cap - JSON likely truncated");
+    }
 
     // 6. Parse Claude's response
     const textBlock = response.content.find((b) => b.type === "text");
@@ -312,7 +335,7 @@ Generate a complete revenue plan as JSON.`;
       const isRecurring = prod.type === "membership" || prod.type === "subscription" || prod.type === "coaching";
       const price = prod.price || 0;
       const tier = price >= 2000 ? "high" : price >= 500 ? "mid" : "low";
-      const { data: newProd } = await supabase
+      const { data: newProd, error: prodErr } = await supabase
         .from("products")
         .insert({
           company_id: companyId,
@@ -327,6 +350,10 @@ Generate a complete revenue plan as JSON.`;
         .select("id")
         .single();
 
+      if (prodErr) {
+        console.error("[generate-plan] Product insert failed:", prodErr.message, prodErr.details);
+        throw new Error("Failed to save product: " + prodErr.message);
+      }
       productIds.push(newProd?.id || "");
     }
 
@@ -380,7 +407,7 @@ Generate a complete revenue plan as JSON.`;
       const activationDate = new Date(actualYear, actualMonth, 1).toISOString().split("T")[0];
       const eventDate = new Date(actualYear, actualMonth, 15).toISOString().split("T")[0];
 
-      const { data: newInit } = await supabase
+      const { data: newInit, error: initErr } = await supabase
         .from("initiatives")
         .insert({
           company_id: companyId,
@@ -389,7 +416,7 @@ Generate a complete revenue plan as JSON.`;
           initiative_type_id: typeId,
           name: init.name,
           description: init.description || "",
-          kind: init.kind || "one-time",
+          kind: ["one-time", "recurring", "evergreen"].includes(init.kind) ? init.kind : "one-time",
           status: "planned",
           activation_date: activationDate,
           event_date: eventDate,
@@ -404,6 +431,10 @@ Generate a complete revenue plan as JSON.`;
         .select("id")
         .single();
 
+      if (initErr) {
+        console.error("[generate-plan] Initiative insert failed:", initErr.message, "| details:", initErr.details, "| hint:", initErr.hint);
+        throw new Error("Failed to save initiative: " + initErr.message);
+      }
       if (!newInit) continue;
 
       // Insert tasks for this initiative
@@ -480,8 +511,43 @@ Generate a complete revenue plan as JSON.`;
       })
       .eq("id", companyId);
 
+    // 7g. Log this generation event for admin metrics + activity feed.
+    //     Non-fatal: if the table doesn't exist yet, we just skip it.
+    try {
+      await supabase.from("generation_events").insert({
+        company_id: companyId,
+        user_id: user.id,
+        event_type: "plan_generation",
+        initiatives_created: (plan.initiatives || []).length,
+        model: MODEL,
+      });
+    } catch (logErr) {
+      console.log("[generate-plan] generation_events log skipped:", logErr);
+    }
+
     return NextResponse.json({ success: true, productsCreated: productIds.length, initiativesCreated: (plan.initiatives || []).length });
   } catch (err: any) {
+    // Surface auth failures against the AI provider in plain language, since
+    // an invalid/expired key is by far the most common cause of failure here.
+    const isAuthError =
+      err?.status === 401 ||
+      err?.error?.error?.type === "authentication_error" ||
+      String(err?.message || "").includes("API key is invalid");
+
+    if (isAuthError) {
+      console.error("[generate-plan] Anthropic rejected the API key (401). Set a valid ANTHROPIC_API_KEY.");
+      return NextResponse.json(
+        {
+          error:
+            "The AI service rejected our API key. Please set a valid ANTHROPIC_API_KEY on the server and try again.",
+          status: 401,
+          type: "authentication_error",
+          model: MODEL,
+        },
+        { status: 500 }
+      );
+    }
+
     const detail = {
       error: err?.message || "Internal error",
       status: err?.status,

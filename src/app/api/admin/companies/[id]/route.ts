@@ -90,12 +90,15 @@ export async function GET(
     console.log("[admin/companies/id] Products:", products?.length || 0);
 
     // 7. Get initiatives
-    const { data: initiatives } = await adminClient
+    const { data: initiatives, error: initErr } = await adminClient
       .from("initiatives")
-      .select("id, name, description, kind, channel, status, activation_date, revenue_better, planned_budget")
+      .select("id, name, description, kind, status, activation_date, revenue_better, planned_budget, initiative_types(channel)")
       .eq("company_id", id)
       .order("activation_date", { ascending: true });
 
+    if (initErr) {
+      console.error("[admin/companies/id] Initiatives query error:", initErr.message);
+    }
     console.log("[admin/companies/id] Initiatives:", initiatives?.length || 0);
 
     // 8. Get annual plan
@@ -147,7 +150,7 @@ export async function GET(
         name: i.name,
         description: i.description,
         kind: i.kind,
-        channel: i.channel,
+        channel: (i as any).initiative_types?.channel || "unknown",
         status: i.status,
         activationDate: i.activation_date,
         revenueBetter: Number(i.revenue_better) || 0,

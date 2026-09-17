@@ -52,6 +52,9 @@ export async function updateSession(request: NextRequest) {
 
   // Protected routes: redirect to login if not authenticated
   const isAuthRoute = request.nextUrl.pathname.startsWith('/auth');
+  // API routes must never be HTML-redirected — they own their own auth and
+  // must return JSON so clients get a real error instead of a login page.
+  const isApiRoute = request.nextUrl.pathname.startsWith('/api');
   const isPublicRoute =
     request.nextUrl.pathname === '/' ||
     request.nextUrl.pathname.startsWith('/sample-plan') ||
@@ -59,7 +62,12 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith('/admin-login');
   const isAdminRoute = request.nextUrl.pathname.startsWith('/admin');
   const isAppRoute =
-    !isAuthRoute && !isPublicRoute && !isAdminRoute;
+    !isAuthRoute && !isApiRoute && !isPublicRoute && !isAdminRoute;
+
+  // Unauthenticated API calls get a JSON 401, never a redirect.
+  if (!user && isApiRoute) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   // If user is not logged in and trying to access a protected route
   if (!user && isAppRoute) {

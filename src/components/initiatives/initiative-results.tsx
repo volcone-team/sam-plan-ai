@@ -276,7 +276,7 @@ function ResultRow({ result, metricKeys, onUpdate, onDelete }: { result: Initiat
           <button onClick={() => setEditing(!editing)} className="text-xs text-[hsl(var(--primary))] hover:underline">
             {editing ? 'Cancel' : 'Edit'}
           </button>
-          <button onClick={() => { if (window.confirm('Delete this result?')) onDelete(result.id); }} className="text-xs text-red-500 hover:underline">
+          <button onClick={() => { if (window.confirm('Delete this result?')) onDelete(result.id); }} className="rounded-[var(--radius-md)] bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 transition-colors">
             Delete
           </button>
         </div>
@@ -372,7 +372,7 @@ function ExpenseRow({ expense, onDelete }: { expense: Expense; onDelete: (id: st
       <p className="text-sm font-bold text-[hsl(var(--foreground))] shrink-0">{formatCurrency(expense.amount)}</p>
       <button
         onClick={() => { if (window.confirm('Delete this expense?')) onDelete(expense.id); }}
-        className="text-xs text-red-500 hover:underline shrink-0"
+        className="rounded-[var(--radius-md)] bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 transition-colors shrink-0"
       >
         Delete
       </button>

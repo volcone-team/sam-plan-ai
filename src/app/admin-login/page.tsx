@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
+import { cacheClearAll } from '@/lib/client-cache';
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -44,12 +45,14 @@ export default function AdminLoginPage() {
 
       if (profileError || !profile) {
         setError("Could not verify admin access.");
+        cacheClearAll();
         await supabase.auth.signOut();
         return;
       }
 
       if (!profile.is_admin) {
         setError("Access denied. This account does not have admin privileges.");
+        cacheClearAll();
         await supabase.auth.signOut();
         return;
       }

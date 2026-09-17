@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { planningService } from "@/services/planning.service";
+import { useToast } from "@/components/ui/toast";
+import { ProgressBar } from "@/components/ui/progress-bar";
 import { useAuth } from "@/hooks/use-auth";
 
 const GENERATION_MESSAGES = [
@@ -34,6 +36,7 @@ type Phase = "working" | "error";
 export default function GeneratingPage() {
   const router = useRouter();
   const { userId, companyId, loading: authLoading } = useAuth();
+  const { showToast } = useToast();
 
   const [messageIndex, setMessageIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -108,19 +111,34 @@ export default function GeneratingPage() {
             });
         await planningService.completePlanningInput(saved.id);
 
-        // 2. Reset old plan data before regenerating
-        console.log("[generating] Resetting old plan data...");
-        const resetRes = await fetch("/api/plan/reset", { method: "DELETE" });
+        // 2. Reset old plan data before regenerating.
+        //    "scratch" mode = selective reset (keep past/in-progress, delete only
+        //    upcoming not-started initiatives). Otherwise fall back to full reset
+        //    (first-time generation, nothing to keep).
+        const regenMode = localStorage.getItem("sam-regen-mode");
+        const resetEndpoint =
+          regenMode === "scratch" ? "/api/plan/reset-scratch" : "/api/plan/reset";
+        console.log("[generating] Resetting old plan data via:", resetEndpoint, "(mode:", regenMode || "none", ")");
+
+        const resetRes = await fetch(resetEndpoint, { method: "DELETE" });
         if (resetRes.ok) {
-          console.log("[generating] Plan reset successful");
+          const resetData = await resetRes.json().catch(() => ({}));
+          console.log("[generating] Plan reset successful:", resetData);
         } else {
           const resetData = await resetRes.json().catch(() => ({}));
           console.warn("[generating] Plan reset partial/failed:", resetData.error || resetRes.status);
           // Non-fatal: continue with generation even if reset partially fails
         }
 
+        // Clear the regen-mode flag now that reset has run.
+        localStorage.removeItem("sam-regen-mode");
+
         // 3. Generate the plan. Read as text first so a non-JSON error
         //    response (crash, gateway timeout) still yields a real message.
+        showToast(
+          "Building your plan can take up to a minute - the AI is working through your answers in detail.",
+          { variant: "wait", duration: 15000 }
+        );
         const res = await fetch("/api/generate-plan", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -138,12 +156,15 @@ export default function GeneratingPage() {
         if (!res.ok) {
           const detail =
             parsed?.error ||
-            (raw ? raw.slice(0, 300) : `Request failed with status ${res.status}`);
+            (raw ? raw.slice(0, 300) : `Request failed with status ${res.status} (empty response)`);
           console.error("[onboarding] plan generation failed", {
             status: res.status,
-            body: parsed ?? raw,
+            statusText: res.statusText,
+            rawLength: raw.length,
+            rawPreview: raw.slice(0, 500),
+            parsed,
           });
-          setErrorMessage(detail);
+          setErrorMessage(`${detail} (status ${res.status})`);
           setPhase("error");
           return;
         }
@@ -251,6 +272,8 @@ export default function GeneratingPage() {
         >
           {GENERATION_MESSAGES[messageIndex]}
         </p>
+
+        <ProgressBar active={phase === "working"} estimatedMs={35000} className="mt-5 max-w-xs" />
 
         <p className="mt-3 text-xs text-[hsl(var(--foreground-subtle))]">
           This usually takes 20-40 seconds. Please keep this tab open.

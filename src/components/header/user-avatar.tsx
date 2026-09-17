@@ -8,6 +8,7 @@ import { User, LogOut, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { cacheClearAll } from '@/lib/client-cache';
 
 export interface UserAvatarProps {
   /** User's display name (for initials fallback and aria-label) */
@@ -61,6 +62,8 @@ export function UserAvatar({
 
   const handleSignOut = async () => {
     const supabase = createClient();
+    // Drop cached profile/plan data so the next user never sees it.
+    cacheClearAll();
     await supabase.auth.signOut();
     router.push("/auth/login");
   };

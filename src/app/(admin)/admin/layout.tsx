@@ -8,6 +8,7 @@ import { AdminSidebar } from "@/components/admin";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { cacheClearAll } from '@/lib/client-cache';
 
 interface AdminLayoutProps {
   children: ReactNode;
@@ -29,6 +30,8 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
 
   const handleSignOut = async () => {
     const supabase = createClient();
+    // Drop cached profile/plan data so the next user never sees it.
+    cacheClearAll();
     await supabase.auth.signOut();
     router.push("/admin-login");
   };

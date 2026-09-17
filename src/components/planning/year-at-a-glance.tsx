@@ -1,7 +1,7 @@
 'use client';
 import { formatDate, formatDateShort } from '@/lib/format-date';
 
-import { useCompanyId } from '@/hooks/use-auth';
+import { useAuth, useCompanyId } from '@/hooks/use-auth';
 import { useRouter } from 'next/navigation';
 
 import { useEffect, useState } from 'react';
@@ -18,6 +18,7 @@ import {
   ListTodo,
   BarChart3,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react';
 import { planService } from '@/services/plan.service';
 import { projectionService } from '@/services/projection.service';
@@ -27,7 +28,9 @@ import { resultService } from '@/services/result.service';
 import { taskService } from '@/services/task.service';
 import { RevenueChart } from './revenue-chart';
 import { InitiativeTimeline } from './initiative-timeline';
+import { RegenerateModal } from './regenerate-modal';
 import type { AnnualPlan, QuarterlyPlan, Initiative, Task, Result } from '@/types';
+import { cacheGet, cacheSet, cacheInvalidatePrefix, CacheKeys, TTL } from '@/lib/client-cache';
 
 const YEAR = new Date().getFullYear();
 
@@ -66,6 +69,7 @@ function formatCurrency(value: number): string {
 
 export function YearAtAGlance() {
   const companyId = useCompanyId() || "";
+  const { loading: authLoading } = useAuth();
   const router = useRouter();
   const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   const [weekStats, setWeekStats] = useState<{ total: number; completed: number; hours: number } | null>(null);
@@ -88,27 +92,58 @@ export function YearAtAGlance() {
   const [totalActualSpend, setTotalActualSpend] = useState(0);
 
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId) {
+      // Auth resolved but no company: stop spinning and say so, rather than
+      // showing an indefinite loader.
+      if (!authLoading) {
+        setLoading(false);
+        setError('No company is linked to your account yet.');
+      }
+      return;
+    }
     const loadData = async () => {
       try {
         setLoading(true);
         setError(null);
 
-        const [plan, quarters, projections, products, initiativesData] = await Promise.all([
-          planService.getAnnualPlan(companyId, YEAR),
-          planService.getQuarterlyPlans(companyId, YEAR),
-          projectionService.getProjectionsByCompany(companyId),
-          productService.getProductsByCompany(companyId),
-          initiativeService.getInitiativesByCompany(companyId),
-        ]);
+        // Cache-first: these five queries cost ~2-4s combined because each is a
+        // separate network round trip. Serve the cached copy instantly and
+        // revalidate in the background when it goes stale.
+        const cacheKey = CacheKeys.dashboard(companyId);
+        const cached = cacheGet<any>(cacheKey, TTL.planData);
+
+        let plan: AnnualPlan | null = null;
+        let quarters: QuarterlyPlan[] = [];
+        let projections: any[] = [];
+        let products: Array<{ id: string; name: string }> = [];
+        let initiativesData: Initiative[] = [];
+
+        if (cached) {
+          ({ plan, quarters, projections, products, initiativesData } = cached.value);
+          console.log('[YearAtAGlance] Served from cache (stale:', cached.stale, ')');
+        }
+
+        if (!cached || cached.stale) {
+          const fresh = await Promise.all([
+            planService.getAnnualPlan(companyId, YEAR),
+            planService.getQuarterlyPlans(companyId, YEAR),
+            projectionService.getProjectionsByCompany(companyId),
+            productService.getProductsByCompany(companyId),
+            initiativeService.getInitiativesByCompany(companyId),
+          ]);
+          [plan, quarters, projections, products, initiativesData] = fresh;
+          cacheSet(cacheKey, {
+            plan, quarters, projections, products, initiativesData,
+          });
+        }
 
         setAnnualPlan(plan);
         setQuarterlyPlans(quarters);
 
         // Build monthly data from projections
-        const goodProj = projections.find(p => p.scenario === 'good');
-        const betterProj = projections.find(p => p.scenario === 'better');
-        const bestProj = projections.find(p => p.scenario === 'best');
+        const goodProj = projections.find((p: any) => p.scenario === 'good');
+        const betterProj = projections.find((p: any) => p.scenario === 'better');
+        const bestProj = projections.find((p: any) => p.scenario === 'best');
 
         const monthly: MonthlyData[] = [];
         for (let m = 1; m <= 12; m++) {
@@ -127,13 +162,22 @@ export function YearAtAGlance() {
         const bestTotal = monthly.reduce((sum, m) => sum + m.best, 0);
         setProjectionTotals({ good: goodTotal, better: betterTotal, best: bestTotal });
 
-        // Build product revenue data
-        const productMap = new Map(products.map(p => [p.id, p.name]));
-        const [goodByProduct, betterByProduct, bestByProduct] = await Promise.all([
-          projectionService.getProjectedRevenueByProduct(companyId, 'good'),
-          projectionService.getProjectedRevenueByProduct(companyId, 'better'),
-          projectionService.getProjectedRevenueByProduct(companyId, 'best'),
-        ]);
+        // Build product revenue data.
+        // Derived from the projections we already fetched - avoids 3 extra
+        // round trips that were re-querying the same rows.
+        const productMap = new Map<string, string>(products.map((p) => [p.id, p.name]));
+        const aggregateByProduct = (scenario: string) => {
+          const map = new Map<string, number>();
+          for (const proj of projections.filter((pr: any) => pr.scenario === scenario)) {
+            for (const item of ((proj as any).byProduct || [])) {
+              map.set(item.productId, (map.get(item.productId) || 0) + item.revenue);
+            }
+          }
+          return Array.from(map).map(([productId, revenue]) => ({ productId, revenue }));
+        };
+        const goodByProduct = aggregateByProduct('good');
+        const betterByProduct = aggregateByProduct('better');
+        const bestByProduct = aggregateByProduct('best');
 
         const productRevMap = new Map<string, ProductRevenue>();
         for (const item of goodByProduct) {
@@ -186,15 +230,20 @@ export function YearAtAGlance() {
         setInitiatives(timelineInitiatives);
 
         // --- Dashboard/Accountability data ---
-        const now = new Date();
-        const allTasksArr: (Task & { initiativeName: string })[] = [];
+        // Primary content is ready; let the page paint now and finish the
+        // secondary panels below. This is what makes the dashboard feel fast.
+        setLoading(false);
 
-        for (const init of initiativesData) {
-          const initTasks = await taskService.getTasksByInitiative(init.id);
-          initTasks.forEach(t => {
-            allTasksArr.push({ ...t, initiativeName: init.name });
-          });
-        }
+        const now = new Date();
+
+        // Single company-wide task query instead of one per initiative.
+        // The old N+1 loop cost ~1.5s per initiative (12s+ on real plans).
+        const initiativeNameById = new Map(initiativesData.map((i: Initiative) => [i.id, i.name]));
+        const companyTasks = await taskService.getTasksByCompany(companyId);
+        const allTasksArr: (Task & { initiativeName: string })[] = companyTasks.map(t => ({
+          ...t,
+          initiativeName: initiativeNameById.get(t.initiativeId) || 'Unknown Initiative',
+        }));
 
         // Overdue tasks
         const overdue = allTasksArr.filter(t => {
@@ -215,7 +264,7 @@ export function YearAtAGlance() {
         // Recent results (last 4 weeks)
         const fourWeeksAgo = new Date(now);
         fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
-        const results = await resultService.getResultsByDateRange(fourWeeksAgo, now);
+        const results = await resultService.getResultsByDateRange(fourWeeksAgo, now, companyId);
         setRecentResults(results.slice(0, 5));
         setTotalActualRevenue(results.reduce((sum: number, r: Result) => sum + r.actualRevenue, 0));
         setTotalActualSpend(results.reduce((sum: number, r: Result) => sum + r.actualSpend, 0));
@@ -229,7 +278,7 @@ export function YearAtAGlance() {
     };
 
     loadData();
-  }, [companyId]);
+  }, [companyId, authLoading]);
 
   // Load weekly check-in stats
   useEffect(() => {
@@ -312,42 +361,51 @@ export function YearAtAGlance() {
     );
   }
 
-  const handleRegenerate = () => {
-    console.log("[YearAtAGlance] User confirmed regeneration");
+  // "Start from Scratch" — clears upcoming initiatives and rebuilds via questionnaire.
+  const handleStartFromScratch = () => {
+    console.log("[YearAtAGlance] Start from Scratch confirmed");
+    cacheInvalidatePrefix(CacheKeys.planPrefix);
     setShowRegenConfirm(false);
+    // Flag the intent so the generating flow knows to run the selective (not full) reset.
+    localStorage.setItem("sam-regen-mode", "scratch");
     localStorage.removeItem("sam-questionnaire-full");
     localStorage.removeItem("sam-questionnaire-quickstart");
     localStorage.removeItem("sam-questionnaire-mode");
     router.push("/onboarding/full");
   };
 
+  // "Enhance Current Plan" — AI suggestions (built in Group B). Placeholder route for now.
+  const handleEnhance = () => {
+    console.log("[YearAtAGlance] Enhance Current Plan chosen");
+    cacheInvalidatePrefix(CacheKeys.planPrefix);
+    setShowRegenConfirm(false);
+    // Enhance flow (suggestions + accept/reject) is implemented in Group B.
+    // For now, route to the enhance entry point which will be built next.
+    router.push("/enhance-plan");
+  };
+
   return (
     <div className="space-y-6">
-      {/* Regenerate confirmation modal */}
-      {showRegenConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-sm rounded-[var(--radius-lg)] border border-border bg-card p-6 shadow-xl">
-            <h3 className="text-lg font-semibold">Regenerate Your Plan?</h3>
-            <p className="mt-2 text-sm text-[hsl(var(--foreground-muted))]">
-              This will replace your current initiatives, tasks, and projections. Your products will be kept.
-            </p>
-            <div className="mt-5 flex items-center justify-end gap-3">
-              <button onClick={() => setShowRegenConfirm(false)} className="rounded-[var(--radius-md)] border border-border px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--background-muted))]">
-                Cancel
-              </button>
-              <button onClick={handleRegenerate} className="rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90">
-                Regenerate Plan
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Two-step regenerate modal (choice → hard confirm for scratch) */}
+      <RegenerateModal
+        open={showRegenConfirm}
+        onClose={() => setShowRegenConfirm(false)}
+        onStartFromScratch={handleStartFromScratch}
+        onEnhance={handleEnhance}
+      />
 
       {/* Action bar */}
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-2">
         <button
-          onClick={() => setShowRegenConfirm(true)}
-          className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm font-medium text-[hsl(var(--foreground-muted))] hover:text-[hsl(var(--foreground))] hover:border-[hsl(var(--primary))] transition-colors"
+          onClick={() => { console.log("[YearAtAGlance] Enhance Plan clicked"); router.push("/enhance-plan"); }}
+          className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600 transition-colors"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          Enhance Plan
+        </button>
+        <button
+          onClick={() => { console.log("[YearAtAGlance] Regenerate clicked"); setShowRegenConfirm(true); }}
+          className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 transition-colors"
         >
           <RefreshCw className="h-3.5 w-3.5" />
           Regenerate Plan
@@ -462,17 +520,6 @@ export function YearAtAGlance() {
           </div>
         </div>
       )}
-
-      {/* Action bar */}
-      <div className="flex items-center justify-end">
-        <button
-          onClick={() => { console.log("[YearAtAGlance] Regenerate clicked"); setShowRegenConfirm(true); }}
-          className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm font-medium text-[hsl(var(--foreground-muted))] hover:text-[hsl(var(--foreground))] hover:border-[hsl(var(--primary))] transition-colors"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          Regenerate Plan
-        </button>
-      </div>
 
       {/* Upcoming Tasks */}
       {upcomingTasks.length > 0 && (

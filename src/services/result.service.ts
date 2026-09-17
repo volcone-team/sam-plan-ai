@@ -109,16 +109,22 @@ export class ResultService {
     console.log("[result] Not found in Supabase"); throw new Error("Not found");
   }
 
-  async getResultsByDateRange(startDate: Date, endDate: Date): Promise<Result[]> {
+  /**
+   * Results within a date range.
+   * Pass companyId to scope the query at the database level - without it the
+   * query relies solely on RLS and scans more rows than necessary.
+   */
+  async getResultsByDateRange(startDate: Date, endDate: Date, companyId?: string): Promise<Result[]> {
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
-        const { data, error } = await supabase
+        let query = supabase
           .from('results')
           .select('*')
           .gte('week_start_date', startDate.toISOString().split('T')[0])
-          .lte('week_start_date', endDate.toISOString().split('T')[0])
-          .order('week_start_date', { ascending: true });
+          .lte('week_start_date', endDate.toISOString().split('T')[0]);
+        if (companyId) query = query.eq('company_id', companyId);
+        const { data, error } = await query.order('week_start_date', { ascending: true });
 
         if (!error && data) {
           return data.map(row => this.mapRow(row));

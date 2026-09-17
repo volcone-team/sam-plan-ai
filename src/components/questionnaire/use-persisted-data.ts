@@ -61,7 +61,16 @@ export function usePersistedData(mode: QuestionnaireMode) {
           return;
         }
         console.log("[usePersistedData] Pre-filling from DB:", Object.keys(json.answers).length, "fields");
-        setData((prev) => ({ ...prev, ...json.answers }));
+        // Ensure every pre-filled product has a stable id so list keys and
+        // edit/remove handlers work (DB rows use UUIDs; guard anyway).
+        const answers = { ...json.answers };
+        if (Array.isArray(answers.products)) {
+          answers.products = answers.products.map((p: any, i: number) => ({
+            ...p,
+            id: p.id || `prod-prefill-${i}-${Math.random().toString(36).slice(2, 7)}`,
+          }));
+        }
+        setData((prev) => ({ ...prev, ...answers }));
       } catch (err) {
         console.log("[usePersistedData] DB load failed:", err);
       }

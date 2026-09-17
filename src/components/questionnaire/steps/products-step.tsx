@@ -56,7 +56,7 @@ export function ProductsStep({ data, onChange, errors }: ProductsStepProps) {
       <div className="space-y-4">
         {data.products.map((product, index) => (
           <div
-            key={product.id}
+            key={product.id || `product-${index}`}
             className="rounded-[var(--radius-lg)] border border-border p-4 space-y-3"
           >
             <div className="flex items-center justify-between">

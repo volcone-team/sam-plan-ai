@@ -252,7 +252,7 @@ export function SubscriptionPlanEditor() {
                   </button>
                   <button
                     onClick={() => handleDeletePlan(plan.id)}
-                    className="inline-flex items-center gap-1 text-xs text-red-500 hover:text-red-700"
+                    className="inline-flex items-center gap-1 rounded-[var(--radius-md)] bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-red-700 transition-colors"
                   >
                     <Trash2 className="h-3 w-3" /> Delete
                   </button>

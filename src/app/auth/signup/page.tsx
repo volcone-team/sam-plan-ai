@@ -7,6 +7,7 @@ import { Loader2, Eye, EyeOff } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { BrandLogo } from '@/components/brand-logo';
+import { getAppUrl } from '@/lib/app-url';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -41,19 +42,26 @@ export default function SignupPage() {
 
       const supabase = createClient();
 
-      // Where the user should land once their account is usable. If they filled
-      // the questionnaire before signing up, resume it; otherwise start it.
+      // Where the user should land once their account is usable.
+      //
+      // - Arrived via the questionnaire (has a "next" param, e.g. from the
+      //   generating screen) -> resume exactly where they left off.
+      // - Has an in-progress questionnaire draft but no explicit "next" ->
+      //   resume generating it.
+      // - Signed up directly (no questionnaire involved at all) -> go
+      //   straight to the dashboard. The questionnaire is optional and
+      //   reachable later from there; it must not be forced on direct signups.
       const requestedNext = new URLSearchParams(window.location.search).get('next');
       const hasDraft = !!localStorage.getItem('sam-plan-data');
       const destination =
-        requestedNext || (hasDraft ? '/onboarding/generating' : '/onboarding');
+        requestedNext || (hasDraft ? '/onboarding/generating' : '/year-at-a-glance');
 
       // 1. Sign up with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(destination)}`,
+          emailRedirectTo: `${getAppUrl()}/auth/callback?next=${encodeURIComponent(destination)}`,
           data: {
             first_name: formData.firstName,
             last_name: formData.lastName,
@@ -64,6 +72,20 @@ export default function SignupPage() {
 
       if (authError) {
         setError(authError.message);
+        return;
+      }
+
+      // Supabase does not return an error for an email that is already
+      // registered and confirmed - it returns a decoy user object instead,
+      // to prevent attackers from using signup to enumerate real emails.
+      // The tell is an empty identities array. Without this check the UI
+      // showed "Check your email" for a signup that never happened and never
+      // sent anything.
+      const isExistingAccount =
+        !!authData.user && (authData.user.identities?.length ?? 0) === 0;
+
+      if (isExistingAccount) {
+        setError('An account with this email already exists. Please sign in instead.');
         return;
       }
 
@@ -126,6 +148,14 @@ export default function SignupPage() {
         {error && (
           <div className="rounded-[var(--radius-md)] border border-[hsl(var(--destructive)_/_0.3)] bg-[hsl(var(--destructive)_/_0.05)] px-4 py-3 text-sm text-[hsl(var(--destructive))]">
             {error}
+            {error.includes('already exists') && (
+              <>
+                {' '}
+                <Link href="/auth/login" className="font-medium underline">
+                  Sign in
+                </Link>
+              </>
+            )}
           </div>
         )}
 
