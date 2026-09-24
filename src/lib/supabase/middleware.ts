@@ -309,8 +309,14 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // If user is logged in and trying to access auth pages, redirect to app
-  if (isAuthenticated && isAuthRoute && !isAuthFlowRoute) {
+  // If user is logged in and trying to access auth pages, redirect to app.
+  //
+  // EXCEPT for a link-only session: bouncing it into the app would immediately
+  // hit the confinement block above and bounce it straight back to
+  // /auth/set-password — a ping-pong that stranded users on the set-password
+  // screen after they had already set their password. A link-only session must
+  // be able to reach /auth/login so it can sign in for real.
+  if (isAuthenticated && isAuthRoute && !isAuthFlowRoute && !isLinkOnlySession) {
     const url = request.nextUrl.clone();
     url.pathname = '/year-at-a-glance';
     return NextResponse.redirect(url);

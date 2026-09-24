@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
@@ -9,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { BrandLogo } from '@/components/brand-logo';
 
 export default function ResetPasswordPage() {
-  const router = useRouter();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -32,6 +30,20 @@ export default function ResetPasswordPage() {
 
       const url = new URL(window.location.href);
       const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+
+      // 0. Already finished. ?passwordSet=1 means this flow completed and we
+      //    were mid-redirect to login — don't re-show the form (or a scary
+      //    "expired" screen); show the success state, which offers a button and
+      //    auto-forwards to sign in.
+      if (url.searchParams.get('passwordSet') === '1') {
+        if (!mounted) return;
+        setSuccess(true);
+        setCheckingSession(false);
+        setTimeout(() => {
+          window.location.assign('/auth/login?passwordSet=1');
+        }, 1500);
+        return;
+      }
 
       // 1. Explicit error in query or hash → link is invalid/expired.
       if (url.searchParams.get('error') || hash.get('error')) {
@@ -129,15 +141,19 @@ export default function ResetPasswordPage() {
       // so we end it here and make the user sign in with the new password.
       // A failing signOut must not strand them on this screen.
       try {
-        await supabase.auth.signOut();
+        // scope 'local' clears this browser's session without needing a
+        // round trip to succeed; a failure here must not strand the user.
+        await supabase.auth.signOut({ scope: 'local' });
       } catch {
-        // Ignore — the redirect below still gets them to a usable page.
+        // Ignore — the hard navigation below still gets them to a usable page.
       }
 
-      // Send them to login after ~2s so the confirmation is readable.
+      // Full page load (not router.push): guarantees the server sees the
+      // cleared cookies. A client-side navigation could still carry the old
+      // session, and middleware would then ping-pong us back here.
       setTimeout(() => {
-        router.push('/auth/login?passwordSet=1');
-      }, 2000);
+        window.location.assign('/auth/login?passwordSet=1');
+      }, 1500);
     } catch {
       setError('Something went wrong. Please try again.');
     } finally {
@@ -198,6 +214,11 @@ export default function ResetPasswordPage() {
               Your password has been reset. Please sign in with it to continue.
             </p>
           </div>
+          {/* Explicit escape hatch: the auto-redirect below is a convenience,
+              never the only way out. */}
+          <Link href="/auth/login?passwordSet=1" className="block">
+            <Button className="w-full">Go to sign in</Button>
+          </Link>
         </div>
       </div>
     );
