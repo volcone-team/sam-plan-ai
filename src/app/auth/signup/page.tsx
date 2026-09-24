@@ -48,13 +48,13 @@ export default function SignupPage() {
       //   generating screen) -> resume exactly where they left off.
       // - Has an in-progress questionnaire draft but no explicit "next" ->
       //   resume generating it.
-      // - Signed up directly (no questionnaire involved at all) -> go
-      //   straight to the dashboard. The questionnaire is optional and
-      //   reachable later from there; it must not be forced on direct signups.
+      // - Signed up directly (no questionnaire involved) -> the new welcome
+      //   screen, which offers the questionnaire options or a skip to the
+      //   dashboard. The questionnaire is never forced.
       const requestedNext = new URLSearchParams(window.location.search).get('next');
       const hasDraft = !!localStorage.getItem('sam-plan-data');
       const destination =
-        requestedNext || (hasDraft ? '/onboarding/generating' : '/year-at-a-glance');
+        requestedNext || (hasDraft ? '/onboarding/generating' : '/onboarding/welcome');
 
       // 1. Sign up with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({

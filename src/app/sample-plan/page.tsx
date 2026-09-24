@@ -1,8 +1,10 @@
 import { Eye, Target, TrendingUp, Calendar, Rocket } from "lucide-react";
 import Link from "next/link";
-import { companyService } from "@/services/company.service";
-import { planService } from "@/services/plan.service";
-import { initiativeService } from "@/services/initiative.service";
+import {
+  getSampleCompany,
+  getSampleQuarterlyPlans,
+  getSampleInitiatives,
+} from "@/lib/sample-plan-data";
 import { PageContainer, PageHeader, SectionContainer, SectionHeader } from "@/components/layout";
 import { DemoBanner } from "@/components/demo-banner";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -10,14 +12,15 @@ import { Button } from "@/components/ui/button";
 
 /**
  * Sample Plan — Year at a Glance (read-only demo).
- * Loads mock data via the service layer to demonstrate
- * what a completed revenue plan looks like.
+ *
+ * Uses explicit sample data. It previously called the real services and
+ * depended on them silently falling back to mock JSON; that fallback is gone,
+ * so the demo now states its intent directly.
  */
-export default async function SamplePlanPage() {
-  const company = await companyService.getCompany();
-  const companyId = company.id;
-  const quarterlyPlans = await planService.getQuarterlyPlans(companyId, company.planningYear);
-  const initiatives = await initiativeService.getActiveInitiatives(companyId);
+export default function SamplePlanPage() {
+  const company = getSampleCompany();
+  const quarterlyPlans = getSampleQuarterlyPlans(company.planningYear);
+  const initiatives = getSampleInitiatives();
 
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat("en-US", {
@@ -36,7 +39,7 @@ export default async function SamplePlanPage() {
             <span className="text-sm font-semibold">Sample Plan</span>
           </div>
           <div className="flex items-center gap-3">
-            <Link href="/onboarding">
+            <Link href="/auth/signup">
               <Button size="sm">Create My Plan</Button>
             </Link>
             <Link
@@ -175,7 +178,7 @@ export default async function SamplePlanPage() {
               Answer a few questions and get a personalized revenue plan with
               initiatives, projections, and execution timelines.
             </p>
-            <Link href="/onboarding" className="mt-6">
+            <Link href="/auth/signup" className="mt-6">
               <Button size="lg">Generate My Plan</Button>
             </Link>
           </div>

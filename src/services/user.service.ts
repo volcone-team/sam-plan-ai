@@ -2,12 +2,14 @@
  * User Service
  * Manages team members, roles, and access.
  *
- * Strategy: Try Supabase first. If not configured or query fails,
- * fall back to mock JSON data.
+ * Strategy: real data only. Mock JSON is served ONLY when mock mode is
+ * explicitly opted into for local development (SAM_USE_MOCK_DATA=1).
+ * A misconfigured environment throws ConfigurationError instead of silently
+ * returning fabricated users.
  */
 
 import type { User, CreateUserDTO, UpdateUserDTO } from '@/types';
-import { isSupabaseConfigured, getSupabase, camelToSnake } from '@/lib/supabase/db';
+import { assertSupabaseConfigured, isMockDataEnabled, getSupabase, camelToSnake } from '@/lib/supabase/db';
 import usersData from '@/mock-data/users.json';
 
 export class UserService {
@@ -15,114 +17,100 @@ export class UserService {
    * Get all users in a company
    */
   async getUsersByCompany(companyId: string): Promise<User[]> {
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = getSupabase();
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('company_id', companyId)
-          .order('created_at', { ascending: true });
-
-        if (!error && data) {
-          return data.map(row => this.mapRowToUser(row));
-        }
-      } catch {
-        // Fall through to mock
-      }
+    if (isMockDataEnabled()) {
+      await this.delay();
+      return usersData
+        .filter(u => u.companyId === companyId)
+        .map(u => this.transformMockData(u));
     }
 
-    await this.delay();
-    return usersData
-      .filter(u => u.companyId === companyId)
-      .map(u => this.transformMockData(u));
+    assertSupabaseConfigured();
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    return (data || []).map(row => this.mapRowToUser(row));
   }
 
   /**
    * Get a specific user
    */
   async getUser(id: string): Promise<User> {
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = getSupabase();
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', id)
-          .single();
-
-        if (!error && data) {
-          return this.mapRowToUser(data);
-        }
-      } catch {
-        // Fall through to mock
-      }
+    if (isMockDataEnabled()) {
+      await this.delay();
+      const mockUser = usersData.find(u => u.id === id);
+      if (!mockUser) throw new Error(`User ${id} not found`);
+      return this.transformMockData(mockUser);
     }
 
-    await this.delay();
-    const user = usersData.find(u => u.id === id);
-    if (!user) throw new Error(`User ${id} not found`);
-    return this.transformMockData(user);
+    assertSupabaseConfigured();
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) throw error;
+    if (!data) throw new Error(`User ${id} not found`);
+    return this.mapRowToUser(data);
   }
 
   /**
    * Get user by email
    */
   async getUserByEmail(email: string): Promise<User | null> {
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = getSupabase();
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('email', email)
-          .single();
-
-        if (!error && data) {
-          return this.mapRowToUser(data);
-        }
-        return null;
-      } catch {
-        // Fall through to mock
-      }
+    if (isMockDataEnabled()) {
+      await this.delay();
+      const mockUser = usersData.find(u => u.email === email);
+      return mockUser ? this.transformMockData(mockUser) : null;
     }
 
-    await this.delay();
-    const user = usersData.find(u => u.email === email);
-    return user ? this.transformMockData(user) : null;
+    assertSupabaseConfigured();
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data ? this.mapRowToUser(data) : null;
   }
 
   /**
    * Create a new user
    */
   async createUser(dto: CreateUserDTO): Promise<User> {
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = getSupabase();
-        const insertData = {
-          company_id: dto.companyId,
-          email: dto.email,
-          first_name: dto.firstName,
-          last_name: dto.lastName,
-          role: dto.role || 'team_member',
-          marketing_signature: dto.marketingSignature || null,
-          stage_of_business: dto.stageOfBusiness || null,
-        };
+    if (!isMockDataEnabled()) {
+      assertSupabaseConfigured();
+      const supabase = getSupabase();
+      const insertData = {
+        company_id: dto.companyId,
+        email: dto.email,
+        first_name: dto.firstName,
+        last_name: dto.lastName,
+        role: dto.role || 'team_member',
+        marketing_signature: dto.marketingSignature || null,
+        stage_of_business: dto.stageOfBusiness || null,
+      };
 
-        const { data, error } = await supabase
-          .from('profiles')
-          .insert(insertData)
-          .select()
-          .single();
+      const { data, error } = await supabase
+        .from('profiles')
+        .insert(insertData)
+        .select()
+        .single();
 
-        if (!error && data) {
-          return this.mapRowToUser(data);
-        }
-      } catch {
-        // Fall through to mock
-      }
+      if (error) throw error;
+      if (!data) throw new Error('Failed to create user');
+      return this.mapRowToUser(data);
     }
 
+    // Mock path only reachable with the explicit dev opt-in.
     await this.delay();
     const newUser = {
       id: `user-${Date.now()}`,
@@ -139,24 +127,21 @@ export class UserService {
    * Update user details
    */
   async updateUser(id: string, dto: UpdateUserDTO): Promise<User> {
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = getSupabase();
-        const updateData = camelToSnake(dto as unknown as Record<string, unknown>);
+    if (!isMockDataEnabled()) {
+      assertSupabaseConfigured();
+      const supabase = getSupabase();
+      const updateData = camelToSnake(dto as unknown as Record<string, unknown>);
 
-        const { data, error } = await supabase
-          .from('profiles')
-          .update(updateData)
-          .eq('id', id)
-          .select()
-          .single();
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(updateData)
+        .eq('id', id)
+        .select()
+        .single();
 
-        if (!error && data) {
-          return this.mapRowToUser(data);
-        }
-      } catch {
-        // Fall through to mock
-      }
+      if (error) throw error;
+      if (!data) throw new Error(`User ${id} not found`);
+      return this.mapRowToUser(data);
     }
 
     await this.delay();
@@ -170,55 +155,47 @@ export class UserService {
    * Get team members with specific role
    */
   async getUsersByRole(companyId: string, role: User['role']): Promise<User[]> {
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = getSupabase();
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('company_id', companyId)
-          .eq('role', role);
-
-        if (!error && data) {
-          return data.map(row => this.mapRowToUser(row));
-        }
-      } catch {
-        // Fall through to mock
-      }
+    if (isMockDataEnabled()) {
+      await this.delay();
+      return usersData
+        .filter(u => u.companyId === companyId && u.role === role)
+        .map(u => this.transformMockData(u));
     }
 
-    await this.delay();
-    return usersData
-      .filter(u => u.companyId === companyId && u.role === role)
-      .map(u => this.transformMockData(u));
+    assertSupabaseConfigured();
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('role', role);
+
+    if (error) throw error;
+    return (data || []).map(row => this.mapRowToUser(row));
   }
 
   /**
    * Get users with access to initiatives (operators and above)
    */
   async getOperators(companyId: string): Promise<User[]> {
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = getSupabase();
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('company_id', companyId)
-          .in('role', ['owner', 'operator']);
-
-        if (!error && data) {
-          return data.map(row => this.mapRowToUser(row));
-        }
-      } catch {
-        // Fall through to mock
-      }
+    if (isMockDataEnabled()) {
+      await this.delay();
+      const operatorRoles = ['owner', 'operator'];
+      return usersData
+        .filter(u => u.companyId === companyId && operatorRoles.includes(u.role as string))
+        .map(u => this.transformMockData(u));
     }
 
-    await this.delay();
-    const operatorRoles = ['owner', 'operator'];
-    return usersData
-      .filter(u => u.companyId === companyId && operatorRoles.includes(u.role as string))
-      .map(u => this.transformMockData(u));
+    assertSupabaseConfigured();
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('company_id', companyId)
+      .in('role', ['owner', 'operator']);
+
+    if (error) throw error;
+    return (data || []).map(row => this.mapRowToUser(row));
   }
 
   /**

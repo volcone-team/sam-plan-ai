@@ -28,8 +28,8 @@ export default function LandingPage() {
             >
               Login
             </Link>
-            <Link href="/onboarding">
-              <Button size="sm">Get Started</Button>
+            <Link href="/auth/signup">
+              <Button size="sm">Create an Account</Button>
             </Link>
           </nav>
           <div className="flex items-center gap-2 sm:hidden">
@@ -37,8 +37,8 @@ export default function LandingPage() {
             <Link href="/auth/login" className="text-sm text-[hsl(var(--foreground-muted))] hover:text-foreground">
               Login
             </Link>
-            <Link href="/onboarding">
-              <Button size="sm">Get Started</Button>
+            <Link href="/auth/signup">
+              <Button size="sm">Create an Account</Button>
             </Link>
           </div>
         </div>
@@ -84,9 +84,9 @@ export default function LandingPage() {
 
               {/* CTA Buttons */}
               <div className="mt-10 flex flex-col gap-4 sm:flex-row">
-                <Link href="/onboarding">
+                <Link href="/auth/signup">
                   <GlassButton className="w-full sm:w-auto">
-                    Generate My Plan
+                    Create an Account
                     <ArrowRight className="ml-1 h-4 w-4" />
                   </GlassButton>
                 </Link>
@@ -161,9 +161,9 @@ export default function LandingPage() {
                 initiatives, projections, and project plans — in minutes.
               </p>
               <div className="mt-8 flex flex-col gap-4 sm:flex-row">
-                <Link href="/onboarding">
+                <Link href="/auth/signup">
                   <Button size="lg">
-                    Generate My Plan
+                    Create an Account
                     <ArrowRight className="ml-1 h-4 w-4" />
                   </Button>
                 </Link>

@@ -182,7 +182,7 @@ export default function ReviewPage() {
             <Link href="/onboarding/full">
               <Button variant="outline">Resume Full Plan</Button>
             </Link>
-            <Link href="/onboarding">
+            <Link href="/onboarding/welcome">
               <Button>Start Questionnaire</Button>
             </Link>
           </div>

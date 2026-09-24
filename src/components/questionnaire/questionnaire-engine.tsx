@@ -132,7 +132,7 @@ export function QuestionnaireEngine({ mode }: QuestionnaireEngineProps) {
       <header className="shrink-0 border-b border-border bg-background">
         <div className="mx-auto flex h-14 max-w-3xl items-center justify-between px-4 sm:px-6">
           <Link
-            href="/onboarding"
+            href="/onboarding/welcome"
             className="flex items-center gap-2 text-sm text-[hsl(var(--foreground-muted))] hover:text-foreground transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />

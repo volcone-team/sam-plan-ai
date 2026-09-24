@@ -124,25 +124,53 @@ export async function POST(request: Request) {
 
     const companyId = profile.company_id;
 
-    // 3. Get annual plan
-    const { data: annualPlan } = await supabase
-      .from("annual_plans")
-      .select("id")
-      .eq("company_id", companyId)
-      .order("year", { ascending: false })
-      .limit(1)
-      .single();
-
-    if (!annualPlan) {
-      return NextResponse.json({ error: "No annual plan found" }, { status: 400 });
-    }
-
-    // 4. Parse questionnaire data from request body
+    // 3. Parse the request body first - we need targetYear to resolve the plan.
     const body = await request.json();
     const questionnaire = body.questionnaire;
+    const targetYear: number | undefined =
+      typeof body.targetYear === "number" && body.targetYear > 2000 ? body.targetYear : undefined;
 
     if (!questionnaire) {
       return NextResponse.json({ error: "Missing questionnaire data" }, { status: 400 });
+    }
+
+    // 4. Resolve the annual plan to generate into.
+    //    With a targetYear (future-year draft) attach to THAT year's plan,
+    //    creating it if needed. Without one, use the most recent plan.
+    let annualPlan: { id: string } | null = null;
+    if (targetYear) {
+      const { data: existing } = await supabase
+        .from("annual_plans")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("year", targetYear)
+        .maybeSingle();
+      if (existing) {
+        annualPlan = existing;
+      } else {
+        const { data: created, error: createErr } = await supabase
+          .from("annual_plans")
+          .insert({ company_id: companyId, year: targetYear, baseline_revenue: 0, stretch_revenue: 0, operating_budget: 0, status: "draft" })
+          .select("id")
+          .single();
+        if (createErr || !created) {
+          return NextResponse.json({ error: "Could not create the plan for " + targetYear }, { status: 500 });
+        }
+        annualPlan = created;
+      }
+    } else {
+      const { data: latest } = await supabase
+        .from("annual_plans")
+        .select("id")
+        .eq("company_id", companyId)
+        .order("year", { ascending: false })
+        .limit(1)
+        .single();
+      annualPlan = latest;
+    }
+
+    if (!annualPlan) {
+      return NextResponse.json({ error: "No annual plan found" }, { status: 400 });
     }
 
     // 5. Call Claude
@@ -198,8 +226,10 @@ Generate a complete revenue plan as JSON.`;
     const planPeriodRaw = questionnaire.planningPeriod || "12-months";
     const planMonths = planPeriodRaw === "3-months" ? 3 : planPeriodRaw === "6-months" ? 6 : 12;
     const now = new Date();
-    const startMonth = now.getMonth() + 1; // 1-indexed
-    const startYear = now.getFullYear();
+    // A future-year plan runs the full calendar year (Jan). The current year
+    // starts from the current month, as before.
+    const startMonth = targetYear ? 1 : now.getMonth() + 1; // 1-indexed
+    const startYear = targetYear ?? now.getFullYear();
 
     // 5b. Load initiative types from DB to feed into the prompt
     let initiativeTypesContext = "";
@@ -327,19 +357,56 @@ Generate a complete revenue plan as JSON.`;
         .eq("id", annualPlan.id);
     }
 
-    // 7b. Insert products from the user's questionnaire (not AI-generated)
+    // 7b. Persist the user's questionnaire products (not AI-generated).
+    //     Reuse an existing product with the same name instead of inserting a
+    //     duplicate. Previously every regeneration re-inserted the full list,
+    //     so a company accumulated the same product many times over. We match
+    //     by name rather than deleting, because kept initiatives still
+    //     reference the existing product rows via FK.
     const productIds: string[] = [];
     const userProducts = questionnaire.products || [];
+
+    const { data: existingProducts } = await supabase
+      .from("products")
+      .select("id, name")
+      .eq("company_id", companyId);
+    const productIdByName = new Map<string, string>(
+      (existingProducts || []).map((pr: { id: string; name: string }) => [
+        String(pr.name).trim().toLowerCase(),
+        pr.id,
+      ])
+    );
+
     for (let i = 0; i < userProducts.length; i++) {
       const prod = userProducts[i];
+      const name = prod.name || "Untitled Product";
+      const key = String(name).trim().toLowerCase();
       const isRecurring = prod.type === "membership" || prod.type === "subscription" || prod.type === "coaching";
       const price = prod.price || 0;
       const tier = price >= 2000 ? "high" : price >= 500 ? "mid" : "low";
+
+      // Already have this product - refresh its details and reuse the row.
+      const existingId = productIdByName.get(key);
+      if (existingId) {
+        await supabase
+          .from("products")
+          .update({
+            price,
+            revenue_type: isRecurring ? "recurring" : "one-time",
+            ticket_tier: tier,
+            is_active: true,
+            display_order: i,
+          })
+          .eq("id", existingId);
+        productIds.push(existingId);
+        continue;
+      }
+
       const { data: newProd, error: prodErr } = await supabase
         .from("products")
         .insert({
           company_id: companyId,
-          name: prod.name || "Untitled Product",
+          name,
           description: "",
           price,
           revenue_type: isRecurring ? "recurring" : "one-time",
@@ -355,6 +422,7 @@ Generate a complete revenue plan as JSON.`;
         throw new Error("Failed to save product: " + prodErr.message);
       }
       productIds.push(newProd?.id || "");
+      if (newProd?.id) productIdByName.set(key, newProd.id);
     }
 
     // 7c. Get or create initiative types for each channel
@@ -458,8 +526,23 @@ Generate a complete revenue plan as JSON.`;
       }
     }
 
-    // 7e. Insert projections
+    // 7e. Insert projections.
+    //     Replace, don't append: generation used to only INSERT, so every
+    //     regeneration stacked another good/better/best set on top of the old
+    //     ones (one company reached 10 rows where 3 are correct). Clearing the
+    //     company's projections first makes generation idempotent.
     if (plan.monthlyProjections) {
+      const { error: clearProjErr } = await supabase
+        .from("projections")
+        .delete()
+        .eq("company_id", companyId)
+        .eq("annual_plan_id", annualPlan.id);
+      if (clearProjErr) {
+        console.error("[generate-plan] Failed to clear old projections:", clearProjErr.message);
+      } else {
+        console.log("[generate-plan] Cleared previous projections before insert");
+      }
+
       const scenarios = ["good", "better", "best"] as const;
       for (const scenario of scenarios) {
         // Claude may return an array directly or a nested object - normalize.
@@ -498,18 +581,23 @@ Generate a complete revenue plan as JSON.`;
       }
     }
 
-    // 7f. Update company revenue targets + plan financials
-    await supabase
-      .from("companies")
-      .update({
-        target_revenue: questionnaire.annualRevenueGoal || 0,
-        prior_year_revenue: questionnaire.priorYearRevenue || 0,
-        baseline_revenue: plan.annualPlan?.baselineRevenue || 0,
-        stretch_revenue: plan.annualPlan?.stretchRevenue || 0,
-        operating_budget: plan.annualPlan?.operatingBudget || 0,
-        description: questionnaire.idealCustomer || "",
-      })
-      .eq("id", companyId);
+    // 7f. Update company-level revenue targets + financials.
+    //     Only for the CURRENT year. The `companies` row holds the live
+    //     targets; a future-year generation must not overwrite them (its
+    //     figures live on that year's annual_plans row, updated in 7a).
+    if (!targetYear) {
+      await supabase
+        .from("companies")
+        .update({
+          target_revenue: questionnaire.annualRevenueGoal || 0,
+          prior_year_revenue: questionnaire.priorYearRevenue || 0,
+          baseline_revenue: plan.annualPlan?.baselineRevenue || 0,
+          stretch_revenue: plan.annualPlan?.stretchRevenue || 0,
+          operating_budget: plan.annualPlan?.operatingBudget || 0,
+          description: questionnaire.idealCustomer || "",
+        })
+        .eq("id", companyId);
+    }
 
     // 7g. Log this generation event for admin metrics + activity feed.
     //     Non-fatal: if the table doesn't exist yet, we just skip it.

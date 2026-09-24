@@ -9,18 +9,18 @@ import { cookies } from "next/headers";
  *
  * KEEPS (never deleted):
  *   - Completed / launched / in-progress initiatives (touched or done)
- *   - Any initiative whose activation_date is today or in the past
  *   - All results, expenses, and their history
  *
  * DELETES (only these):
- *   - Initiatives with status 'planned' AND activation_date in the future
- *     (upcoming, not-yet-started work)
+ *   - Initiatives with status 'planned' (not-yet-started work), regardless of
+ *     date - a past-dated planned initiative is still untouched work, and
+ *     keeping it caused duplicates to pile up on each regeneration
  *   - Tasks belonging to those deleted initiatives (via ON DELETE CASCADE)
  *
  * Also snapshots the full current plan to plan_snapshots first, so nothing
  * is ever truly lost.
  */
-export async function DELETE() {
+export async function DELETE(request: Request) {
   try {
     console.log("[plan/reset-scratch] Starting selective reset...");
 
@@ -59,24 +59,42 @@ export async function DELETE() {
     const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
     console.log("[plan/reset-scratch] Company:", companyId, "| today:", today);
 
-    // 1. Load all initiatives to decide what stays vs. goes
+    // Which year are we resetting? Scope to that year's plan so a future-year
+    // regeneration cannot touch the current year's initiatives.
+    const url = new URL(request.url);
+    const yearParam = Number(url.searchParams.get("year"));
+    const targetYear = Number.isFinite(yearParam) && yearParam > 2000 ? yearParam : null;
+
+    const { data: targetPlan } = targetYear
+      ? await supabase.from("annual_plans").select("id, year").eq("company_id", companyId).eq("year", targetYear).maybeSingle()
+      : await supabase.from("annual_plans").select("id, year").eq("company_id", companyId).order("year", { ascending: false }).limit(1).maybeSingle();
+
+    if (!targetPlan?.id) {
+      console.log("[plan/reset-scratch] No plan row for year", targetYear ?? "(latest)", "- nothing to reset");
+      return NextResponse.json({ success: true, deleted: 0, kept: 0 });
+    }
+    const planId = targetPlan.id;
+    console.log("[plan/reset-scratch] Year:", targetPlan.year, "| planId:", planId);
+
+    // 1. Load this year's initiatives to decide what stays vs. goes
     const { data: allInitiatives, error: loadErr } = await supabase
       .from("initiatives")
       .select("id, name, status, activation_date")
-      .eq("company_id", companyId);
+      .eq("annual_plan_id", planId);
 
     if (loadErr) {
       console.error("[plan/reset-scratch] Failed to load initiatives:", loadErr.message);
       return NextResponse.json({ error: loadErr.message }, { status: 500 });
     }
 
-    // Decide which initiatives to delete:
-    //   status === 'planned' AND activation_date is in the FUTURE
-    const toDelete = (allInitiatives || []).filter((i) => {
-      const isPlanned = i.status === "planned";
-      const isFuture = i.activation_date && i.activation_date > today;
-      return isPlanned && isFuture;
-    });
+    // Decide which initiatives to delete: any that have NOT been started.
+    //
+    // This used to also require activation_date > today, which meant
+    // past-dated "planned" rows survived every regeneration and the new
+    // generation stacked more on top - one company accumulated 26 initiatives
+    // with the same names repeated. `status === "planned"` already means
+    // untouched, so the date test only caused duplication.
+    const toDelete = (allInitiatives || []).filter((i) => i.status === "planned");
     const toKeep = (allInitiatives || []).filter((i) => !toDelete.includes(i));
 
     console.log(
@@ -99,12 +117,12 @@ export async function DELETE() {
         { data: expensesFull },
         { data: annualPlanFull },
       ] = await Promise.all([
-        supabase.from("initiatives").select("*").eq("company_id", companyId),
+        supabase.from("initiatives").select("*").eq("annual_plan_id", planId),
         supabase.from("tasks").select("*").eq("company_id", companyId),
-        supabase.from("projections").select("*").eq("company_id", companyId),
+        supabase.from("projections").select("*").eq("annual_plan_id", planId),
         supabase.from("results").select("*").eq("company_id", companyId),
         supabase.from("expenses").select("*").eq("company_id", companyId),
-        supabase.from("annual_plans").select("*").eq("company_id", companyId).order("year", { ascending: false }).limit(1).single(),
+        supabase.from("annual_plans").select("*").eq("id", planId).single(),
       ]);
 
       const hasData = (initiativesFull?.length || 0) > 0;

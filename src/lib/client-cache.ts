@@ -111,6 +111,7 @@ export const TTL = {
 /** Cache keys, centralised so invalidation can't drift from writes. */
 export const CacheKeys = {
   me: "me",
-  dashboard: (companyId: string) => `dashboard:${companyId}`,
+  /** Year-scoped so switching years does not serve another year's data. */
+  dashboard: (companyId: string, year: number) => `dashboard:${companyId}:${year}`,
   planPrefix: "dashboard:",
 } as const;

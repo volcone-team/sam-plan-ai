@@ -2,12 +2,17 @@
  * Company Service
  * Handles all company data operations.
  *
- * Strategy: Try Supabase first. If not configured or query fails,
- * fall back to mock JSON data so the app works during development.
+ * Strategy: real data only. Mock JSON is served ONLY when mock mode is
+ * explicitly opted into for local development (SAM_USE_MOCK_DATA=1).
+ *
+ * Previously this fell back to mock data whenever Supabase was unconfigured OR
+ * a query failed, which meant a misconfigured production deploy silently
+ * served fabricated records ("Elevate Coaching", $750k target) as if they were
+ * the user's own. Misconfiguration must fail loudly instead.
  */
 
 import type { Company, UpdateCompanyDTO } from '@/types';
-import { isSupabaseConfigured, getSupabase, snakeToCamel, camelToSnake } from '@/lib/supabase/db';
+import { assertSupabaseConfigured, isMockDataEnabled, getSupabase, snakeToCamel, camelToSnake } from '@/lib/supabase/db';
 import companyData from '@/mock-data/company.json';
 
 export class CompanyService {
@@ -15,57 +20,53 @@ export class CompanyService {
    * Get the company profile by ID
    */
   async getCompany(id?: string): Promise<Company> {
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = getSupabase();
-        let query = supabase.from('companies').select('*');
-
-        if (id) {
-          query = query.eq('id', id);
-        }
-
-        const { data, error } = await query.limit(1).single();
-
-        if (!error && data) {
-          return this.mapRowToCompany(data);
-        }
-      } catch {
-        // Fall through to mock
-      }
+    // Dev-only escape hatch, explicitly opted into.
+    if (isMockDataEnabled()) {
+      await this.delay();
+      return this.transformMockData(companyData);
     }
 
-    // Fallback: mock data
-    await this.delay();
-    return this.transformMockData(companyData);
+    // Throws ConfigurationError rather than fabricating data.
+    assertSupabaseConfigured();
+
+    const supabase = getSupabase();
+    let query = supabase.from('companies').select('*');
+    if (id) {
+      query = query.eq('id', id);
+    }
+
+    const { data, error } = await query.limit(1).single();
+    if (error) throw error;
+    if (!data) throw new Error('Company not found');
+
+    return this.mapRowToCompany(data);
   }
 
   /**
    * Update company details
    */
   async updateCompany(id: string, dto: UpdateCompanyDTO): Promise<Company> {
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = getSupabase();
-        const updateData = camelToSnake(dto as unknown as Record<string, unknown>);
-
-        const { data, error } = await supabase
-          .from('companies')
-          .update(updateData)
-          .eq('id', id)
-          .select()
-          .single();
-
-        if (!error && data) {
-          return this.mapRowToCompany(data);
-        }
-      } catch {
-        // Fall through to mock
-      }
+    if (isMockDataEnabled()) {
+      await this.delay();
+      return this.transformMockData({ ...companyData, ...dto, updatedAt: new Date().toISOString() });
     }
 
-    // Fallback: mock update
-    await this.delay();
-    return this.transformMockData({ ...companyData, ...dto, updatedAt: new Date().toISOString() });
+    assertSupabaseConfigured();
+
+    const supabase = getSupabase();
+    const updateData = camelToSnake(dto as unknown as Record<string, unknown>);
+
+    const { data, error } = await supabase
+      .from('companies')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    if (!data) throw new Error('Company not found');
+
+    return this.mapRowToCompany(data);
   }
 
   /**

@@ -1,0 +1,201 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1. Create the notifications schema migration": [
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196465923
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196476867
+      }
+    ],
+    "2. Implement the pure template renderer": [
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196466023
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196484076
+      }
+    ],
+    "3. Implement the unsubscribe token helper": [
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196466103
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196491022
+      }
+    ],
+    "4. Build the notifications service core (detection + recipients + rules)": [
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196466136
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196498411
+      }
+    ],
+    "5. Implement the claim-before-send idempotency path in the service": [
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196466174
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196506008
+      }
+    ],
+    "6. Build the unsubscribe link into the send path": [
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196466204
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196523448
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196726632
+      }
+    ],
+    "7. Add the secured cron route": [
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196466243
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196735528
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790197300340
+      }
+    ],
+    "8. Add the Vercel cron schedule": [
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196466288
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790197308552
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790197366533
+      }
+    ],
+    "9. Add the unsubscribe route": [
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196466349
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790197374904
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790197738616
+      }
+    ],
+    "10. Add the admin notifications API": [
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196466386
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790197746329
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790198103994
+      }
+    ],
+    "11. Build the admin notifications page": [
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196466459
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790198112289
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790198611233
+      }
+    ],
+    "12. Document the new environment variables": [
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196466535
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790198621314
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790198737482
+      }
+    ],
+    "13. End-to-end verification and QA": [
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790196466603
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790198748260
+      },
+      {
+        "executionId": "95cd95b9-1358-4753-a126-1f23a8b17abc",
+        "chatSessionId": "30cfde4b-966b-4c37-a139-a6ecb28c626e",
+        "timestamp": 1790199227123
+      }
+    ]
+  }
+}

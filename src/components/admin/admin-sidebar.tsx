@@ -14,6 +14,7 @@ import {
   BookOpen,
   CreditCard,
   TrendingUp,
+  Bell,
   Settings,
   Shield,
   Menu,
@@ -40,6 +41,7 @@ const navItems: NavItem[] = [
   { label: "Content", href: "/admin/content", icon: BookOpen },
   { label: "Subscriptions", href: "/admin/subscriptions", icon: CreditCard },
   { label: "Analytics", href: "/admin/analytics", icon: TrendingUp },
+  { label: "Notifications", href: "/admin/notifications", icon: Bell },
   { label: "Settings", href: "/admin/settings", icon: Settings },
 ];
 

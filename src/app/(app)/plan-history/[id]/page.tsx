@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Loader2, DollarSign, Rocket, ListTodo, BarChart3, RotateCcw, Check, AlertTriangle, X } from 'lucide-react';
+import { ArrowLeft, Loader2, DollarSign, Rocket, ListTodo, BarChart3, RotateCcw, Check, AlertTriangle, X, Trash2 } from 'lucide-react';
 import { PageContainer } from '@/components/layout';
 import { cacheInvalidatePrefix, CacheKeys } from '@/lib/client-cache';
 import { useToast } from '@/components/ui/toast';
@@ -35,6 +35,8 @@ export default function PlanSnapshotDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState<string | null>(null); // "full" or an initiative id
   const [confirmFull, setConfirmFull] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const { showToast } = useToast();
 
@@ -67,6 +69,26 @@ export default function PlanSnapshotDetailPage() {
     } finally {
       setRestoring(null);
       setConfirmFull(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    console.log("[PlanSnapshot] Deleting snapshot:", params.id);
+    try {
+      const res = await fetch(`/api/plan/history/${params.id}`, { method: "DELETE" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(json.error || "Could not delete this plan version.", { variant: "error", duration: 5000 });
+        return;
+      }
+      showToast(`"${json.deletedLabel || "Plan version"}" deleted from history.`, { variant: "success", duration: 4000 });
+      router.push("/plan-history");
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : "Network error", { variant: "error", duration: 5000 });
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(false);
     }
   };
 
@@ -133,13 +155,22 @@ export default function PlanSnapshotDetailPage() {
             Saved {new Date(snapshot.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </p>
         </div>
-        <button
-          onClick={() => setConfirmFull(true)}
-          className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm font-medium hover:border-[hsl(var(--primary))] hover:bg-[hsl(var(--background-muted))] transition-colors"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-          Restore Entire Plan
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setConfirmFull(true)}
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm font-medium hover:border-[hsl(var(--primary))] hover:bg-[hsl(var(--background-muted))] transition-colors"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Restore Entire Plan
+          </button>
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 transition-colors"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete
+          </button>
+        </div>
       </div>
 
       {/* Full-restore warning modal. Restoring replaces every not-started
@@ -197,6 +228,56 @@ export default function PlanSnapshotDetailPage() {
               label="Restoring your plan..."
               className="mt-4"
             />
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-[var(--radius-lg)] border border-border bg-card p-6 shadow-xl">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-500" />
+                <h3 className="text-lg font-semibold">Delete this plan version?</h3>
+              </div>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="rounded-md p-1 text-[hsl(var(--foreground-muted))] hover:bg-[hsl(var(--background-muted))]"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-[var(--radius-md)] border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/20">
+              <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                &ldquo;{snapshot.label}&rdquo; will be permanently removed from your history.
+              </p>
+              <ul className="mt-2 space-y-1 text-xs text-amber-800 dark:text-amber-300">
+                <li>• Your current plan is not affected</li>
+                <li>• You will no longer be able to restore this version</li>
+                <li>• This cannot be undone</li>
+              </ul>
+            </div>
+
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                className="rounded-[var(--radius-md)] border border-border px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--background-muted))] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                Yes, Delete
+              </button>
+            </div>
           </div>
         </div>
       )}

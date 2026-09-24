@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/* ------------------------------------------------------------
+   DARK MODE VARIANT (Tailwind v4)
+   Tailwind v4 defaults `dark:` to @media (prefers-color-scheme: dark),
+   which ignores the `.dark` class that next-themes sets on <html>.
+   That meant an explicit theme toggle updated the CSS-variable theme but
+   left every `dark:` utility following the OS setting instead.
+   Binding the variant to the class keeps utilities and tokens in sync.
+   ------------------------------------------------------------ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* ============================================================
    DESIGN SYSTEM FOUNDATION — Phase 2.1
    SAM Flow AI Design Tokens
@@ -733,4 +743,32 @@ label[for],
 button:disabled,
 [aria-disabled="true"] {
   cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------
+   BRAND LOGO DARK-MODE SWAP
+   Swaps the wordmark between light/dark backgrounds with pure CSS
+   (no client JS, so it's flash-free before first paint).
+
+   These `.dark .brand-logo-*` rules have specificity 0,2,0, which
+   reliably beats any single-class display utility (0,1,0) a caller
+   might pass via `className`. That matters because the project's
+   `dark:` variant uses `:where(.dark, .dark *)` (specificity 0,0,0),
+   so a `dark:hidden`/`block` pair on one element would tie and depend
+   on source order — the bug this replaces.
+   ------------------------------------------------------------ */
+.brand-logo-light {
+  display: block;
+}
+
+.brand-logo-dark {
+  display: none;
+}
+
+.dark .brand-logo-light {
+  display: none;
+}
+
+.dark .brand-logo-dark {
+  display: block;
 }

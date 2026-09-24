@@ -2,13 +2,14 @@
 
 import { useAuth } from '@/hooks/use-auth';
 import { useTheme } from 'next-themes';
+import { useRouter } from 'next/navigation';
 
 import { useState, useEffect } from 'react';
-import { Save, CheckCircle } from 'lucide-react';
+import { Save, CheckCircle, Trash2, AlertTriangle, Lock, Loader2, Eye, EyeOff } from 'lucide-react';
 import { userService } from '@/services/user.service';
-import type { User } from '@/types';
-
-const STORAGE_KEY = 'sam-flow-user-profile';
+import { createClient } from '@/lib/supabase/client';
+import { cacheClearAll } from '@/lib/client-cache';
+import { DeleteAccountModal } from './delete-account-modal';
 
 interface ProfileFormData {
   firstName: string;
@@ -21,10 +22,22 @@ interface ProfileFormData {
 export function UserProfile() {
   const { userId, firstName, lastName, email, role: authRole, loading: authLoading } = useAuth();
   const { theme: currentTheme, setTheme } = useTheme();
+  const router = useRouter();
   const [formData, setFormData] = useState<ProfileFormData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSuccess, setShowSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  /** Which delete flow the modal is showing, or null when closed. */
+  const [deleteMode, setDeleteMode] = useState<'account' | 'company' | null>(null);
+
+  // --- Security / Change Password state (kept separate from profile-save state) ---
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPasswords, setShowPasswords] = useState(false);
+  const [pwSubmitting, setPwSubmitting] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwSuccess, setPwSuccess] = useState(false);
 
   useEffect(() => {
     if (authLoading) return;
@@ -73,6 +86,63 @@ export function UserProfile() {
   const handleChange = (field: keyof ProfileFormData, value: string) => {
     if (!formData) return;
     setFormData({ ...formData, [field]: value });
+  };
+
+  // Both account and company deletion end the current user's session, so wipe
+  // client cache, sign out, and send them to the landing page.
+  const handleDeleted = async () => {
+    setDeleteMode(null);
+    cacheClearAll();
+    try {
+      await createClient().auth.signOut();
+    } catch {
+      // Even if sign-out fails, the account/company is already gone server-side.
+    }
+    router.push('/');
+  };
+
+  const handlePasswordUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwError(null);
+    setPwSuccess(false);
+
+    // Client-side validation before hitting the API.
+    if (newPassword !== confirmPassword) {
+      setPwError('Passwords do not match.');
+      return;
+    }
+    if (newPassword.length < 8) {
+      setPwError('Password must be at least 8 characters.');
+      return;
+    }
+
+    setPwSubmitting(true);
+    try {
+      const res = await fetch('/api/me/password', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setPwError(data.message || data.error || 'Could not update password.');
+        return;
+      }
+
+      // Success: clear fields and show confirmation.
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPwSuccess(true);
+      setTimeout(() => setPwSuccess(false), 3000);
+    } catch {
+      setPwError('Could not update password.');
+    } finally {
+      setPwSubmitting(false);
+    }
   };
 
   const getInitials = (): string => {
@@ -204,6 +274,171 @@ export function UserProfile() {
           Save Profile
         </button>
       </div>
+
+      {/* Security — change password. */}
+      <div className="rounded-[var(--radius-lg)] border border-border bg-card p-5">
+        <div className="flex items-center gap-2">
+          <Lock className="h-5 w-5 text-[hsl(var(--primary))]" />
+          <h3 className="text-base font-semibold">Security</h3>
+        </div>
+
+        <div className="mt-4 space-y-4">
+          <div>
+            <p className="text-sm font-medium">Change Password</p>
+            <p className="text-xs text-[hsl(var(--foreground-muted))]">
+              Enter your current password, then choose a new one.
+            </p>
+          </div>
+
+          {pwError && (
+            <div role="alert" className="rounded-[var(--radius-md)] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+              {pwError}
+            </div>
+          )}
+
+          {pwSuccess && (
+            <div className="flex items-center gap-2 rounded-[var(--radius-md)] border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200">
+              <CheckCircle className="h-4 w-4" />
+              Password updated successfully.
+            </div>
+          )}
+
+          <form onSubmit={handlePasswordUpdate} className="space-y-4">
+            <div className="space-y-1.5">
+              <label htmlFor="currentPassword" className="text-sm font-medium">
+                Current password
+              </label>
+              <div className="relative">
+                <input
+                  id="currentPassword"
+                  type={showPasswords ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  value={currentPassword}
+                  onChange={e => setCurrentPassword(e.target.value)}
+                  className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 pr-10 text-sm outline-none focus:border-[hsl(var(--primary))] focus:ring-1 focus:ring-[hsl(var(--primary))]"
+                  placeholder="Enter current password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswords(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[hsl(var(--foreground-muted))] hover:text-foreground"
+                  aria-label={showPasswords ? 'Hide passwords' : 'Show passwords'}
+                >
+                  {showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label htmlFor="newPassword" className="text-sm font-medium">
+                  New password
+                </label>
+                <input
+                  id="newPassword"
+                  type={showPasswords ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))] focus:ring-1 focus:ring-[hsl(var(--primary))]"
+                  placeholder="Min 8 characters"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="confirmPassword" className="text-sm font-medium">
+                  Confirm new password
+                </label>
+                <input
+                  id="confirmPassword"
+                  type={showPasswords ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))] focus:ring-1 focus:ring-[hsl(var(--primary))]"
+                  placeholder="Re-enter new password"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={pwSubmitting}
+                className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 transition-opacity disabled:opacity-60"
+              >
+                {pwSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Updating...
+                  </>
+                ) : (
+                  <>
+                    <Lock className="h-4 w-4" />
+                    Update Password
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Danger Zone — destructive, irreversible actions. */}
+      <div className="rounded-[var(--radius-lg)] border border-red-200 bg-card p-5 dark:border-red-900/60">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="h-5 w-5 text-red-500" />
+          <h3 className="text-base font-semibold text-red-600 dark:text-red-400">Danger Zone</h3>
+        </div>
+
+        <div className="mt-4 space-y-4">
+          {/* Delete account — always available. */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-medium">Delete Account</p>
+              <p className="text-xs text-[hsl(var(--foreground-muted))]">
+                Permanently delete your account. This cannot be undone.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDeleteMode('account')}
+              className="inline-flex items-center justify-center gap-1.5 rounded-[var(--radius-md)] border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete Account
+            </button>
+          </div>
+
+          {/* Delete company — owners only. */}
+          {authRole === 'owner' && (
+            <div className="flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium">Delete Company &amp; All Data</p>
+                <p className="text-xs text-[hsl(var(--foreground-muted))]">
+                  Removes the entire company and every member, along with all plans and data.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteMode('company')}
+                className="inline-flex items-center justify-center gap-1.5 rounded-[var(--radius-md)] bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete Company &amp; All Data
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <DeleteAccountModal
+        open={deleteMode !== null}
+        mode={deleteMode ?? 'account'}
+        onClose={() => setDeleteMode(null)}
+        userEmail={email || formData.email}
+        onConfirmed={handleDeleted}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
@@ -16,6 +16,82 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  // Session guard: a user reaching this page arrived from a recovery link, so
+  // they should already have a session (or carry the token needed to establish
+  // one). Without it updateUser would fail — so check up front and show a
+  // friendly recovery message instead of the form. Mirrors /auth/set-password.
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [hasSession, setHasSession] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const establishSession = async () => {
+      const supabase = createClient();
+
+      const url = new URL(window.location.href);
+      const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+
+      // 1. Explicit error in query or hash → link is invalid/expired.
+      if (url.searchParams.get('error') || hash.get('error')) {
+        if (!mounted) return;
+        setHasSession(false);
+        setCheckingSession(false);
+        return;
+      }
+
+      // 2. PREFERRED: token_hash + type (the link we email). Deterministic —
+      //    verifyOtp establishes the session server-verified, with no reliance
+      //    on implicit-flow hash fragments that the PKCE browser client will
+      //    refuse to adopt (and strip), which caused false "expired" screens.
+      const tokenHash = url.searchParams.get('token_hash');
+      const otpType = url.searchParams.get('type');
+      if (tokenHash && otpType) {
+        await supabase.auth.verifyOtp({
+          type: otpType as 'recovery' | 'invite' | 'email',
+          token_hash: tokenHash,
+        });
+      } else if (url.searchParams.get('code')) {
+        // 3. PKCE flow: exchange ?code=<uuid> for a session.
+        await supabase.auth.exchangeCodeForSession(window.location.href);
+      } else if (hash.get('access_token')) {
+        // 4. Legacy implicit flow: tokens in the URL hash. The browser client may
+        //    already have adopted them; otherwise set the session explicitly.
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session) {
+          await supabase.auth.setSession({
+            access_token: hash.get('access_token')!,
+            refresh_token: hash.get('refresh_token') ?? '',
+          });
+        }
+      }
+
+      // 5. Final authority: whatever we attempted, ask for the actual user.
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!mounted) return;
+
+      // 6. Clean the URL once a session exists so a refresh does not re-run the
+      // exchange against a now-consumed code (avoids "code already used").
+      if (user) {
+        window.history.replaceState({}, '', '/auth/reset-password');
+      }
+
+      setHasSession(!!user);
+      setCheckingSession(false);
+    };
+
+    establishSession();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,9 +122,21 @@ export default function ResetPasswordPage() {
       }
 
       setSuccess(true);
-      // Redirect to app after 2 seconds
+
+      // The session that authorized this page came from a recovery LINK, and
+      // its `amr` claim stays 'otp' forever — resetting the password does not
+      // upgrade it. Middleware therefore (correctly) confines it to this flow,
+      // so we end it here and make the user sign in with the new password.
+      // A failing signOut must not strand them on this screen.
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // Ignore — the redirect below still gets them to a usable page.
+      }
+
+      // Send them to login after ~2s so the confirmation is readable.
       setTimeout(() => {
-        router.push('/year-at-a-glance');
+        router.push('/auth/login?passwordSet=1');
       }, 2000);
     } catch {
       setError('Something went wrong. Please try again.');
@@ -56,6 +144,47 @@ export default function ResetPasswordPage() {
       setLoading(false);
     }
   };
+
+  // Loading state while we verify the recovery session (prevents form flash)
+  if (checkingSession) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center px-4">
+        <div className="w-full max-w-sm space-y-6 text-center">
+          <BrandLogo width={140} height={47} />
+          <Loader2 className="h-6 w-6 animate-spin text-[hsl(var(--foreground-muted))] mx-auto" />
+        </div>
+      </div>
+    );
+  }
+
+  // No session: the reset link is invalid or expired
+  if (!hasSession) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center px-4">
+        <div className="w-full max-w-sm space-y-6 text-center">
+          <BrandLogo width={140} height={47} />
+          <div className="space-y-3">
+            <h1 className="text-2xl font-bold tracking-tight">Reset link expired</h1>
+            <p className="text-sm text-[hsl(var(--foreground-muted))]">
+              This link is invalid, already used, or has expired. Request a new
+              password reset link to continue.
+            </p>
+          </div>
+          <div className="space-y-3">
+            <Link href="/auth/forgot-password" className="block">
+              <Button className="w-full">Forgot Password</Button>
+            </Link>
+            <Link
+              href="/auth/login"
+              className="block text-center text-sm text-[hsl(var(--foreground-muted))] hover:text-foreground transition-colors"
+            >
+              Back to Login
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (success) {
     return (
@@ -66,7 +195,7 @@ export default function ResetPasswordPage() {
             <CheckCircle2 className="h-12 w-12 text-[hsl(var(--success))] mx-auto" />
             <h1 className="text-2xl font-bold tracking-tight">Password updated</h1>
             <p className="text-sm text-[hsl(var(--foreground-muted))]">
-              Your password has been reset successfully. Redirecting you to the app...
+              Your password has been reset. Please sign in with it to continue.
             </p>
           </div>
         </div>

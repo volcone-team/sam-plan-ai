@@ -12,6 +12,9 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackError = searchParams.get('error');
+  // Set after /auth/set-password or /auth/reset-password signs the link session
+  // out — the user must now sign in with the password they just chose.
+  const passwordSet = searchParams.get('passwordSet') === '1';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -70,6 +73,13 @@ function LoginForm() {
             </p>
           </div>
         </div>
+
+        {/* Password just set — confirm it worked and explain the sign-in step */}
+        {passwordSet && !error && (
+          <div className="rounded-[var(--radius-md)] border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200">
+            Your password has been set. Sign in to continue.
+          </div>
+        )}
 
         {/* Error */}
         {error && (

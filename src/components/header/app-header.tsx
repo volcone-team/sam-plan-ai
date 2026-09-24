@@ -16,7 +16,8 @@ export interface AppHeaderProps {
   actions?: ReactNode;
   /** Number of unread notifications */
   notificationCount?: number;
-  /** User display name */
+  /** Optional display-name override. When omitted, UserAvatar reads the
+   *  signed-in profile from useAuth() so initials reflect the real user. */
   userName?: string;
   /** User avatar image URL */
   userImageUrl?: string;
@@ -34,7 +35,7 @@ export function AppHeader({
   breadcrumbs,
   actions,
   notificationCount = 0,
-  userName = "User",
+  userName,
   userImageUrl,
   className,
 }: AppHeaderProps) {

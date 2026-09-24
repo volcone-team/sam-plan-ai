@@ -31,7 +31,7 @@ export function DemoBanner({ className }: DemoBannerProps) {
         </p>
       </div>
       <Link
-        href="/onboarding"
+        href="/auth/signup"
         className="hidden sm:inline-flex items-center gap-1 text-xs font-medium text-[hsl(var(--info))] hover:underline shrink-0"
       >
         Create your own plan

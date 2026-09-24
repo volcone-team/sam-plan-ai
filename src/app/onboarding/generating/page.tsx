@@ -85,6 +85,10 @@ export default function GeneratingPage() {
 
       const data = JSON.parse(rawData);
 
+      // Snapshot id captured from a full reset, used to roll back if
+      // generation fails (clause 2.5). Declared here so the catch can see it.
+      let rollbackSnapshotId: string | null = null;
+
       try {
         // 1. Save the raw questionnaire answers.
         const answers = {
@@ -116,18 +120,44 @@ export default function GeneratingPage() {
         //    upcoming not-started initiatives). Otherwise fall back to full reset
         //    (first-time generation, nothing to keep).
         const regenMode = localStorage.getItem("sam-regen-mode");
-        const resetEndpoint =
+        const isFullReset = regenMode !== "scratch";
+
+        // Which year is being generated. Read BEFORE the reset so the reset can
+        // be scoped to that year - otherwise generating a future year wiped the
+        // current year's plan as collateral damage.
+        const targetYearRaw = localStorage.getItem("sam-plan-target-year");
+        const targetYear = targetYearRaw ? Number(targetYearRaw) : undefined;
+        // Consume the flag immediately. Leaving it set until a SUCCESSFUL
+        // generation meant a failed or abandoned run kept redirecting every
+        // future regeneration at the wrong year.
+        localStorage.removeItem("sam-plan-target-year");
+
+        const resetBase =
           regenMode === "scratch" ? "/api/plan/reset-scratch" : "/api/plan/reset";
-        console.log("[generating] Resetting old plan data via:", resetEndpoint, "(mode:", regenMode || "none", ")");
+        const resetEndpoint = targetYear ? `${resetBase}?year=${targetYear}` : resetBase;
+        console.log(
+          "[generating] Resetting old plan data via:", resetEndpoint,
+          "(mode:", regenMode || "none", "| year:", targetYear ?? "current", ")"
+        );
 
         const resetRes = await fetch(resetEndpoint, { method: "DELETE" });
-        if (resetRes.ok) {
-          const resetData = await resetRes.json().catch(() => ({}));
-          console.log("[generating] Plan reset successful:", resetData);
-        } else {
-          const resetData = await resetRes.json().catch(() => ({}));
-          console.warn("[generating] Plan reset partial/failed:", resetData.error || resetRes.status);
-          // Non-fatal: continue with generation even if reset partially fails
+        const resetData = await resetRes.json().catch(() => ({} as Record<string, unknown>));
+
+        if (!resetRes.ok) {
+          // Abort: do NOT proceed into generation on a failed reset, or we
+          // compound the damage (clause 2.3).
+          console.error("[generating] Plan reset failed — aborting:", resetData.error || resetRes.status);
+          setErrorMessage(
+            (typeof resetData.error === "string" ? resetData.error : "Could not prepare your plan for regeneration.") +
+              " Your existing plan was not changed."
+          );
+          setPhase("error");
+          return;
+        }
+
+        console.log("[generating] Plan reset successful:", resetData);
+        if (isFullReset && typeof resetData.snapshotId === "string") {
+          rollbackSnapshotId = resetData.snapshotId;
         }
 
         // Clear the regen-mode flag now that reset has run.
@@ -142,7 +172,7 @@ export default function GeneratingPage() {
         const res = await fetch("/api/generate-plan", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ questionnaire: data }),
+          body: JSON.stringify({ questionnaire: data, targetYear }),
         });
 
         const raw = await res.text();
@@ -164,20 +194,41 @@ export default function GeneratingPage() {
             rawPreview: raw.slice(0, 500),
             parsed,
           });
-          setErrorMessage(`${detail} (status ${res.status})`);
+          const restoreNote = await attemptRollback(rollbackSnapshotId);
+          setErrorMessage(`${detail} (status ${res.status})${restoreNote}`);
           setPhase("error");
           return;
         }
 
         // 3. Success - clear the draft so signup cannot loop back here.
         localStorage.removeItem("sam-plan-data");
+        localStorage.removeItem("sam-plan-target-year");
         goToDashboard();
       } catch (err) {
         console.error("[onboarding] plan generation threw", err);
+        const restoreNote = await attemptRollback(rollbackSnapshotId);
         setErrorMessage(
-          err instanceof Error ? err.message : "Could not generate your plan."
+          (err instanceof Error ? err.message : "Could not generate your plan.") + restoreNote
         );
         setPhase("error");
+      }
+    }
+
+    // Restores the pre-reset snapshot after a failed generation so the user is
+    // never left with a wiped plan (clause 2.5). Returns a user-facing note.
+    async function attemptRollback(snapshotId: string | null): Promise<string> {
+      if (!snapshotId) return "";
+      try {
+        const r = await fetch(`/api/plan/history/${snapshotId}/restore`, { method: "POST" });
+        if (r.ok) {
+          console.log("[generating] Rolled back to snapshot", snapshotId);
+          return " Your previous plan has been restored.";
+        }
+        console.error("[generating] Rollback failed:", r.status);
+        return " We could not automatically restore your previous plan — please contact support.";
+      } catch (e) {
+        console.error("[generating] Rollback threw:", e);
+        return " We could not automatically restore your previous plan — please contact support.";
       }
     }
 

@@ -2,23 +2,29 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { getInviteContext, sendMemberInvite } from "@/lib/team-invite";
 
 /**
  * POST /api/team/create-member
  *
  * Creates a new team member for the requesting user's company.
  * Only the company owner can create members.
- * Uses the service role key to bypass email verification.
+ *
+ * The member is created WITHOUT a password. They receive a branded invite
+ * email with a link to set their own password. Member creation never fails
+ * just because the invite email couldn't be sent — the response reports
+ * whether the invite went out via the `invited` flag, and the UI offers a
+ * resend option.
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { firstName, lastName, email, password, role } = body;
+    const { firstName, lastName, email, role } = body;
 
     // Validate inputs
-    if (!firstName || !lastName || !email || !password) {
+    if (!firstName || !lastName || !email) {
       return NextResponse.json(
-        { error: "First name, last name, email, and password are required." },
+        { error: "First name, last name, and email are required." },
         { status: 400 }
       );
     }
@@ -26,13 +32,6 @@ export async function POST(request: Request) {
     if (!["operator", "team_member", "viewer"].includes(role)) {
       return NextResponse.json(
         { error: "Role must be 'operator', 'team_member', or 'viewer'." },
-        { status: 400 }
-      );
-    }
-
-    if (password.length < 6) {
-      return NextResponse.json(
-        { error: "Password must be at least 6 characters." },
         { status: 400 }
       );
     }
@@ -60,7 +59,7 @@ export async function POST(request: Request) {
     // 2. Verify the user is a company owner
     const { data: profile } = await supabase
       .from("profiles")
-      .select("company_id, role")
+      .select("company_id, role, first_name, last_name")
       .eq("id", user.id)
       .single();
 
@@ -77,7 +76,7 @@ export async function POST(request: Request) {
 
     const companyId = profile.company_id;
 
-    // 3. Create the auth user with service role (skips email verification)
+    // 3. Create the auth user with service role (no password — invite flow)
     const adminClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -85,8 +84,7 @@ export async function POST(request: Request) {
 
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
       email,
-      password,
-      email_confirm: true, // Skip email verification
+      email_confirm: true, // Account usable; they'll set a password via invite link
       user_metadata: {
         first_name: firstName,
         last_name: lastName,
@@ -173,6 +171,31 @@ export async function POST(request: Request) {
       // Non-fatal: the profile might still be correct if trigger handled it
     }
 
+    // 5. Generate the invite link and email it. This is best-effort — the
+    // member is already created, so an email failure must NOT fail the request.
+    let invited = false;
+    try {
+      const { inviterName, companyName } = await getInviteContext(
+        adminClient,
+        {
+          first_name: profile.first_name ?? (user.user_metadata?.first_name as string | undefined) ?? null,
+          last_name: profile.last_name ?? (user.user_metadata?.last_name as string | undefined) ?? null,
+        },
+        companyId
+      );
+
+      invited = await sendMemberInvite(adminClient, {
+        email,
+        inviterName,
+        companyName,
+        role,
+      });
+    } catch (inviteErr: unknown) {
+      const message = inviteErr instanceof Error ? inviteErr.message : String(inviteErr);
+      console.error("[team/create-member] Invite send failed:", message);
+      invited = false;
+    }
+
     return NextResponse.json({
       success: true,
       member: {
@@ -182,9 +205,11 @@ export async function POST(request: Request) {
         lastName,
         role,
       },
+      invited,
     });
-  } catch (err: any) {
-    console.error("[team/create-member] Error:", err?.message || err);
-    return NextResponse.json({ error: err?.message || "Internal error" }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[team/create-member] Error:", message);
+    return NextResponse.json({ error: message || "Internal error" }, { status: 500 });
   }
 }

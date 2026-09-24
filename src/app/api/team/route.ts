@@ -66,19 +66,53 @@ export async function GET() {
 
     console.log("[team] GET - Found", members?.length || 0, "members");
 
+    const memberList = members || [];
+
+    // Determine each member's last sign-in so the UI can flag pending invites
+    // (a member who has never signed in hasn't set their password yet).
+    // One admin lookup per member — fine for small teams. Cap to avoid
+    // hammering the auth API for unexpectedly large teams; uncapped members
+    // fall back to null (treated as pending) rather than blocking the list.
+    const LOOKUP_CAP = 100;
+    const lastSignInById = new Map<string, string | null>();
+
+    await Promise.all(
+      memberList.slice(0, LOOKUP_CAP).map(async (m) => {
+        try {
+          const { data: authData, error: authErr } = await adminClient.auth.admin.getUserById(m.id);
+          if (authErr) {
+            console.error("[team] GET - getUserById error for", m.id, ":", authErr.message);
+            lastSignInById.set(m.id, null);
+            return;
+          }
+          lastSignInById.set(m.id, authData?.user?.last_sign_in_at ?? null);
+        } catch (lookupErr: unknown) {
+          const msg = lookupErr instanceof Error ? lookupErr.message : String(lookupErr);
+          console.error("[team] GET - getUserById threw for", m.id, ":", msg);
+          lastSignInById.set(m.id, null);
+        }
+      })
+    );
+
     return NextResponse.json({
-      members: (members || []).map((m) => ({
-        id: m.id,
-        email: m.email,
-        firstName: m.first_name,
-        lastName: m.last_name,
-        role: m.role,
-        isActive: m.is_active ?? true,
-        createdAt: m.created_at,
-      })),
+      members: memberList.map((m) => {
+        const lastSignInAt = lastSignInById.has(m.id) ? lastSignInById.get(m.id)! : null;
+        return {
+          id: m.id,
+          email: m.email,
+          firstName: m.first_name,
+          lastName: m.last_name,
+          role: m.role,
+          isActive: m.is_active ?? true,
+          createdAt: m.created_at,
+          lastSignInAt,
+          pending: !lastSignInAt,
+        };
+      }),
     });
-  } catch (err: any) {
-    console.error("[team] GET Error:", err?.message || err);
-    return NextResponse.json({ error: err?.message || "Internal error" }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[team] GET Error:", message);
+    return NextResponse.json({ error: message || "Internal error" }, { status: 500 });
   }
 }

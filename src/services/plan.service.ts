@@ -40,6 +40,30 @@ export class PlanService {
     return null;
   }
 
+  /**
+   * Every year this company has an annual plan for, newest first.
+   * Drives the year switcher on Year-at-a-Glance so users can review a past
+   * year or plan a future one.
+   */
+  async getPlanYears(companyId: string): Promise<number[]> {
+    if (!companyId) return [];
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('annual_plans')
+          .select('year')
+          .eq('company_id', companyId)
+          .order('year', { ascending: false });
+
+        if (!error && data) {
+          return data.map((r) => Number(r.year)).filter((y) => !Number.isNaN(y));
+        }
+      } catch { /* fall through */ }
+    }
+    return [];
+  }
+
   async createAnnualPlan(dto: CreateAnnualPlanDTO): Promise<AnnualPlan> {
     if (isSupabaseConfigured()) {
       try {
@@ -94,6 +118,22 @@ export class PlanService {
     // Mock data removed - return empty
     console.log("[plan] No data in Supabase, returning empty");
     throw new Error("Not found");
+  }
+
+  /**
+   * Removes an annual plan. Used by "Remove year" on a future-year draft.
+   * Child rows (initiatives, projections, quarterly plans) cascade.
+   */
+  async deleteAnnualPlan(id: string): Promise<boolean> {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { error } = await supabase.from('annual_plans').delete().eq('id', id);
+        if (!error) return true;
+        console.error('[plan] deleteAnnualPlan failed:', error.message);
+      } catch { /* fall through */ }
+    }
+    return false;
   }
 
   async getQuarterlyPlans(companyId: string, year: number): Promise<QuarterlyPlan[]> {

@@ -178,3 +178,89 @@ export async function sendWeeklySummaryEmail(
     tags: ["weekly-summary"],
   });
 }
+
+export async function sendMemberInviteEmail(
+  to: string,
+  opts: { inviterName?: string | null; companyName?: string | null; inviteUrl: string; role?: string | null }
+): Promise<string | null> {
+  const inviter = opts.inviterName || "Your team";
+  const company = opts.companyName || "their company";
+  const companyForSubject = opts.companyName || "SAM Plan AI";
+
+  const roleLabels: Record<string, string> = {
+    operator: "Operator",
+    team_member: "Team Member",
+    viewer: "Viewer",
+  };
+  const roleLabel = opts.role ? roleLabels[opts.role] || null : null;
+  const roleLine = roleLabel
+    ? `<p style="font-size: 15px; line-height: 1.6; color: #555; margin: 0 0 16px 0;">Your role will be <strong>${roleLabel}</strong>.</p>`
+    : "";
+  const roleText = roleLabel ? `\nYour role will be ${roleLabel}.` : "";
+
+  return sendEmail({
+    to,
+    subject: `You've been invited to join ${companyForSubject}`,
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #1a1a1a;">You're invited! 🎉</h1>
+        <p style="font-size: 16px; line-height: 1.6; color: #333;">
+          <strong>${inviter}</strong> invited you to join <strong>${company}</strong> on SAM Plan AI.
+        </p>
+        ${roleLine}
+        <p style="font-size: 16px; line-height: 1.6; color: #333;">
+          Click the button below to accept your invite and set your own password.
+        </p>
+        <a href="${opts.inviteUrl}"
+           style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px;
+                  border-radius: 6px; text-decoration: none; font-weight: 600; margin-top: 8px;">
+          Accept invite &amp; set your password
+        </a>
+        <p style="font-size: 14px; color: #666; margin-top: 24px;">
+          Or copy and paste this link into your browser:<br />
+          <a href="${opts.inviteUrl}" style="color: #2563eb; word-break: break-all;">${opts.inviteUrl}</a>
+        </p>
+        <p style="font-size: 13px; color: #999; margin-top: 24px;">
+          This invite link expires soon — please accept it as soon as you can.
+        </p>
+        <p style="font-size: 14px; color: #666; margin-top: 32px;">— The SAM Plan AI Team</p>
+      </div>
+    `,
+    text: `You're invited!\n\n${inviter} invited you to join ${company} on SAM Plan AI.${roleText}\n\nAccept your invite and set your password:\n${opts.inviteUrl}\n\nThis invite link expires soon — please accept it as soon as you can.\n\n— The SAM Plan AI Team`,
+    tags: ["member-invite"],
+  });
+}
+export async function sendTwoFactorCodeEmail(
+  to: string,
+  code: string,
+  opts?: { firstName?: string | null }
+): Promise<string | null> {
+  const name = opts?.firstName || "there";
+
+  return sendEmail({
+    to,
+    subject: "Your SAM Plan AI verification code",
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #1a1a1a;">Hi ${name},</h1>
+        <p style="font-size: 16px; line-height: 1.6; color: #333;">
+          Someone signing in to SAM Plan AI requested a verification code. Enter the code below to finish signing in.
+        </p>
+        <div style="background: #f5f5f5; border-radius: 8px; padding: 24px; margin: 24px 0; text-align: center;">
+          <div style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 28px; font-weight: 700; letter-spacing: 6px; color: #1a1a1a;">
+            ${code}
+          </div>
+        </div>
+        <p style="font-size: 15px; line-height: 1.6; color: #555;">
+          This code expires shortly, so use it soon.
+        </p>
+        <p style="font-size: 14px; line-height: 1.6; color: #666;">
+          If you didn't try to sign in, you can safely ignore this email — nobody can access your account without this code.
+        </p>
+        <p style="font-size: 14px; color: #666; margin-top: 32px;">— The SAM Plan AI Team</p>
+      </div>
+    `,
+    text: `Hi ${name},\n\nSomeone signing in to SAM Plan AI requested a verification code.\n\nYour code: ${code}\n\nThis code expires shortly, so use it soon.\n\nIf you didn't try to sign in, you can safely ignore this email — nobody can access your account without this code.\n\n— The SAM Plan AI Team`,
+    tags: ["two-factor"],
+  });
+}
