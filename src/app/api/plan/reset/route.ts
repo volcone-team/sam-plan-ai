@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { requirePlanEditor } from "@/lib/require-plan-editor";
 
 /**
  * DELETE /api/plan/reset?year=YYYY
@@ -18,6 +19,10 @@ export async function DELETE(request: Request) {
   try {
     console.log("[plan/reset] Starting plan reset...");
 
+    // Authorization: only owner/operator may reset plan data.
+    const check = await requirePlanEditor();
+    if (!check.ok) return NextResponse.json({ error: check.error }, { status: check.status });
+
     const cookieStore = await cookies();
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -32,24 +37,7 @@ export async function DELETE(request: Request) {
       }
     );
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      console.log("[plan/reset] No user session");
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("company_id")
-      .eq("id", user.id)
-      .single();
-
-    if (!profile?.company_id) {
-      console.log("[plan/reset] No company for user:", user.email);
-      return NextResponse.json({ error: "No company found" }, { status: 400 });
-    }
-
-    const companyId = profile.company_id;
+    const companyId = check.companyId;
 
     // Which year are we resetting? Defaults to the newest plan (previous
     // behaviour) when the caller does not say.
@@ -79,7 +67,7 @@ export async function DELETE(request: Request) {
     }
 
     const planId = targetPlan.id;
-    console.log("[plan/reset] Company:", companyId, "| User:", user.email, "| year:", targetPlan.year, "| planId:", planId);
+    console.log("[plan/reset] Company:", companyId, "| User:", check.userId, "| year:", targetPlan.year, "| planId:", planId);
 
     // Initiatives belonging to THIS year - used to scope task/result/expense deletes.
     const { data: yearInitiatives } = await supabase
@@ -217,8 +205,9 @@ export async function DELETE(request: Request) {
 
     console.log("[plan/reset] Complete");
     return NextResponse.json({ success: true, snapshotId, snapshotLabel });
-  } catch (err: any) {
-    console.error("[plan/reset] Error:", err?.message || err);
-    return NextResponse.json({ error: err?.message || "Internal error" }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[plan/reset] Error:", message);
+    return NextResponse.json({ error: message || "Internal error" }, { status: 500 });
   }
 }

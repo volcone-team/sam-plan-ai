@@ -5,6 +5,7 @@ import {
   DEFAULT_RULES,
   validateNotificationSettings,
 } from "@/lib/notifications/logic";
+import { logActivity } from "@/lib/activity-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -168,6 +169,35 @@ export async function PUT(req: Request) {
     }
 
     const saved = await loadState(db);
+
+    // Audit trail — never throws, never affects this response. metadata records
+    // the validated fields the caller actually supplied (i.e. what changed).
+    const changed: Record<string, unknown> = {};
+    if (v.enabled !== undefined) changed.enabled = v.enabled;
+    if (v.leadTimes !== undefined) changed.leadTimes = v.leadTimes;
+    if (v.recipientRule !== undefined) changed.recipientRule = v.recipientRule;
+    if (v.subject !== undefined) changed.subject = v.subject;
+    if (v.bodyHtml !== undefined) changed.bodyHtmlChanged = true;
+
+    const { data: actor } = await db
+      .from("profiles")
+      .select("email")
+      .eq("id", check.userId)
+      .maybeSingle();
+
+    await logActivity(
+      {
+        actorUserId: check.userId,
+        actorEmail: actor?.email ?? null,
+        action: "notification_rules.updated",
+        targetType: "notification_rules",
+        targetId: null,
+        targetLabel: templateKey,
+        metadata: { changed, fields: Object.keys(changed) },
+      },
+      db
+    );
+
     return NextResponse.json(saved);
   } catch (err: unknown) {
     const msg = errMessage(err);

@@ -16,6 +16,7 @@ import type {
   UpdateAnnualPlanDTO,
 } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
+import { toDateOnly } from '@/lib/plan-dates';
 
 export class PlanService {
   async getAnnualPlan(companyId: string, year: number): Promise<AnnualPlan | null> {
@@ -45,6 +46,58 @@ export class PlanService {
    * Drives the year switcher on Year-at-a-Glance so users can review a past
    * year or plan a future one.
    */
+  /**
+   * The annual plan that GOVERNS a calendar year.
+   *
+   * A 12-month plan generated in September is one annual_plans row (that year)
+   * whose initiatives run into the next year. So "the plan for 2027" may be the
+   * 2026 row when 2026's plan spans into 2027. This returns the year's own row
+   * if it has one, otherwise the most recent EARLIER plan whose initiatives
+   * reach into the requested year - the same plan and goals, not a new one.
+   */
+  async getGoverningPlan(
+    companyId: string,
+    year: number,
+    initiatives: Array<{ activationDate: Date | string; annualPlanId?: string }>
+  ): Promise<AnnualPlan | null> {
+    const own = await this.getAnnualPlan(companyId, year);
+    if (own) return own;
+
+    // No row of its own: find the plan whose initiatives fall in this year.
+    const planIdsInYear = new Set(
+      initiatives
+        .filter((i) => new Date(i.activationDate).getFullYear() === year && i.annualPlanId)
+        .map((i) => i.annualPlanId as string)
+    );
+    if (planIdsInYear.size === 0) return null;
+
+    // Prefer the earliest-starting plan that reaches into this year, so goals
+    // come from the plan that was actually generated.
+    const years = await this.getPlanYears(companyId);
+    for (const y of [...years].sort((a, b) => a - b)) {
+      const plan = await this.getAnnualPlan(companyId, y);
+      if (plan?.id && planIdsInYear.has(plan.id)) return plan;
+    }
+    return null;
+  }
+
+  /** A single annual plan by id. Used to inherit goals for a year a plan spans into. */
+  async getAnnualPlanById(id: string): Promise<AnnualPlan | null> {
+    if (!id) return null;
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('annual_plans')
+          .select('*')
+          .eq('id', id)
+          .single();
+        if (!error && data) return this.mapAnnualRow(data);
+      } catch { /* fall through */ }
+    }
+    return null;
+  }
+
   async getPlanYears(companyId: string): Promise<number[]> {
     if (!companyId) return [];
     if (isSupabaseConfigured()) {
@@ -242,8 +295,8 @@ export class PlanService {
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
-        const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0];
-        const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+        const startDate = toDateOnly(new Date(year, month - 1, 1));
+        const endDate = toDateOnly(new Date(year, month, 0));
 
         const { data, error } = await supabase
           .from('weekly_plans')
@@ -268,7 +321,7 @@ export class PlanService {
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
-        const dateStr = weekStartDate.toISOString().split('T')[0];
+        const dateStr = toDateOnly(weekStartDate);
         const { data, error } = await supabase
           .from('weekly_plans')
           .select('*')
@@ -295,7 +348,7 @@ export class PlanService {
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
-        const startDate = this.getWeekStart(new Date()).toISOString().split('T')[0];
+        const startDate = toDateOnly(this.getWeekStart(new Date()));
         const { data, error } = await supabase
           .from('weekly_plans')
           .select('*')

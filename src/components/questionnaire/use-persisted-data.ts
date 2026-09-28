@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   createEmptyQuestionnaireData,
+  createEmptyProduct,
   type QuestionnaireData,
 } from "./questionnaire-data";
 import type { QuestionnaireMode } from "./questionnaire-types";
@@ -19,7 +20,14 @@ function loadFromStorage(mode: QuestionnaireMode): QuestionnaireData {
     const stored = localStorage.getItem(getStorageKey(mode));
     if (stored) {
       const parsed = JSON.parse(stored) as Partial<QuestionnaireData>;
-      return { ...createEmptyQuestionnaireData(), ...parsed };
+      const merged = { ...createEmptyQuestionnaireData(), ...parsed };
+      // A spread lets a persisted `products: []` overwrite the seeded blank row,
+      // which would put returning users back on an empty step. Always keep one
+      // row to type into.
+      if (!merged.products || merged.products.length === 0) {
+        merged.products = [createEmptyProduct()];
+      }
+      return merged;
     }
   } catch {
     // Ignore parse errors
@@ -69,6 +77,11 @@ export function usePersistedData(mode: QuestionnaireMode) {
             ...p,
             id: p.id || `prod-prefill-${i}-${Math.random().toString(36).slice(2, 7)}`,
           }));
+          // Same reason as the localStorage path: an empty array from the DB
+          // must not leave the step with no row to edit.
+          if (answers.products.length === 0) {
+            answers.products = [createEmptyProduct()];
+          }
         }
         setData((prev) => ({ ...prev, ...answers }));
       } catch (err) {

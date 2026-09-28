@@ -13,6 +13,7 @@ import type {
   UpdateExpenseDTO,
 } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
+import { toDateOnly, parseDateOnly } from '@/lib/plan-dates';
 
 export class ExpenseService {
   async getAllExpenses(): Promise<Expense[]> {
@@ -104,8 +105,8 @@ export class ExpenseService {
         const { data, error } = await supabase
           .from('expenses')
           .select('*')
-          .gte('date', startDate.toISOString().split('T')[0])
-          .lte('date', endDate.toISOString().split('T')[0])
+          .gte('date', toDateOnly(startDate))
+          .lte('date', toDateOnly(endDate))
           .order('date', { ascending: true });
 
         if (!error && data) {
@@ -203,7 +204,7 @@ export class ExpenseService {
           category: dto.category,
           description: dto.description || '',
           amount: dto.amount,
-          date: dto.date instanceof Date ? dto.date.toISOString().split('T')[0] : dto.date,
+          date: toDateOnly(dto.date),
           source: 'manual',
           source_details: dto.sourceDetails || null,
         };
@@ -233,7 +234,7 @@ export class ExpenseService {
         if (dto.category !== undefined) updateData.category = dto.category;
         if (dto.description !== undefined) updateData.description = dto.description;
         if (dto.amount !== undefined) updateData.amount = dto.amount;
-        if (dto.date !== undefined) updateData.date = dto.date instanceof Date ? dto.date.toISOString().split('T')[0] : dto.date;
+        if (dto.date !== undefined) updateData.date = toDateOnly(dto.date);
 
         const { data, error } = await supabase
           .from('expenses')
@@ -308,7 +309,7 @@ export class ExpenseService {
         if (!error && data) {
           const map = new Map<number, number>();
           for (const row of data) {
-            const month = new Date(row.date as string).getMonth() + 1;
+            const month = parseDateOnly(row.date as string).getMonth() + 1;
             map.set(month, (map.get(month) || 0) + Number(row.amount));
           }
           return Array.from(map)
@@ -331,7 +332,7 @@ export class ExpenseService {
       category: row.category as ExpenseCategory,
       description: (row.description as string) || '',
       amount: Number(row.amount) || 0,
-      date: new Date(row.date as string),
+      date: parseDateOnly(row.date as string),
       source: (row.source || 'manual') as any,
       sourceDetails: (row.source_details as string) || undefined,
       createdAt: new Date(row.created_at as string),

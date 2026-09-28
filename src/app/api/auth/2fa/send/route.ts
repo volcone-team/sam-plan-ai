@@ -12,7 +12,11 @@ const COOLDOWN_SECONDS = 45;
 /**
  * POST /api/auth/2fa/send
  *
- * Emails the authenticated ADMIN user an 8-digit verification code.
+ * Emails the authenticated user an 8-digit verification code.
+ *
+ * Applies to ALL authenticated users — every account must pass the emailed code
+ * challenge before using the app (customer app and admin panel alike). There is
+ * no admin-only restriction here.
  *
  * The code itself is generated and later validated by Supabase — we ask for a
  * magiclink and pull `properties.email_otp` off the response, then deliver it
@@ -22,7 +26,6 @@ const COOLDOWN_SECONDS = 45;
  * Responses:
  *   200 { sent: true }
  *   401 { error: "Unauthorized" }
- *   400 { error: "not_required", message }      - caller is not an admin
  *   429 { error: "cooldown", message, retryAfter }
  *   500 { error: "code_generation_failed" | "email_failed" | <message> }
  */
@@ -53,9 +56,13 @@ export async function POST() {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
+    // Profile is fetched purely to personalise the email. It is NOT an
+    // authorization check: two-factor applies to every authenticated user, so a
+    // missing or unreadable profile must not block the code from being sent —
+    // we just fall back to a null first name.
     const { data: profile, error: profileErr } = await adminClient
       .from("profiles")
-      .select("is_admin, first_name")
+      .select("first_name")
       .eq("id", user.id)
       .single();
 
@@ -63,14 +70,7 @@ export async function POST() {
       console.log("[2fa/send] Profile lookup failed for", user.email, profileErr.message);
     }
 
-    // Two-factor is admin-only. Everyone else is already fully signed in.
-    if (!profile?.is_admin) {
-      console.log("[2fa/send] Not required for", user.email);
-      return NextResponse.json(
-        { error: "not_required", message: "Two-factor verification is not required for this account." },
-        { status: 400 }
-      );
-    }
+    const firstName = profile?.first_name ?? null;
 
     // Cooldown: cheap anti-spam so a stuck client can't hammer Mailgun.
     const lastSentRaw = cookieStore.get(COOLDOWN_COOKIE)?.value;
@@ -105,7 +105,7 @@ export async function POST() {
     }
 
     const messageId = await sendTwoFactorCodeEmail(user.email!, String(emailOtp), {
-      firstName: profile.first_name,
+      firstName,
     });
 
     if (!messageId) {

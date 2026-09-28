@@ -29,13 +29,6 @@ interface AdminCompany {
   createdAt: string;
 }
 
-function generatePassword(): string {
-  const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let pw = "";
-  for (let i = 0; i < 10; i++) pw += chars[Math.floor(Math.random() * chars.length)];
-  return pw;
-}
-
 function formatCurrency(amount: number, currency: string = "USD"): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -69,7 +62,8 @@ export function CompanyManagement() {
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [addSuccess, setAddSuccess] = useState<string | null>(null);
-  const [addForm, setAddForm] = useState({ companyName: "", ownerEmail: "", ownerFirstName: "", ownerLastName: "", ownerPassword: "" });
+  const [addWarning, setAddWarning] = useState<string | null>(null);
+  const [addForm, setAddForm] = useState({ companyName: "", ownerEmail: "", ownerFirstName: "", ownerLastName: "" });
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -97,6 +91,7 @@ export function CompanyManagement() {
     e.preventDefault();
     setAddError(null);
     setAddSuccess(null);
+    setAddWarning(null);
     setAddLoading(true);
     try {
       const res = await fetch("/api/admin/companies/create", {
@@ -106,8 +101,12 @@ export function CompanyManagement() {
       });
       const data = await res.json();
       if (!res.ok) { setAddError(data.error || "Failed"); return; }
-      setAddSuccess("Company '" + data.company.name + "' created. Credentials: " + addForm.ownerEmail + " / " + addForm.ownerPassword);
-      setAddForm({ companyName: "", ownerEmail: "", ownerFirstName: "", ownerLastName: "", ownerPassword: generatePassword() });
+      if (data.invited) {
+        setAddSuccess(`${data.company.name} was created — an invite email was sent to ${data.user.email}.`);
+      } else {
+        setAddWarning(`${data.company.name} was created, but the invite email couldn\u2019t be sent. You can resend it from the customer\u2019s team settings.`);
+      }
+      setAddForm({ companyName: "", ownerEmail: "", ownerFirstName: "", ownerLastName: "" });
       loadCompanies(search);
     } catch (err) {
       setAddError("Network error");
@@ -182,7 +181,7 @@ export function CompanyManagement() {
     <div className="space-y-6">
       {/* Add Company button */}
       <div className="flex items-center justify-end mb-4">
-        <button onClick={() => { setShowAddForm(!showAddForm); if (!addForm.ownerPassword) setAddForm(f => ({ ...f, ownerPassword: generatePassword() })); }} className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Add Company</button>
+        <button onClick={() => setShowAddForm(!showAddForm)} className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Add Company</button>
       </div>
 
       {showAddForm && (
@@ -190,6 +189,7 @@ export function CompanyManagement() {
           <h4 className="text-sm font-semibold mb-4">Create New Company + Owner</h4>
           {addError && <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{addError}</div>}
           {addSuccess && <div className="mb-3 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{addSuccess}</div>}
+          {addWarning && <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">{addWarning}</div>}
           <form onSubmit={handleAddCompany} className="space-y-3">
             <div><label className="mb-1 block text-xs font-medium">Company Name *</label><input type="text" required value={addForm.companyName} onChange={(e) => setAddForm(f => ({ ...f, companyName: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" placeholder="Acme Coaching" /></div>
             <div className="grid grid-cols-2 gap-3">
@@ -197,7 +197,7 @@ export function CompanyManagement() {
               <div><label className="mb-1 block text-xs font-medium">Last Name</label><input type="text" value={addForm.ownerLastName} onChange={(e) => setAddForm(f => ({ ...f, ownerLastName: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" /></div>
             </div>
             <div><label className="mb-1 block text-xs font-medium">Owner Email *</label><input type="email" required value={addForm.ownerEmail} onChange={(e) => setAddForm(f => ({ ...f, ownerEmail: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" placeholder="owner@company.com" /></div>
-            <div><label className="mb-1 block text-xs font-medium">Password *</label><div className="flex gap-2"><input type="text" required value={addForm.ownerPassword} onChange={(e) => setAddForm(f => ({ ...f, ownerPassword: e.target.value }))} className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm font-mono" /><button type="button" onClick={() => setAddForm(f => ({ ...f, ownerPassword: generatePassword() }))} className="rounded-md border border-border px-3 py-2 text-xs">Generate</button></div><p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">Share credentials manually. No email sent.</p></div>
+            <p className="text-xs text-[hsl(var(--foreground-muted))]">The owner will receive an invite email with a link to set their own password.</p>
             <div className="flex gap-2 pt-2">
               <button type="submit" disabled={addLoading} className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">{addLoading ? "Creating..." : "Create Company"}</button>
               <button type="button" onClick={() => setShowAddForm(false)} className="rounded-md border border-border px-4 py-2 text-sm font-medium">Cancel</button>

@@ -28,7 +28,11 @@ export interface ProjectTemplateTask {
   id: string;
   name: string;
   description: string;
-  daysBeforeEvent: number; // relative to event date (e.g., -21 for 21 days before)
+  // Days BEFORE the event date this task is due. Non-negative: 21 means 21
+  // days before, 0 means on the day. Never negative - this used to document the
+  // opposite sign to the generation prompt, which is why tasks were scheduled
+  // after their event. See resolveLeadDays in @/lib/plan-dates.
+  daysBeforeEvent: number;
   estimatedHours: number;
   estimatedHoursRange?: {
     min: number;

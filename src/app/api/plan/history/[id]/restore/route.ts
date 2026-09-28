@@ -140,17 +140,30 @@ export async function POST(
 
     // 4. Build a product-id map. Snapshot initiatives reference old product ids.
     //    Match current products by name; if missing, recreate from snapshot products.
+    //
+    //    Matching is NORMALISED (trim + lowercase) to agree with the generator
+    //    in /api/generate-plan. It used to compare raw names, so any difference
+    //    in case or surrounding whitespace missed the match and recreated the
+    //    product - leaving the company with two rows of the same name, the
+    //    original empty and the new copy holding the restored initiatives.
+    //    That is the reported "products are duplicated" defect: a failed
+    //    generation triggers a rollback, the rollback restores, and the restore
+    //    duplicated every product whose name did not match byte-for-byte.
+    const productKey = (name: unknown) => String(name ?? "").trim().toLowerCase();
+
     const { data: currentProducts } = await admin
       .from("products")
       .select("id, name")
       .eq("company_id", companyId);
-    const productByName = new Map((currentProducts || []).map((p) => [p.name, p.id]));
+    const productByName = new Map(
+      (currentProducts || []).map((p) => [productKey(p.name), p.id])
+    );
 
     // Map: snapshot product_id -> live product_id
     const snapProducts: any[] = data.products || [];
     const productIdMap = new Map<string, string>();
     for (const sp of snapProducts) {
-      let liveId = productByName.get(sp.name);
+      let liveId = productByName.get(productKey(sp.name));
       if (!liveId) {
         const { data: recreated } = await admin
           .from("products")
@@ -167,7 +180,7 @@ export async function POST(
           .select("id")
           .single();
         liveId = recreated?.id;
-        if (liveId) productByName.set(sp.name, liveId);
+        if (liveId) productByName.set(productKey(sp.name), liveId);
       }
       if (liveId) productIdMap.set(sp.id, liveId);
     }

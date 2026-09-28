@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Users,
   Building2,
@@ -18,6 +19,51 @@ interface StatusItem {
   label: string;
   status: SystemStatus;
   description: string;
+}
+
+/** Subset of the GET /api/admin/activity entry shape this panel renders. */
+interface ActivityEntry {
+  id: string;
+  actorEmail: string | null;
+  action: string;
+  targetType: string | null;
+  targetLabel: string | null;
+  createdAt: string;
+}
+
+/** How many entries the dashboard panel shows. The full log lives at /admin/activity. */
+const ACTIVITY_LIMIT = 6;
+
+/**
+ * Colour the action pill by its subject — same convention as the full
+ * activity log page so the two views read the same.
+ */
+function pillColor(action: string): string {
+  if (action.startsWith("company.")) return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
+  if (action.endsWith(".deleted") || action.endsWith(".deactivated"))
+    return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
+  if (action.endsWith(".created")) return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300";
+  return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
+}
+
+/**
+ * Compact timestamp for a dashboard row: relative for anything under a week,
+ * otherwise a short date. Falls back to the raw value if unparseable.
+ */
+function formatRelative(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+
+  const seconds = Math.round((Date.now() - d.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 const systemStatus: StatusItem[] = [
@@ -45,25 +91,62 @@ export function AdminDashboard() {
   } | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Activity feed state, kept deliberately separate from stats/loading above so
+  // a failure in one panel never blanks the other.
+  const [entries, setEntries] = useState<ActivityEntry[]>([]);
+  const [activityLoading, setActivityLoading] = useState(true);
+  const [activityError, setActivityError] = useState<string | null>(null);
+
   useEffect(() => {
-    async function loadStats() {
+    // Abort on unmount: in dev a cold route compile can outlive the mount and
+    // the aborted request otherwise surfaces as a bogus "Failed to fetch".
+    const controller = new AbortController();
+
+    // No setState in the effect body (react-hooks/set-state-in-effect); every
+    // setState below happens after an await, and AbortError returns early so
+    // nothing is written after unmount.
+    const loadStats = async () => {
       try {
-        console.log("[AdminDashboard] Loading stats...");
-        const res = await fetch("/api/admin/stats");
+        const res = await fetch("/api/admin/stats", { signal: controller.signal });
         const data = await res.json();
         if (res.ok && data.stats) {
-          console.log("[AdminDashboard] Stats:", data.stats);
           setStats(data.stats);
         } else {
           console.error("[AdminDashboard] Stats error:", data.error);
         }
       } catch (err) {
+        if ((err as Error)?.name === "AbortError") return;
         console.error("[AdminDashboard] Failed to load stats:", err);
-      } finally {
-        setLoading(false);
       }
-    }
+      setLoading(false);
+    };
+
     loadStats();
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadActivity = async () => {
+      try {
+        const res = await fetch(`/api/admin/activity?limit=${ACTIVITY_LIMIT}`, {
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`Request failed (${res.status})`);
+        const data: { entries?: ActivityEntry[] } = await res.json();
+        setEntries(data.entries ?? []);
+      } catch (err) {
+        // Navigated away mid-request — not an error, and state is gone anyway.
+        if ((err as Error)?.name === "AbortError") return;
+        setActivityError("Could not load recent activity.");
+      }
+      setActivityLoading(false);
+    };
+
+    loadActivity();
+    return () => controller.abort();
   }, []);
 
   const metrics = [
@@ -103,20 +186,74 @@ export function AdminDashboard() {
       </section>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Activity Feed — placeholder until we have real activity logging */}
+        {/* Activity Feed — latest entries from the admin audit trail */}
         <section aria-label="Recent activity">
           <div className="rounded-[var(--radius-lg)] border border-border bg-card">
-            <div className="border-b border-border px-6 py-4">
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <h2 className="text-base font-semibold text-[hsl(var(--foreground))]">
                 Recent Activity
               </h2>
+              <Link
+                href="/admin/activity"
+                className="text-sm font-medium text-[hsl(var(--primary))] transition-colors hover:underline"
+              >
+                View all
+              </Link>
             </div>
-            <div className="px-6 py-8 text-center">
-              <Activity className="mx-auto h-8 w-8 text-[hsl(var(--foreground-muted))]" />
-              <p className="mt-2 text-sm text-[hsl(var(--foreground-muted))]">
-                Activity feed coming soon. This will show signups, plan generations, and key events.
-              </p>
-            </div>
+
+            {activityLoading && (
+              <div className="px-6 py-8">
+                <p className="text-sm text-[hsl(var(--foreground-muted))]">Loading activity…</p>
+              </div>
+            )}
+
+            {/* Muted on purpose: one failed panel shouldn't make the dashboard
+                look broken. */}
+            {!activityLoading && activityError && (
+              <div className="px-6 py-8">
+                <p className="text-sm text-[hsl(var(--foreground-muted))]">{activityError}</p>
+              </div>
+            )}
+
+            {!activityLoading && !activityError && entries.length === 0 && (
+              <div className="px-6 py-8 text-center">
+                <Activity className="mx-auto h-8 w-8 text-[hsl(var(--foreground-muted))]" />
+                <p className="mt-2 text-sm text-[hsl(var(--foreground-muted))]">
+                  No activity recorded yet
+                </p>
+                <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">
+                  Admin actions like creating users or changing notification rules will appear here.
+                </p>
+              </div>
+            )}
+
+            {!activityLoading && !activityError && entries.length > 0 && (
+              <ul className="divide-y divide-border">
+                {entries.map((entry) => (
+                  <li key={entry.id} className="px-6 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full px-2.5 py-0.5 font-mono text-xs font-medium",
+                          pillColor(entry.action)
+                        )}
+                      >
+                        {entry.action}
+                      </span>
+                      <span className="whitespace-nowrap text-xs text-[hsl(var(--foreground-muted))]">
+                        {formatRelative(entry.createdAt)}
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate text-sm text-[hsl(var(--foreground-muted))]">
+                      <span className="text-[hsl(var(--foreground))]">
+                        {entry.actorEmail ?? "system"}
+                      </span>
+                      {entry.targetLabel && <> → {entry.targetLabel}</>}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </section>
 

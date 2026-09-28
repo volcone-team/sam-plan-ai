@@ -7,6 +7,7 @@ import { PageContainer } from '@/components/layout';
 import { cacheInvalidatePrefix, CacheKeys } from '@/lib/client-cache';
 import { useToast } from '@/components/ui/toast';
 import { ProgressBar } from '@/components/ui/progress-bar';
+import { usePermission } from '@/hooks/use-permission';
 
 interface SnapshotData {
   id: string;
@@ -37,10 +38,13 @@ export default function PlanSnapshotDetailPage() {
   const [confirmFull, setConfirmFull] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  /** Only owner/operator may restore snapshots or delete history. */
+  const canEditPlan = usePermission('plan.regenerate');
 
   const { showToast } = useToast();
 
   const restore = async (initiativeId?: string) => {
+    if (!canEditPlan) return;
     const key = initiativeId || "full";
     setRestoring(key);
     console.log("[PlanSnapshot] Restoring:", key);
@@ -73,6 +77,7 @@ export default function PlanSnapshotDetailPage() {
   };
 
   const handleDelete = async () => {
+    if (!canEditPlan) return;
     setDeleting(true);
     console.log("[PlanSnapshot] Deleting snapshot:", params.id);
     try {
@@ -154,7 +159,13 @@ export default function PlanSnapshotDetailPage() {
           <p className="text-sm text-[hsl(var(--foreground-muted))]">
             Saved {new Date(snapshot.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </p>
+          {!canEditPlan && (
+            <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">
+              You have read-only access to plan history.
+            </p>
+          )}
         </div>
+        {canEditPlan && (
         <div className="flex items-center gap-2">
           <button
             onClick={() => setConfirmFull(true)}
@@ -171,12 +182,13 @@ export default function PlanSnapshotDetailPage() {
             Delete
           </button>
         </div>
+        )}
       </div>
 
       {/* Full-restore warning modal. Restoring replaces every not-started
           initiative and all revenue targets/projections in the current plan
           with this snapshot's data - make that unmistakably clear up front. */}
-      {confirmFull && (
+      {canEditPlan && confirmFull && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-[var(--radius-lg)] border border-border bg-card p-6 shadow-xl">
             <div className="flex items-start justify-between">
@@ -233,7 +245,7 @@ export default function PlanSnapshotDetailPage() {
       )}
 
       {/* Delete confirmation */}
-      {confirmDelete && (
+      {canEditPlan && confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-[var(--radius-lg)] border border-border bg-card p-6 shadow-xl">
             <div className="flex items-start justify-between">
@@ -323,6 +335,7 @@ export default function PlanSnapshotDetailPage() {
                     <p className="text-sm font-medium">{formatCurrency(Number(init.revenue_better) || 0)}</p>
                     <p className="text-xs text-[hsl(var(--foreground-muted))]">projected</p>
                   </div>
+                  {canEditPlan && (
                   <button
                     onClick={() => restore(init.id)}
                     disabled={restoring === init.id}
@@ -332,6 +345,7 @@ export default function PlanSnapshotDetailPage() {
                     {restoring === init.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
                     Restore
                   </button>
+                  )}
                 </div>
                 {restoring === init.id && (
                   <div className="absolute inset-x-5 bottom-0">

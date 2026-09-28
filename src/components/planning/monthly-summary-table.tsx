@@ -18,8 +18,11 @@ import { resultService } from '@/services/result.service';
 import { initiativeService } from '@/services/initiative.service';
 import { exportToCSV } from '@/lib/csv-export';
 import type { Initiative, Projection } from '@/types';
+import { usePlanYears } from '@/hooks/use-plan-years';
 
-const YEAR = new Date().getFullYear();
+// Year comes from the shared PlanYearProvider, not a module-level constant.
+// The old `const YEAR = new Date().getFullYear()` was evaluated once when this
+// chunk was parsed, which made a plan spanning into the next year unviewable.
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -52,6 +55,8 @@ function formatPercent(value: number): string {
 }
 
 interface MonthData {
+  /** True when the month has initiatives, so its targets are real. */
+  planned: boolean;
   month: number;
   good: number;
   better: number;
@@ -73,6 +78,9 @@ const STATUS_COLORS: Record<string, { dot: string; badge: string }> = {
 
 export function MonthlySummaryTable() {
   const companyId = useCompanyId() || "";
+  // Shared with Year-at-a-Glance: the plan year being viewed, which may be a
+  // year the plan spans into rather than the current calendar year.
+  const { selectedYear: YEAR, setSelectedYear, years: planYears } = usePlanYears(companyId);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [monthsData, setMonthsData] = useState<MonthData[]>([]);
@@ -95,7 +103,12 @@ export function MonthlySummaryTable() {
 
         const getMonthRevenue = (proj: Projection | undefined, month: number): number => {
           if (!proj?.monthly) return 0;
-          const monthEntry = (proj.monthly as any[]).find((m: any) => m.month === month);
+          // Match the YEAR as well as the month. Projection entries carry
+          // { year, month, revenue }, so matching on month alone made a 2027
+          // entry supply the value for the same month of 2026.
+          const monthEntry = (proj.monthly as any[]).find(
+            (m: any) => m.month === month && (m.year === undefined || m.year === YEAR)
+          );
           return monthEntry?.revenue || 0;
         };
 
@@ -108,15 +121,21 @@ export function MonthlySummaryTable() {
             initiativeService.getInitiativesByDateRange(companyId, start, end),
           ]);
 
-          const good = getMonthRevenue(goodProj, m);
-          const better = getMonthRevenue(betterProj, m);
-          const best = getMonthRevenue(bestProj, m);
+          // A month with no initiatives has no plan, so it must not show
+          // Good/Better/Best figures. Projections are a year-level rollup and
+          // previously filled in every month, including the months before a
+          // mid-year plan even starts.
+          const planned = initiatives.length > 0;
+          const good = planned ? getMonthRevenue(goodProj, m) : 0;
+          const better = planned ? getMonthRevenue(betterProj, m) : 0;
+          const best = planned ? getMonthRevenue(bestProj, m) : 0;
           const actual = results.reduce((sum, r) => sum + r.actualRevenue, 0);
           const variance = actual - better;
           const variancePercent = better > 0 ? ((actual - better) / better) * 100 : null;
 
           return {
             month: m,
+            planned,
             good,
             better,
             best,
@@ -139,7 +158,7 @@ export function MonthlySummaryTable() {
     };
 
     loadAllMonths();
-  }, [companyId]);
+  }, [companyId, YEAR]);
 
   const handleExportCSV = () => {
     const headers = [
@@ -155,7 +174,16 @@ export function MonthlySummaryTable() {
     ];
 
     const rows = monthsData.map((m) => {
-      const status = m.month === currentMonth ? 'Current' : m.month < currentMonth ? 'Complete' : 'Upcoming';
+      // Mirrors the badge: unplanned months have no status, and the comparison
+      // is against a real point in time rather than a bare month number.
+      const nowYear = new Date().getFullYear();
+      const status = !m.planned
+        ? 'Not planned'
+        : YEAR < nowYear || (YEAR === nowYear && m.month < currentMonth)
+          ? 'Complete'
+          : YEAR === nowYear && m.month === currentMonth
+            ? 'Current'
+            : 'Upcoming';
       return [
         `${MONTH_NAMES[m.month - 1]} ${YEAR}`,
         m.good.toFixed(2),
@@ -320,8 +348,11 @@ interface MonthRowProps {
 }
 
 function MonthRow({ data, year, isCurrent, isExpanded, onToggle }: MonthRowProps) {
-  const { month, good, better, best, actual, variance, variancePercent, initiatives } = data;
-  const hasData = good > 0 || better > 0 || best > 0 || actual > 0 || initiatives.length > 0;
+  const { month, planned, good, better, best, actual, variance, variancePercent, initiatives } = data;
+  // A month is only "planned" when it actually has initiatives. Without that,
+  // the year-level projection rollup filled in targets for every month - including
+  // the months before a mid-year plan starts, which is misleading.
+  const hasData = planned || actual > 0 || initiatives.length > 0;
 
   return (
     <>
@@ -366,7 +397,7 @@ function MonthRow({ data, year, isCurrent, isExpanded, onToggle }: MonthRowProps
         </td>
         <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{initiatives.length}</td>
         <td className="text-center py-3 px-3">
-          <MonthStatusBadge month={month} currentMonth={getCurrentMonth()} />
+          <MonthStatusBadge month={month} year={year} planned={planned} />
         </td>
       </tr>
       {/* Expanded initiative rows */}
@@ -444,15 +475,44 @@ function InitiativeChildRow({ initiative }: InitiativeChildRowProps) {
 
 /* --- Month Status Badge --- */
 
-function MonthStatusBadge({ month, currentMonth }: { month: number; currentMonth: number }) {
-  if (month < currentMonth) {
+function MonthStatusBadge({
+  month,
+  year,
+  planned,
+}: {
+  month: number;
+  year: number;
+  planned: boolean;
+}) {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+
+  // A month the plan does not cover has no status to report. It used to compare
+  // month numbers only, so with a plan generated in September, August showed
+  // "Complete" despite never having been planned - and every month before
+  // September of a FUTURE year showed "Complete" as well, because the year was
+  // ignored entirely.
+  if (!planned) {
+    return (
+      <span className="text-xs font-medium text-[hsl(var(--foreground-subtle))]">
+        Not planned
+      </span>
+    );
+  }
+
+  // Compare the actual point in time, not just the month number.
+  const isPast = year < currentYear || (year === currentYear && month < currentMonth);
+  const isCurrent = year === currentYear && month === currentMonth;
+
+  if (isPast) {
     return (
       <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">
         Complete
       </span>
     );
   }
-  if (month === currentMonth) {
+  if (isCurrent) {
     return (
       <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700">
         In Progress

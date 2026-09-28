@@ -44,24 +44,31 @@ export default function SignupPage() {
 
       // Where the user should land once their account is usable.
       //
-      // - Arrived via the questionnaire (has a "next" param, e.g. from the
-      //   generating screen) -> resume exactly where they left off.
-      // - Has an in-progress questionnaire draft but no explicit "next" ->
-      //   resume generating it.
-      // - Signed up directly (no questionnaire involved) -> the new welcome
-      //   screen, which offers the questionnaire options or a skip to the
-      //   dashboard. The questionnaire is never forced.
+      // ONLY an explicit ?next= is honoured. That is set by the flows that
+      // genuinely need to resume something — e.g. /onboarding/generating sends
+      // anonymous visitors to /auth/signup?next=/onboarding/generating so the
+      // questionnaire they just completed still gets generated.
+      //
+      // We deliberately do NOT inspect localStorage for a questionnaire draft
+      // here. That heuristic was wrong in three ways:
+      //   1. The draft is not scoped to a user, so an abandoned draft from a
+      //      previous account in this browser hijacked a brand-new signup and
+      //      generated their plan from someone else's answers.
+      //   2. The decision was baked into the confirmation EMAIL LINK at signup
+      //      time but acted on much later — possibly in a different browser,
+      //      where the draft state is completely different.
+      //   3. It was redundant: the only flow that legitimately needs to resume
+      //      already passes an explicit ?next=.
+      // Everyone else lands on the welcome screen and chooses for themselves.
       const requestedNext = new URLSearchParams(window.location.search).get('next');
-      const hasDraft = !!localStorage.getItem('sam-plan-data');
-      const destination =
-        requestedNext || (hasDraft ? '/onboarding/generating' : '/onboarding/welcome');
+      const destination = requestedNext || '/onboarding/welcome';
 
       // 1. Sign up with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
         options: {
-          emailRedirectTo: `${getAppUrl()}/auth/callback?next=${encodeURIComponent(destination)}`,
+          emailRedirectTo: `${getAppUrl()}/auth/confirmed?next=${encodeURIComponent(destination)}`,
           data: {
             first_name: formData.firstName,
             last_name: formData.lastName,

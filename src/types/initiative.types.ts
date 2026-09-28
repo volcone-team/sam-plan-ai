@@ -97,8 +97,10 @@ export interface UpdateInitiativeDTO {
   name?: string;
   description?: string;
   status?: InitiativeStatus;
+  initiativeTypeId?: string;
+  productId?: string;
   activationDate?: Date;
-  eventDate?: Date;
+  eventDate?: Date | null; // null explicitly clears the event date
   trafficInput?: number;
   revenueScenarios?: Partial<RevenueScenarios>;
   plannedBudget?: number;

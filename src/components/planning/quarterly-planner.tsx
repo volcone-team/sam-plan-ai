@@ -20,8 +20,12 @@ import { initiativeService } from '@/services/initiative.service';
 import { resultService } from '@/services/result.service';
 import { QuarterlySummaryTable } from './quarterly-summary-table';
 import type { QuarterlyPlan, Initiative, Projection } from '@/types';
+import { usePlanYears } from '@/hooks/use-plan-years';
+import { PlanYearTabs } from '@/components/planning/plan-year-tabs';
 
-const YEAR = new Date().getFullYear();
+// Year comes from the shared PlanYearProvider, not a module-level constant.
+// The old `const YEAR = new Date().getFullYear()` was evaluated once when this
+// chunk was parsed, which made a plan spanning into the next year unviewable.
 
 const QUARTER_MONTHS: Record<number, number[]> = {
   1: [1, 2, 3],
@@ -86,6 +90,9 @@ const STATUS_COLORS: Record<string, string> = {
 
 export function QuarterlyPlanner() {
   const companyId = useCompanyId() || "";
+  // Shared with Year-at-a-Glance: the plan year being viewed, which may be a
+  // year the plan spans into rather than the current calendar year.
+  const { selectedYear: YEAR, setSelectedYear, years: planYears } = usePlanYears(companyId);
   const router = useRouter();
   const [selectedQuarter, setSelectedQuarter] = useState(getCurrentQuarter());
   const [loading, setLoading] = useState(true);
@@ -144,9 +151,10 @@ export function QuarterlyPlanner() {
           month: m,
           name: MONTH_NAMES[m],
           target: 0, // from plan monthly targets if available
-          good: (goodProj?.monthly as any[])?.find((x: any) => x.month === m)?.revenue || 0,
-          better: (betterProj?.monthly as any[])?.find((x: any) => x.month === m)?.revenue || 0,
-          best: (bestProj?.monthly as any[])?.find((x: any) => x.month === m)?.revenue || 0,
+          // Year-aware: a 2027 entry must not supply 2026's value.
+          good: (goodProj?.monthly as any[])?.find((x: any) => x.month === m && (x.year === undefined || x.year === YEAR))?.revenue || 0,
+          better: (betterProj?.monthly as any[])?.find((x: any) => x.month === m && (x.year === undefined || x.year === YEAR))?.revenue || 0,
+          best: (bestProj?.monthly as any[])?.find((x: any) => x.month === m && (x.year === undefined || x.year === YEAR))?.revenue || 0,
         }));
         setMonthlyBreakdown(monthlyData);
 
@@ -162,7 +170,7 @@ export function QuarterlyPlanner() {
     };
 
     loadQuarterData();
-  }, [selectedQuarter]);
+  }, [selectedQuarter, YEAR]);
 
   if (loading) {
     return (
@@ -186,6 +194,13 @@ export function QuarterlyPlanner() {
 
   return (
     <div className="space-y-6">
+      {/* Year tabs first: which year you are looking at governs everything below. */}
+      <PlanYearTabs
+        years={planYears}
+        selectedYear={YEAR}
+        onSelect={setSelectedYear}
+        currentYear={new Date().getFullYear()}
+      />
       {/* Quarterly Summary Table */}
       <QuarterlySummaryTable />
 

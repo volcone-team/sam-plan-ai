@@ -86,6 +86,9 @@ export async function POST(request: Request) {
       email,
       email_confirm: true, // Account usable; they'll set a password via invite link
       user_metadata: {
+        // No password chosen yet — middleware confines this session to
+        // /auth/set-password until they pick one.
+        needs_password: true,
         first_name: firstName,
         last_name: lastName,
         company_name: null, // They're joining an existing company

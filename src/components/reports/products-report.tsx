@@ -10,8 +10,10 @@ import { projectionService } from '@/services/projection.service';
 import { resultService } from '@/services/result.service';
 import { initiativeService } from '@/services/initiative.service';
 import type { Product, Result, Initiative } from '@/types';
+import { usePlanYears } from '@/hooks/use-plan-years';
 
-const CURRENT_YEAR = 2026;
+// Was the literal 2026, which silently stops being true. Now the shared
+// selected plan year, so reports follow the year filter like every other screen.
 
 // Product-specific colors for the bars
 const PRODUCT_COLORS = [
@@ -44,6 +46,9 @@ interface ProductRevenueData {
 
 export function ProductsReport() {
   const companyId = useCompanyId() || "";
+  // Shared with Year-at-a-Glance: the plan year being viewed, which may be a
+  // year the plan spans into rather than the current calendar year.
+  const { selectedYear: CURRENT_YEAR, setSelectedYear, years: planYears } = usePlanYears(companyId);
   const [products, setProducts] = useState<Product[]>([]);
   const [results, setResults] = useState<Result[]>([]);
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
@@ -75,7 +80,7 @@ export function ProductsReport() {
       }
     }
     loadData();
-  }, [companyId]);
+  }, [companyId, CURRENT_YEAR]);
 
   // Build initiative → product mapping
   const initiativeProductMap = useMemo(() => {

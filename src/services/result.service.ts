@@ -15,6 +15,7 @@ import type {
   UpdateResultDTO,
 } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
+import { toDateOnly, parseDateOnly } from '@/lib/plan-dates';
 
 export class ResultService {
   async getResultsByInitiative(initiativeId: string): Promise<InitiativeResult[]> {
@@ -65,7 +66,7 @@ export class ResultService {
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
-        const dateStr = weekStartDate.toISOString().split('T')[0];
+        const dateStr = toDateOnly(weekStartDate);
         const { data, error } = await supabase
           .from('results')
           .select('*')
@@ -88,8 +89,8 @@ export class ResultService {
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
-        const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0];
-        const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+        const startDate = toDateOnly(new Date(year, month - 1, 1));
+        const endDate = toDateOnly(new Date(year, month, 0));
         const { data, error } = await supabase
           .from('results')
           .select('*')
@@ -121,8 +122,8 @@ export class ResultService {
         let query = supabase
           .from('results')
           .select('*')
-          .gte('week_start_date', startDate.toISOString().split('T')[0])
-          .lte('week_start_date', endDate.toISOString().split('T')[0]);
+          .gte('week_start_date', toDateOnly(startDate))
+          .lte('week_start_date', toDateOnly(endDate));
         if (companyId) query = query.eq('company_id', companyId);
         const { data, error } = await query.order('week_start_date', { ascending: true });
 
@@ -145,8 +146,8 @@ export class ResultService {
           company_id: dto.companyId,
           initiative_id: dto.initiativeId,
           product_id: null,
-          week_start_date: dto.weekStartDate instanceof Date ? dto.weekStartDate.toISOString().split('T')[0] : dto.weekStartDate,
-          week_end_date: dto.weekEndDate instanceof Date ? dto.weekEndDate.toISOString().split('T')[0] : dto.weekEndDate,
+          week_start_date: toDateOnly(dto.weekStartDate),
+          week_end_date: toDateOnly(dto.weekEndDate),
           actual_revenue: dto.actualRevenue,
           actual_spend: dto.actualSpend,
           metrics: dto.metrics || {},
@@ -179,8 +180,8 @@ export class ResultService {
           company_id: dto.companyId,
           initiative_id: null,
           product_id: dto.productId,
-          week_start_date: dto.weekStartDate instanceof Date ? dto.weekStartDate.toISOString().split('T')[0] : dto.weekStartDate,
-          week_end_date: dto.weekEndDate instanceof Date ? dto.weekEndDate.toISOString().split('T')[0] : dto.weekEndDate,
+          week_start_date: toDateOnly(dto.weekStartDate),
+          week_end_date: toDateOnly(dto.weekEndDate),
           actual_revenue: dto.actualRevenue,
           actual_spend: dto.actualSpend,
           metrics: dto.metrics || {},
@@ -278,8 +279,8 @@ export class ResultService {
       companyId: row.company_id as string,
       initiativeId: (row.initiative_id as string) || null,
       productId: (row.product_id as string) || undefined,
-      weekStartDate: new Date(row.week_start_date as string),
-      weekEndDate: new Date(row.week_end_date as string),
+      weekStartDate: parseDateOnly(row.week_start_date as string),
+      weekEndDate: parseDateOnly(row.week_end_date as string),
       actualRevenue: Number(row.actual_revenue) || 0,
       actualSpend: Number(row.actual_spend) || 0,
       metrics: (row.metrics as any) || {},

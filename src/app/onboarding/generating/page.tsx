@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { cacheInvalidatePrefix, CacheKeys } from "@/lib/client-cache";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "@/components/brand-logo";
@@ -48,8 +49,29 @@ export default function GeneratingPage() {
   const startedRef = useRef(false);
 
   const goToDashboard = useCallback(() => {
+    // Year-at-a-Glance caches its entire dashboard payload (plan, projections,
+    // products, initiatives) under `dashboard:<company>:<year>`. This page is the
+    // one place that REPLACES all of it, and it never invalidated that cache - so
+    // landing on the dashboard straight after generating served the pre-generation
+    // snapshot. If the user had just deleted everything, that snapshot held an
+    // empty initiative list, which is why "Where you are" reported $0 across the
+    // board and claimed no initiatives were scheduled.
+    cacheInvalidatePrefix(CacheKeys.planPrefix);
     setIsFadingOut(true);
-    setTimeout(() => router.push("/year-at-a-glance"), 600);
+    // A FIRST-TIME generation returns to the onboarding screen, where step 2 is
+    // now unlocked and step 3 is actionable - so the user sees progress instead
+    // of being dropped on the dashboard mid-onboarding. A REGENERATION is not
+    // onboarding, so it goes straight to the plan.
+    let isRegeneration = false;
+    try {
+      isRegeneration =
+        localStorage.getItem("sam-regenerated-before") === "1" ||
+        localStorage.getItem("sam-onboarding-complete") === "1";
+      // Mark onboarding as seen so later generations skip the welcome screen.
+      localStorage.setItem("sam-onboarding-complete", "1");
+    } catch { /* private mode - fall back to the dashboard */ }
+    const destination = isRegeneration ? "/year-at-a-glance" : "/onboarding/welcome";
+    setTimeout(() => router.push(destination), 600);
   }, [router]);
 
   // Anonymous visitors finish the questionnaire before they have an account.
@@ -121,6 +143,10 @@ export default function GeneratingPage() {
         //    (first-time generation, nothing to keep).
         const regenMode = localStorage.getItem("sam-regen-mode");
         const isFullReset = regenMode !== "scratch";
+        // Captured HERE, while the flag still exists: it is removed from
+        // localStorage before the generate fetch below, and the server needs it
+        // to log the event as a regeneration rather than a first generation.
+        const isRegeneration = regenMode === "scratch";
 
         // Which year is being generated. Read BEFORE the reset so the reset can
         // be scoped to that year - otherwise generating a future year wiped the
@@ -172,7 +198,7 @@ export default function GeneratingPage() {
         const res = await fetch("/api/generate-plan", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ questionnaire: data, targetYear }),
+          body: JSON.stringify({ questionnaire: data, targetYear, isRegeneration }),
         });
 
         const raw = await res.text();

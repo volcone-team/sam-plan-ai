@@ -92,6 +92,9 @@ export default function SetPasswordPage() {
       // 6. Clean the URL once a session exists so a refresh does not re-run the
       // exchange against a now-consumed code (avoids "code already used").
       if (user) {
+        // A password change is now pending for this account. Fire-and-forget:
+        // failure just means the session isn't confined, never a broken page.
+        void supabase.auth.updateUser({ data: { needs_password: true } });
         window.history.replaceState({}, '', '/auth/set-password');
       }
 
@@ -127,6 +130,9 @@ export default function SetPasswordPage() {
 
       const { error: updateError } = await supabase.auth.updateUser({
         password,
+        // Clear the marker so middleware stops confining this account to the
+        // password-setup flow. See needsPasswordSetup() in supabase/middleware.
+        data: { needs_password: false },
       });
 
       if (updateError) {

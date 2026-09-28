@@ -17,6 +17,7 @@ import {
 import { PageContainer, PageHeader } from "@/components/layout";
 import { useToast } from "@/components/ui/toast";
 import { ProgressBar } from "@/components/ui/progress-bar";
+import { usePermission } from "@/hooks/use-permission";
 
 interface Suggestion {
   id: string;
@@ -69,6 +70,8 @@ export default function EnhancePlanPage() {
   const [actingId, setActingId] = useState<string | null>(null);
   const [applyingAll, setApplyingAll] = useState(false);
   const { showToast, dismissToast } = useToast();
+  /** Only owner/operator may generate suggestions or apply them to the plan. */
+  const canEditPlan = usePermission("plan.regenerate");
 
   const loadSuggestions = useCallback(async () => {
     setLoading(true);
@@ -95,6 +98,7 @@ export default function EnhancePlanPage() {
   }, [loadSuggestions]);
 
   const handleGenerate = async () => {
+    if (!canEditPlan) return;
     setGenerating(true);
     setError(null);
     console.log("[EnhancePlan] Requesting AI enhancement...");
@@ -121,6 +125,7 @@ export default function EnhancePlanPage() {
   };
 
   const decide = async (id: string, decision: "accepted" | "rejected") => {
+    if (!canEditPlan) return;
     setActingId(id);
     console.log("[EnhancePlan] Deciding:", id, "->", decision);
     const target = suggestions.find((s) => s.id === id);
@@ -155,6 +160,7 @@ export default function EnhancePlanPage() {
   };
 
   const acceptAll = async () => {
+    if (!canEditPlan) return;
     setApplyingAll(true);
     const count = suggestions.length;
     console.log("[EnhancePlan] Accepting all", count, "suggestions");
@@ -176,6 +182,7 @@ export default function EnhancePlanPage() {
   };
 
   const rejectAll = async () => {
+    if (!canEditPlan) return;
     setApplyingAll(true);
     const count = suggestions.length;
     console.log("[EnhancePlan] Rejecting all", count, "suggestions");
@@ -208,6 +215,12 @@ export default function EnhancePlanPage() {
         description="AI-recommended improvements to your current plan. You approve each one."
       />
 
+      {!canEditPlan && (
+        <p className="mb-4 text-sm text-[hsl(var(--foreground-muted))]">
+          You have read-only access — ask an owner or operator to apply changes.
+        </p>
+      )}
+
       {error && (
         <div className="mb-4 rounded-[var(--radius-md)] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
           {error}
@@ -224,10 +237,16 @@ export default function EnhancePlanPage() {
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[hsl(var(--primary)/0.1)]">
             <Sparkles className="h-6 w-6 text-[hsl(var(--primary))]" />
           </div>
-          <h3 className="mt-4 text-base font-semibold">Get AI recommendations</h3>
+          <h3 className="mt-4 text-base font-semibold">
+            {canEditPlan ? "Get AI recommendations" : "No suggestions to review"}
+          </h3>
           <p className="mt-1.5 max-w-md text-sm text-[hsl(var(--foreground-muted))]">
-            The AI will review your current plan and suggest improvements — new initiatives, budget tweaks, timing changes, and more. Nothing changes until you approve it.
+            {canEditPlan
+              ? "The AI will review your current plan and suggest improvements — new initiatives, budget tweaks, timing changes, and more. Nothing changes until you approve it."
+              : "There are no AI recommendations waiting right now. An owner or operator can generate new recommendations for this plan."}
           </p>
+          {canEditPlan && (
+          <>
           <button
             onClick={handleGenerate}
             disabled={generating}
@@ -246,6 +265,8 @@ export default function EnhancePlanPage() {
             )}
           </button>
           <ProgressBar active={generating} estimatedMs={30000} className="mt-4 max-w-xs" />
+          </>
+          )}
         </div>
       ) : (
         /* Review list */
@@ -254,6 +275,7 @@ export default function EnhancePlanPage() {
             <p className="text-sm text-[hsl(var(--foreground-muted))]">
               {suggestions.length} suggestion{suggestions.length !== 1 ? "s" : ""} to review
             </p>
+            {canEditPlan && (
             <div className="flex gap-2">
               <button
                 onClick={rejectAll}
@@ -270,6 +292,7 @@ export default function EnhancePlanPage() {
                 {applyingAll ? "Applying…" : "Accept All"}
               </button>
             </div>
+            )}
           </div>
           <ProgressBar active={applyingAll} estimatedMs={suggestions.length * 800} />
 
@@ -322,6 +345,7 @@ export default function EnhancePlanPage() {
                     </div>
                   </div>
 
+                  {canEditPlan && (
                   <div className="flex shrink-0 items-center gap-1.5">
                     <button
                       onClick={() => decide(s.id, "accepted")}
@@ -342,6 +366,7 @@ export default function EnhancePlanPage() {
                       Reject
                     </button>
                   </div>
+                  )}
                 </div>
               </div>
             );

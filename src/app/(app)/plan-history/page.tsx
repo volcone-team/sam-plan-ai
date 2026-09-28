@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { History, Eye, Loader2, FileText, Trash2, AlertTriangle, X } from 'lucide-react';
 import { PageContainer, PageHeader } from '@/components/layout';
 import { useToast } from '@/components/ui/toast';
+import { usePermission } from '@/hooks/use-permission';
 
 interface Snapshot {
   id: string;
@@ -15,6 +16,8 @@ interface Snapshot {
 export default function PlanHistoryPage() {
   const router = useRouter();
   const { showToast } = useToast();
+  /** Only owner/operator may delete plan history. Others see a read-only view. */
+  const canEditPlan = usePermission('plan.regenerate');
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loading, setLoading] = useState(true);
   /** Snapshot awaiting delete confirmation. */
@@ -22,6 +25,7 @@ export default function PlanHistoryPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleDelete = async (snap: Snapshot) => {
+    if (!canEditPlan) return;
     setDeletingId(snap.id);
     console.log("[PlanHistory] Deleting snapshot:", snap.id);
     try {
@@ -68,6 +72,12 @@ export default function PlanHistoryPage() {
         description="View previous versions of your revenue plan"
       />
 
+      {!canEditPlan && (
+        <p className="mb-4 text-sm text-[hsl(var(--foreground-muted))]">
+          You have read-only access to plan history.
+        </p>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-[hsl(var(--primary))]" />
@@ -106,6 +116,7 @@ export default function PlanHistoryPage() {
                   <Eye className="h-3.5 w-3.5" />
                   View
                 </button>
+                {canEditPlan && (
                 <button
                   onClick={() => setConfirmDelete(snap)}
                   disabled={deletingId === snap.id}
@@ -115,6 +126,7 @@ export default function PlanHistoryPage() {
                   {deletingId === snap.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                   Delete
                 </button>
+                )}
               </div>
             </div>
           ))}
@@ -123,7 +135,7 @@ export default function PlanHistoryPage() {
 
       {/* Delete confirmation. Deleting history removes a recovery point, so
           make clear what is and is not affected. */}
-      {confirmDelete && (
+      {canEditPlan && confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-[var(--radius-lg)] border border-border bg-card p-6 shadow-xl">
             <div className="flex items-start justify-between">

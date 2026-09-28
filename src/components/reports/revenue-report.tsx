@@ -8,8 +8,10 @@ import { exportToCSV } from '@/lib/csv-export';
 import { resultService } from '@/services/result.service';
 import { projectionService } from '@/services/projection.service';
 import type { Projection, Result } from '@/types';
+import { usePlanYears } from '@/hooks/use-plan-years';
 
-const CURRENT_YEAR = 2026;
+// Was the literal 2026, which silently stops being true. Now the shared
+// selected plan year, so reports follow the year filter like every other screen.
 
 type PeriodView = 'monthly' | 'quarterly' | 'annual';
 
@@ -35,6 +37,9 @@ const MONTH_SHORT = [
 
 export function RevenueReport() {
   const companyId = useCompanyId() || "";
+  // Shared with Year-at-a-Glance: the plan year being viewed, which may be a
+  // year the plan spans into rather than the current calendar year.
+  const { selectedYear: CURRENT_YEAR, setSelectedYear, years: planYears } = usePlanYears(companyId);
   const [periodView, setPeriodView] = useState<PeriodView>('monthly');
   const [projections, setProjections] = useState<Projection[]>([]);
   const [results, setResults] = useState<Result[]>([]);
@@ -61,7 +66,7 @@ export function RevenueReport() {
       }
     }
     loadData();
-  }, [companyId]);
+  }, [companyId, CURRENT_YEAR]);
 
   // Build monthly data from projections and results
   const monthlyData: MonthlyData[] = useMemo(() => {

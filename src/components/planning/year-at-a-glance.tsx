@@ -33,6 +33,7 @@ import { RegenerateModal } from './regenerate-modal';
 import type { AnnualPlan, QuarterlyPlan, Initiative, Result } from '@/types';
 import { cacheGet, cacheSet, cacheInvalidatePrefix, CacheKeys, TTL } from '@/lib/client-cache';
 import { useToast } from '@/components/ui/toast';
+import { usePlanYears } from '@/hooks/use-plan-years';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -71,8 +72,15 @@ export function YearAtAGlance() {
   const router = useRouter();
   const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   /** Year currently being viewed. Users can review past years or plan ahead. */
-  const [selectedYear, setSelectedYear] = useState<number>(CURRENT_YEAR);
+  // Shared across screens: selecting 2027 here keeps 2027 on Monthly/Quarterly.
+  const { selectedYear, setSelectedYear } = usePlanYears(companyId);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
+  /**
+   * Every calendar year the plan's initiatives touch. A 12-month plan generated
+   * in September spans two years but is ONE annual_plans row, so this is the only
+   * way the later year becomes reachable.
+   */
+  const [spannedYears, setSpannedYears] = useState<number[]>([]);
   /** Bumped to force a data reload after saving a draft. */
   const [reloadKey, setReloadKey] = useState(0);
   const [showPastYears, setShowPastYears] = useState(false);
@@ -152,9 +160,33 @@ export function YearAtAGlance() {
           // year showed the current year's initiatives and projections next to
           // its own zeroed goals - and the draft editor never appeared, because
           // the leaked rows made the year look already-generated.
-          if (plan?.id) {
+          // Initiatives belong to the CALENDAR YEAR their activation date falls
+          // in, not to whichever annual_plans row owns them. A 12-month plan
+          // generated in Sept 2026 is a single 2026 row, but its later
+          // initiatives activate in 2027 - filtering by annual_plan_id hid all
+          // of those, which is why 2027 was empty everywhere except the
+          // Initiatives page (which filters by nothing).
+          const initiativesInYear = initiativesData.filter(
+            (i) => new Date(i.activationDate).getFullYear() === selectedYear
+          );
+          if (initiativesInYear.length > 0) {
+            // The year has real initiatives. Keep them, and keep the goals of
+            // the plan that generated them - a spanned year is the SAME plan,
+            // so it must not show zeroed targets.
+            initiativesData = initiativesInYear;
+            if (!plan) {
+              const owningId = initiativesInYear.find((i) => i.annualPlanId)?.annualPlanId;
+              if (owningId) {
+                const owning = await planService.getAnnualPlanById(owningId);
+                if (owning) plan = owning;
+              }
+            }
+            projections = plan?.id
+              ? projections.filter((pr: { annualPlanId?: string }) => pr.annualPlanId === plan!.id)
+              : [];
+          } else if (plan?.id) {
             projections = projections.filter((pr: { annualPlanId?: string }) => pr.annualPlanId === plan!.id);
-            initiativesData = initiativesData.filter((i) => i.annualPlanId === plan!.id);
+            initiativesData = [];
           } else {
             // No plan row for this year yet - nothing belongs to it.
             projections = [];
@@ -177,9 +209,10 @@ export function YearAtAGlance() {
         for (let m = 1; m <= 12; m++) {
           monthly.push({
             month: m,
-            good: goodProj?.monthly?.find((x: any) => x.month === m)?.revenue || 0,
-            better: betterProj?.monthly?.find((x: any) => x.month === m)?.revenue || 0,
-            best: bestProj?.monthly?.find((x: any) => x.month === m)?.revenue || 0,
+            // Year-aware so a spanned year's entries stay in their own year.
+            good: goodProj?.monthly?.find((x: any) => x.month === m && (x.year === undefined || x.year === selectedYear))?.revenue || 0,
+            better: betterProj?.monthly?.find((x: any) => x.month === m && (x.year === undefined || x.year === selectedYear))?.revenue || 0,
+            best: bestProj?.monthly?.find((x: any) => x.month === m && (x.year === undefined || x.year === selectedYear))?.revenue || 0,
           });
         }
         setMonthlyData(monthly);
@@ -276,9 +309,21 @@ export function YearAtAGlance() {
     let cancelled = false;
     (async () => {
       try {
-        const years = await planService.getPlanYears(companyId);
+        const [years, allInitiatives] = await Promise.all([
+          planService.getPlanYears(companyId),
+          initiativeService.getInitiativesByCompany(companyId),
+        ]);
         if (cancelled) return;
         setAvailableYears(years);
+        // Years the plan actually reaches, from initiative dates.
+        const spanned = new Set<number>();
+        for (const i of allInitiatives) {
+          for (const d of [i.activationDate, i.eventDate]) {
+            const y = d ? new Date(d).getFullYear() : NaN;
+            if (Number.isInteger(y)) spanned.add(y);
+          }
+        }
+        setSpannedYears([...spanned].sort((a, b) => a - b));
         // Prefer the current year when a plan exists for it, otherwise the
         // most recent year on record, so the page is never empty by default.
         if (years.length > 0 && !years.includes(CURRENT_YEAR)) {
@@ -510,7 +555,11 @@ export function YearAtAGlance() {
 
   // Year switcher buckets. Past years collapse into a dropdown so the row stays
   // short as years accumulate; current and future years stay visible.
-  const knownYears = Array.from(new Set([...availableYears, selectedYear, CURRENT_YEAR]));
+  // Years the plan actually spans. `availableYears` only knows about
+  // annual_plans rows, so a plan running into next year never offered that year.
+  const knownYears = Array.from(
+    new Set([...availableYears, ...spannedYears, selectedYear, CURRENT_YEAR])
+  );
   const pastYears = knownYears.filter((y) => y < CURRENT_YEAR).sort((a, b) => b - a);
   const switcherYears = knownYears.filter((y) => y >= CURRENT_YEAR).sort((a, b) => a - b);
   // A future year is in "draft planning" mode until it has actual INITIATIVES.
@@ -520,11 +569,16 @@ export function YearAtAGlance() {
   // into a real generated plan.
   const isFutureYear = selectedYear > CURRENT_YEAR;
   const hasInitiatives = initiativeRows.length > 0;
-  const isDraftPlanning = isFutureYear && !hasInitiatives;
+  // A future year the plan already SPANS is not a draft: it has real generated
+  // initiatives and inherits the plan's goals. Only a year with nothing in it
+  // gets the draft editor.
+  const isDraftPlanning = isFutureYear && !hasInitiatives && !spannedYears.includes(selectedYear);
 
   // Next year that has no plan yet, so "Plan future year" always advances.
+  // The next year the plan does NOT already reach. Generating a plan for a year
+  // the current 12-month plan already covers would duplicate it.
   const nextPlannableYear = (() => {
-    let y = CURRENT_YEAR;
+    let y = Math.max(CURRENT_YEAR, ...(spannedYears.length ? spannedYears : [CURRENT_YEAR]));
     while (knownYears.includes(y)) y += 1;
     return y;
   })();
@@ -680,7 +734,8 @@ export function YearAtAGlance() {
             {y}
             {y > CURRENT_YEAR && (
               <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider opacity-70">
-                Draft
+                {/* A year the current plan spans is part of that plan, not a draft. */}
+                {spannedYears.includes(y) ? 'Planned' : 'Draft'}
               </span>
             )}
           </button>

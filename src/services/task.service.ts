@@ -1,3 +1,4 @@
+import { parseDateOnly, toDateOnly, todayDateOnly } from '@/lib/plan-dates';
 /**
  * Task Service
  * Manages tasks from initiative project templates.
@@ -130,7 +131,7 @@ export class TaskService {
           .eq('initiative_id', initiativeId)
           .eq('priority', 'critical')
           .in('status', ['not_started', 'in_progress'])
-          .gte('due_date', new Date().toISOString().split('T')[0])
+          .gte('due_date', toDateOnly(todayDateOnly()))
           .order('due_date', { ascending: true });
 
         if (!error && data) {
@@ -152,7 +153,7 @@ export class TaskService {
           .from('tasks')
           .select('*')
           .eq('initiative_id', initiativeId)
-          .lt('due_date', new Date().toISOString().split('T')[0])
+          .lt('due_date', toDateOnly(todayDateOnly()))
           .not('status', 'in', '("completed","cancelled")');
 
         if (!error && data) {
@@ -166,6 +167,43 @@ export class TaskService {
     console.log("[task] No data, returning []"); return [];
   }
 
+  /**
+   * Every task for a COMPANY whose due date falls in [startDate, endDate].
+   *
+   * This is the query the cadence views need and did not have. Weekly and Daily
+   * used to iterate the initiatives that overlapped the window and pull tasks
+   * per initiative, so a task due this week whose initiative activates in three
+   * months was structurally invisible - the reported "I set tasks due for the
+   * week and they don't show up". Membership is decided by the task's OWN due
+   * date and nothing else.
+   *
+   * Filtered in Postgres on the DATE column using date-only strings, so no
+   * timezone conversion happens on the way in.
+   */
+  async getTasksByCompanyDueBetween(companyId: string, startDate: Date, endDate: Date): Promise<Task[]> {
+    if (!companyId) return [];
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('company_id', companyId)
+          .gte('due_date', toDateOnly(startDate))
+          .lte('due_date', toDateOnly(endDate))
+          .order('due_date', { ascending: true });
+        if (error) {
+          console.error('[task] getTasksByCompanyDueBetween failed:', error.message);
+          return [];
+        }
+        if (data) return data.map(row => this.mapRow(row));
+      } catch (err) {
+        console.error('[task] getTasksByCompanyDueBetween threw:', err);
+      }
+    }
+    return [];
+  }
+
   async getTasksByDueDate(initiativeId: string, startDate: Date, endDate: Date): Promise<Task[]> {
     if (isSupabaseConfigured()) {
       try {
@@ -174,8 +212,8 @@ export class TaskService {
           .from('tasks')
           .select('*')
           .eq('initiative_id', initiativeId)
-          .gte('due_date', startDate.toISOString().split('T')[0])
-          .lte('due_date', endDate.toISOString().split('T')[0])
+          .gte('due_date', toDateOnly(startDate))
+          .lte('due_date', toDateOnly(endDate))
           .order('due_date', { ascending: true });
 
         if (!error && data) {
@@ -219,7 +257,7 @@ export class TaskService {
           company_id: dto.companyId,
           name: dto.name,
           description: dto.description || '',
-          due_date: dto.dueDate instanceof Date ? dto.dueDate.toISOString().split('T')[0] : dto.dueDate,
+          due_date: toDateOnly(dto.dueDate),
           estimated_hours: dto.estimatedHours || 0,
           estimated_hours_range: dto.estimatedHoursRange || null,
           status: 'not_started',
@@ -255,7 +293,7 @@ export class TaskService {
         if (dto.description !== undefined) updateData.description = dto.description;
         if (dto.status !== undefined) updateData.status = dto.status;
         if (dto.priority !== undefined) updateData.priority = dto.priority;
-        if (dto.dueDate !== undefined) updateData.due_date = dto.dueDate instanceof Date ? dto.dueDate.toISOString().split('T')[0] : dto.dueDate;
+        if (dto.dueDate !== undefined) updateData.due_date = toDateOnly(dto.dueDate);
         if (dto.estimatedHours !== undefined) updateData.estimated_hours = dto.estimatedHours;
         if (dto.actualHours !== undefined) updateData.actual_hours = dto.actualHours;
         if (dto.assignedToUserId !== undefined) updateData.assigned_to_user_id = dto.assignedToUserId || null;
@@ -355,7 +393,9 @@ export class TaskService {
       description: (row.description as string) || '',
       status: (row.status as TaskStatus) || 'not_started',
       priority: (row.priority as TaskPriority) || 'medium',
-      dueDate: new Date(row.due_date as string),
+      // parseDateOnly, not new Date(): a bare YYYY-MM-DD parses as UTC midnight,
+      // which reads back as the PREVIOUS day for anyone behind UTC.
+      dueDate: parseDateOnly(row.due_date as string),
       estimatedHours: Number(row.estimated_hours) || 0,
       estimatedHoursRange: row.estimated_hours_range as any,
       assignedToUserId: (row.assigned_to_user_id as string) || undefined,

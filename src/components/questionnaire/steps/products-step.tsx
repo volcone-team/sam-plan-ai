@@ -4,7 +4,7 @@ import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import type { QuestionnaireData, ProductEntry } from "../questionnaire-data";
-import { PRODUCT_TYPE_OPTIONS } from "../questionnaire-data";
+import { PRODUCT_TYPE_OPTIONS, createEmptyProduct } from "../questionnaire-data";
 
 interface ProductsStepProps {
   data: QuestionnaireData;
@@ -12,19 +12,9 @@ interface ProductsStepProps {
   errors: Record<string, string>;
 }
 
-function generateId(): string {
-  return `prod-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-}
-
 export function ProductsStep({ data, onChange, errors }: ProductsStepProps) {
   const addProduct = () => {
-    const newProduct: ProductEntry = {
-      id: generateId(),
-      name: "",
-      type: "service",
-      price: null,
-    };
-    onChange({ products: [...data.products, newProduct] });
+    onChange({ products: [...data.products, createEmptyProduct()] });
   };
 
   const updateProduct = (id: string, updates: Partial<ProductEntry>) => {
@@ -36,21 +26,16 @@ export function ProductsStep({ data, onChange, errors }: ProductsStepProps) {
   };
 
   const removeProduct = (id: string) => {
-    onChange({ products: data.products.filter((p) => p.id !== id) });
+    const remaining = data.products.filter((p) => p.id !== id);
+    // Never leave the step with nothing to type into: removing the last row
+    // replaces it with a fresh blank one rather than showing an empty screen.
+    onChange({ products: remaining.length > 0 ? remaining : [createEmptyProduct()] });
   };
 
   return (
     <div className="space-y-6">
       {errors.products && (
         <p className="text-xs text-[hsl(var(--error))]">{errors.products}</p>
-      )}
-
-      {data.products.length === 0 && (
-        <div className="rounded-[var(--radius-lg)] border border-dashed border-border p-8 text-center">
-          <p className="text-sm text-[hsl(var(--foreground-muted))]">
-            No products added yet. Add your first product or service below.
-          </p>
-        </div>
       )}
 
       <div className="space-y-4">
@@ -66,7 +51,8 @@ export function ProductsStep({ data, onChange, errors }: ProductsStepProps) {
               <button
                 type="button"
                 onClick={() => removeProduct(product.id)}
-                className="text-[hsl(var(--foreground-muted))] hover:text-[hsl(var(--error))] transition-colors"
+                disabled={data.products.length === 1 && !product.name.trim()}
+                className="text-[hsl(var(--foreground-muted))] transition-colors hover:text-[hsl(var(--error))] disabled:cursor-not-allowed disabled:opacity-30"
                 aria-label={`Remove ${product.name || "product"}`}
               >
                 <Trash2 className="h-4 w-4" />
@@ -130,7 +116,7 @@ export function ProductsStep({ data, onChange, errors }: ProductsStepProps) {
 
       <Button type="button" variant="outline" onClick={addProduct} className="w-full">
         <Plus className="mr-1 h-4 w-4" />
-        Add Product
+        Add another product
       </Button>
     </div>
   );

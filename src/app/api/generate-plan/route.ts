@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { requirePlanEditor } from "@/lib/require-plan-editor";
+import { logGenerationEvent, type GenerationEventType } from "@/lib/generation-events";
+import { toDateOnly, clampDayOfMonth, resolvePlanStart, planMonthToCalendar, todayDateOnly, requiredRunwayDays } from "@/lib/plan-dates";
+import { sequenceEventDates } from "@/lib/plan-schedule";
+import { loadLibrary, loadTaskTemplates, loadAiContext, renderLibraryForPrompt, type LibraryEntry } from "@/lib/workbook/read";
+import { materialiseTasks, materialiseAiTasks, templateRunwayDays } from "@/lib/workbook/materialise";
 
 // Claude needs more than the default serverless budget to produce a full plan.
 // NOTE: Vercel Hobby caps functions at 10s regardless of this value; Pro honours it.
@@ -10,6 +16,47 @@ export const maxDuration = 300;
 // Model is env-overridable so it can be rotated without a code change.
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5-20250929";
 
+// Shapes of the loosely-typed JSON we read (AI output, admin workbook rows).
+// These are descriptive only - the values come from JSON.parse / Supabase.
+
+type GeneratedTask = {
+  name: string;
+  description?: string;
+  daysBeforeEvent?: number;
+  estimatedHours?: number;
+  priority?: string;
+};
+
+type GeneratedInitiative = {
+  name: string;
+  description?: string;
+  kind: string;
+  /** Key into wb_initiative_library. Replaces the old free-text channel enum. */
+  libraryKey?: string;
+  channel?: string;
+  activationMonth?: number;
+  /** Day of month the initiative actually happens, 1-28. Clamped server-side. */
+  eventDay?: number;
+  trafficInput?: number;
+  revenueGood?: number;
+  revenueBetter?: number;
+  revenueBest?: number;
+  plannedBudget?: number;
+  productIndex: number;
+  /**
+   * Tasks are NOT generated any more - they come from the workbook's authored
+   * task template for this initiative. Kept optional so an older cached
+   * response still parses.
+   */
+  tasks?: GeneratedTask[];
+};
+
+type GeneratedPlan = {
+  annualPlan?: { baselineRevenue?: number; stretchRevenue?: number; operatingBudget?: number };
+  initiatives?: GeneratedInitiative[];
+  monthlyProjections?: Record<string, number[] | { monthly?: number[]; revenues?: number[] } | undefined>;
+};
+
 // ------------------------------------------------------------------
 // POST /api/generate-plan
 // Accepts questionnaire answers, calls Claude to generate a revenue
@@ -17,7 +64,7 @@ const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5-20250929";
 // user's company in Supabase.
 // ------------------------------------------------------------------
 
-function buildSystemPrompt(startMonth: number, planMonths: number, startYear: number): string {
+function buildSystemPrompt(startMonth: number, planMonths: number, startYear: number, startDay: number, todayStr: string): string {
   const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const startName = monthNames[startMonth - 1];
   const endMonth = ((startMonth - 1 + planMonths - 1) % 12) + 1;
@@ -39,8 +86,9 @@ Your response MUST be valid JSON (no markdown, no explanation) matching this exa
       "name": "string",
       "description": "string",
       "kind": "one-time" | "recurring" | "evergreen",
-      "channel": "webinar" | "email" | "linkedin" | "referral" | "challenge" | "vsl" | "paid_ads" | "sales_calls" | "content_social" | "custom",
+      "libraryKey": "string (MUST be one of the key= values from the INITIATIVE LIBRARY below - do not invent one)",
       "activationMonth": number (1-${planMonths}),
+      "eventDay": number (1-28, the day of the month the initiative actually happens),
       "trafficInput": number,
       "revenueGood": number,
       "revenueBetter": number,
@@ -51,7 +99,7 @@ Your response MUST be valid JSON (no markdown, no explanation) matching this exa
         {
           "name": "string",
           "description": "string",
-          "daysBeforeEvent": number,
+          "daysBeforeEvent": number (days BEFORE the event this task is due; 0 = on the day. Always positive.),
           "estimatedHours": number,
           "priority": "low" | "medium" | "high" | "critical"
         }
@@ -71,6 +119,10 @@ Your response MUST be valid JSON (no markdown, no explanation) matching this exa
 }
 
 Guidelines:
+- SELECT every initiative from the INITIATIVE LIBRARY below and return its libraryKey verbatim. Do NOT invent initiatives, channels or keys - anything not in the library is rejected.
+- The workbook holds an authored task template for most initiatives, and where it does, YOUR tasks are ignored in favour of it. Still return a task list for every initiative: it is the fallback for the initiatives the workbook has not been filled in for yet.
+- Task daysBeforeEvent is the number of days BEFORE the event, always positive, ordered largest first.
+- Use the library's difficulty (1-5), speed to results, price tier and WHEN/NEEDS/AVOID guidance to decide which initiatives suit this business.
 - Do NOT generate or invent products. The user's products are provided as-is and will be inserted separately. Leave the "products" array empty in your response.
 - All initiatives must reference a productIndex. Use 0 for the first product the user listed, 1 for the second, etc. If the user only has one product, all initiatives use productIndex 0.
 - Generate 4-8 initiatives spread across the plan period
@@ -84,14 +136,32 @@ Guidelines:
 - If they have budget, include paid ads or challenges
 - Spread initiatives across the ${planMonths} months, not front-loaded
 - Revenue projections array must have exactly ${planMonths} entries
+- activationMonth is RELATIVE TO THE PLAN, not the calendar. activationMonth 1 = ${startName} ${startYear}. Do NOT assume activationMonth 1 means January.
+- Do NOT name initiatives after calendar quarters or halves ("Q1", "Q3", "Mid-Year", "Year-End") unless that label is actually correct for the calendar month it lands in. Name them for the play, not the quarter.
+- The plan starts on day ${startDay} of ${startName} ${startYear} (today is ${todayStr}). An initiative's event must leave room for its OWN preparation: if its earliest task is 21 days before the event, the event must be at least 21 days after ${todayStr}. Never schedule an event so early that one of its own tasks would fall before ${todayStr}. If activationMonth 1 has no room, use activationMonth 2 or later.
+- NO TWO initiatives may happen on the same day, and their preparation windows must not overlap. Assume ONE launch is being prepared at a time: the next initiative's preparation begins only after the previous one's event. Space the eventDay/activationMonth values accordingly across the ${planMonths} months. Evergreen initiatives are continuous and exempt.
+- Every initiative MUST include an eventDay: the day of its activationMonth the initiative actually happens (1-28, so it is valid in every month).
+- Task daysBeforeEvent is a COUNT OF DAYS BEFORE the event and must be POSITIVE. Preparation work happens BEFORE the event: build the asset first, then promote, then the event, then follow-up. A task with daysBeforeEvent 14 is due 14 days before eventDay.
+- Order each initiative's tasks from the largest daysBeforeEvent (earliest) to the smallest (closest to the event).
 - Keep output COMPACT: max 4 tasks per initiative, short descriptions (one sentence). Do not add fields beyond the schema.
 `;
 }
 
 export async function POST(request: Request) {
   console.log("[generate-plan] === Request received ===");
+
+  // Hoisted out of the try so the outer catch can log a FAILED generation
+  // event. Both stay null/default until they are actually resolved, so a
+  // failure that happens before authorization cannot log a bogus event.
+  let eventCompanyId: string | null = null;
+  let eventUserId: string | null = null;
+  let eventType: GenerationEventType = "plan_generation";
+
   try {
-    // 1. Auth check
+    // 1. Authorization: only owner/operator may generate/regenerate the plan.
+    const check = await requirePlanEditor();
+    if (!check.ok) return NextResponse.json({ error: check.error }, { status: check.status });
+
     const cookieStore = await cookies();
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -106,35 +176,43 @@ export async function POST(request: Request) {
       }
     );
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // 2. Get user profile + company
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("company_id")
-      .eq("id", user.id)
-      .single();
-
-    if (!profile?.company_id) {
-      return NextResponse.json({ error: "No company found" }, { status: 400 });
-    }
-
-    const companyId = profile.company_id;
+    const companyId = check.companyId;
+    eventCompanyId = companyId;
+    eventUserId = check.userId;
 
     // 3. Parse the request body first - we need targetYear to resolve the plan.
     const body = await request.json();
     const questionnaire = body.questionnaire;
     const targetYear: number | undefined =
       typeof body.targetYear === "number" && body.targetYear > 2000 ? body.targetYear : undefined;
+    // The client knows whether this run is a regeneration (it read the
+    // regen-mode flag). Optional: older callers omit it and we infer below.
+    const isRegenerationFlag: boolean | undefined =
+      typeof body.isRegeneration === "boolean" ? body.isRegeneration : undefined;
 
     if (!questionnaire) {
       return NextResponse.json({ error: "Missing questionnaire data" }, { status: 400 });
     }
 
-    // 4. Resolve the annual plan to generate into.
+    // 4. Determine whether this is a first-time generation or a regeneration.
+    //    Must be decided BEFORE we write anything: after generation the company
+    //    always looks like it has a plan. If the client didn't tell us, fall
+    //    back to "has this company ever had a plan snapshotted?".
+    let isRegeneration = isRegenerationFlag;
+    if (isRegeneration === undefined) {
+      const { count: snapshotCount, error: snapErr } = await supabase
+        .from("plan_snapshots")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId);
+      if (snapErr) {
+        console.error("[generate-plan] Could not count snapshots:", snapErr.message);
+      }
+      isRegeneration = (snapshotCount ?? 0) > 0;
+    }
+    eventType = isRegeneration ? "plan_regeneration" : "plan_generation";
+    console.log("[generate-plan] Event type:", eventType);
+
+    // 4b. Resolve the annual plan to generate into.
     //    With a targetYear (future-year draft) attach to THAT year's plan,
     //    creating it if needed. Without one, use the most recent plan.
     let annualPlan: { id: string } | null = null;
@@ -194,7 +272,7 @@ Prior Year Revenue: $${questionnaire.priorYearRevenue || 0}
 Planning Period: ${questionnaire.planningPeriod || "12-months"}
 
 Products/Services they sell:
-${(questionnaire.products || []).map((p: any) => `- ${p.name} (${p.type}, $${p.price})`).join("\n") || "None specified"}
+${(questionnaire.products || []).map((p: { name?: string; type?: string; price?: number }) => `- ${p.name} (${p.type}, $${p.price})`).join("\n") || "None specified"}
 
 What has worked before: ${(questionnaire.whatsWorked || []).join(", ") || "Nothing specified"}
 Notes: ${questionnaire.whatsWorkedNotes || "None"}
@@ -226,10 +304,15 @@ Generate a complete revenue plan as JSON.`;
     const planPeriodRaw = questionnaire.planningPeriod || "12-months";
     const planMonths = planPeriodRaw === "3-months" ? 3 : planPeriodRaw === "6-months" ? 6 : 12;
     const now = new Date();
-    // A future-year plan runs the full calendar year (Jan). The current year
-    // starts from the current month, as before.
-    const startMonth = targetYear ? 1 : now.getMonth() + 1; // 1-indexed
-    const startYear = targetYear ?? now.getFullYear();
+    // Month 1 of the plan. Rule and rationale live in resolvePlanStart, which is
+    // unit tested - a plan must never be generated into the past.
+    const { startYear, startMonth } = resolvePlanStart(targetYear, now);
+    // Nothing generated may be dated before today. Getting the start MONTH right
+    // is not sufficient: on 27 September, day 1 of the start month and an
+    // AI-chosen event day of 15 are both already gone.
+    const planFloor = todayDateOnly(now);
+
+    console.log("[generate-plan] Plan window starts", startYear, "month", startMonth, "| months:", planMonths);
 
     // 5b. Load initiative types from DB to feed into the prompt
     let initiativeTypesContext = "";
@@ -243,8 +326,14 @@ Generate a complete revenue plan as JSON.`;
       if (initTypes && initTypes.length > 0) {
         console.log("[generate-plan] Loaded", initTypes.length, "initiative types from DB");
         initiativeTypesContext = "\n\nAVAILABLE INITIATIVE TYPES (pick from these when creating initiatives):\n" +
-          initTypes.map((t: any) => {
-            const benchmarks = t.benchmarks || {};
+          initTypes.map((t: {
+            name?: string;
+            channel?: string;
+            description?: string | null;
+            tier?: number;
+            difficulty?: Record<string, number> | null;
+            ai_context?: Record<string, string> | null;
+          }) => {
             const diff = t.difficulty || {};
             const ai = t.ai_context || {};
             return `- ${t.name} (channel: ${t.channel}, tier: ${t.tier})\n` +
@@ -260,50 +349,32 @@ Generate a complete revenue plan as JSON.`;
     }
 
     // 5c. Load workbook data (benchmarks/context from admin-uploaded Excel)
+    // 5c. The workbook IS the brain. Instead of dumping the first 3 sheets of raw
+    //      spreadsheet at the model (which discarded every task template), send
+    //      the structured initiative library and let the model SELECT from it.
     let workbookContext = "";
+    let libraryKeys = new Set<string>();
+    let libraryByKey = new Map<string, LibraryEntry>();
     try {
-      const { data: workbook } = await supabase
-        .from("workbook_data")
-        .select("sheets, file_name")
-        .order("uploaded_at", { ascending: false })
-        .limit(1)
-        .single();
-
-      if (workbook && workbook.sheets) {
-        console.log("[generate-plan] Loaded workbook:", workbook.file_name, "| sheets:", (workbook.sheets as any[]).length);
-        const sheets = workbook.sheets as any[];
-        // Inject each sheet as context (limit to avoid token overflow)
-        const sheetSummaries = sheets.slice(0, 3).map((sheet: any) => {
-          const maxRows = 8; // Keep the prompt small - large context made generation exceed the time limit
-          const rows = (sheet.rows || []).slice(0, maxRows);
-          const headers = sheet.headers || [];
-          let table = `Sheet: "${sheet.name}" (${sheet.rowCount || rows.length} rows)\n`;
-          table += `Headers: ${headers.join(" | ")}\n`;
-          rows.forEach((row: string[]) => {
-            table += row.join(" | ") + "\n";
-          });
-          if ((sheet.rows || []).length > maxRows) {
-            table += `... (${(sheet.rows || []).length - maxRows} more rows)\n`;
-          }
-          return table;
-        });
-
-        workbookContext = "\n\nADMIN WORKBOOK DATA (use this as grounding data for benchmarks, conversion rates, and context):\n" +
-          sheetSummaries.join("\n---\n");
-        // Hard cap so a large workbook can never blow up generation time.
-        const WORKBOOK_CHAR_CAP = 4000;
-        if (workbookContext.length > WORKBOOK_CHAR_CAP) {
-          workbookContext = workbookContext.slice(0, WORKBOOK_CHAR_CAP) + "\n... (workbook truncated)";
-        }
-        console.log("[generate-plan] Workbook context:", workbookContext.length, "chars");
+      const [library, aiContext] = await Promise.all([
+        loadLibrary(supabase),
+        loadAiContext(supabase),
+      ]);
+      libraryKeys = new Set(library.map((l) => l.initiativeKey));
+      libraryByKey = new Map(library.map((l) => [l.initiativeKey, l]));
+      if (library.length > 0) {
+        workbookContext =
+          "\n\nINITIATIVE LIBRARY (the ONLY initiatives you may choose from - return libraryKey verbatim):\n" +
+          renderLibraryForPrompt(library, aiContext);
+        console.log("[generate-plan] Library:", library.length, "initiatives |", workbookContext.length, "chars");
       } else {
-        console.log("[generate-plan] No workbook data found");
+        console.error("[generate-plan] Initiative library is EMPTY - has migration 018 been applied and the workbook re-uploaded?");
       }
-    } catch (err) {
-      console.log("[generate-plan] Failed to load workbook (table may not exist):", err);
+    } catch (wbErr) {
+      console.error("[generate-plan] Workbook load failed:", wbErr);
     }
 
-    const systemPrompt = buildSystemPrompt(startMonth, planMonths, startYear) + initiativeTypesContext + workbookContext;
+    const systemPrompt = buildSystemPrompt(startMonth, planMonths, startYear, planFloor.getDate(), toDateOnly(planFloor)) + initiativeTypesContext + workbookContext;
 
     console.log("[generate-plan] System prompt size:", systemPrompt.length, "chars");
     const claudeStart = Date.now();
@@ -313,10 +384,15 @@ Generate a complete revenue plan as JSON.`;
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     });
+    // Captured here and carried to step 7g: how long the AI call took and what
+    // it cost. duration_ms/model/tokens were previously never populated.
+    const durationMs = Date.now() - claudeStart;
+    const tokensInput = response.usage?.input_tokens ?? null;
+    const tokensOutput = response.usage?.output_tokens ?? null;
     console.log(
-      "[generate-plan] Claude responded in", Date.now() - claudeStart, "ms",
+      "[generate-plan] Claude responded in", durationMs, "ms",
       "| stop_reason:", response.stop_reason,
-      "| output tokens:", response.usage?.output_tokens
+      "| output tokens:", tokensOutput
     );
     if (response.stop_reason === "max_tokens") {
       console.error("[generate-plan] Output hit the token cap - JSON likely truncated");
@@ -328,7 +404,7 @@ Generate a complete revenue plan as JSON.`;
       return NextResponse.json({ error: "No response from AI" }, { status: 500 });
     }
 
-    let plan: any;
+    let plan: GeneratedPlan;
     try {
       plan = JSON.parse(textBlock.text);
     } catch {
@@ -437,23 +513,80 @@ Generate a complete revenue plan as JSON.`;
     }
 
     // 7d. Insert initiatives and their tasks
-    for (const init of plan.initiatives || []) {
+    // Sequence the whole set BEFORE writing any of it. The AI dates each
+    // initiative without knowing about the others, so unsequenced output puts
+    // several launches on the same day with their preparation windows stacked -
+    // a pile-up rather than a plan. sequenceEventDates guarantees distinct
+    // launch days, non-overlapping prep windows, each initiative's own runway,
+    // and nothing in the past, all derived from the plan's own task leads.
+    const generatedInitiatives = plan.initiatives || [];
+
+    // Task templates for everything the model selected. Tasks and their lead
+    // times come from here, not from the model.
+    const selectedKeys = generatedInitiatives.map((gi) => gi.libraryKey || "").filter(Boolean);
+    const templatesByKey = await loadTaskTemplates(supabase, selectedKeys);
+    const unknownKeys = selectedKeys.filter((k) => !libraryKeys.has(k));
+    if (unknownKeys.length > 0) {
+      console.error("[generate-plan] Model returned keys not in the library:", unknownKeys.join(", "));
+    }
+    const missingTemplates = [...new Set(selectedKeys)].filter((k) => !templatesByKey.has(k));
+    if (missingTemplates.length > 0) {
+      console.warn("[generate-plan] No workbook task template for:", missingTemplates.join(", "));
+    }
+    const schedule = sequenceEventDates(
+      generatedInitiatives.map((gi) => {
+        const c = planMonthToCalendar(startYear, startMonth, gi.activationMonth || 1);
+        const day = clampDayOfMonth(c.year, c.month, gi.eventDay ?? 15);
+        return {
+          desiredEvent: new Date(c.year, c.month - 1, day),
+          // Authored runway beats inferred: the workbook says how long this
+          // initiative takes to prepare. Falls back to the model's own task
+          // leads only when the workbook has no template for it.
+          runwayDays: templateRunwayDays(templatesByKey.get(gi.libraryKey || "") || [])
+            || requiredRunwayDays(gi.tasks),
+          // Evergreen work is continuous, not a launch, so it neither blocks
+          // another initiative nor gets pushed by one.
+          exclusive: gi.kind !== "evergreen",
+        };
+      }),
+      { now }
+    );
+    const movedCount = schedule.filter((x) => x.adjusted).length;
+    if (movedCount > 0) {
+      console.log("[generate-plan] Re-sequenced", movedCount, "of", schedule.length, "initiatives to avoid overlap");
+    }
+
+    for (let initIdx = 0; initIdx < generatedInitiatives.length; initIdx++) {
+      const init = generatedInitiatives[initIdx];
       const productId = productIds[init.productIndex] || productIds[0] || null;
       if (!productId) continue;
 
-      let typeId = channelTypeMap.get(init.channel);
+      // The workbook library key IS the channel now that the two are aligned.
+      // `channel` is only read as a fallback for an older cached response.
+      const channel = init.libraryKey || init.channel || "custom";
+
+      let typeId = channelTypeMap.get(channel);
       if (!typeId) {
-        // Create a custom type for unknown channels
+        // No initiative_type row for this library entry yet - create one from the
+        // workbook so the library stays the source of truth rather than a
+        // hand-maintained list. Difficulty is the workbook's 1-5 scale.
+        const libDifficulty = libraryByKey.get(channel)?.difficulty ?? 3;
         const { data: newType } = await supabase
           .from("initiative_types")
           .insert({
-            name: init.channel.charAt(0).toUpperCase() + init.channel.slice(1),
-            channel: init.channel,
-            description: "",
+            name: libraryByKey.get(channel)?.name
+              || channel.charAt(0).toUpperCase() + channel.slice(1),
+            channel,
+            description: libraryByKey.get(channel)?.oneLiner || "",
             owner: "system",
             benchmarks: {},
             project_template: { tasks: [], totalEstimatedHours: 0 },
-            difficulty: { effortToImplement: 5, skillExpertiseRequired: 5, timeToResults: 5, costToRun: 5 },
+            difficulty: {
+              effortToImplement: libDifficulty,
+              skillExpertiseRequired: libDifficulty,
+              timeToResults: libDifficulty,
+              costToRun: libDifficulty,
+            },
             ai_context: {},
             tier: 1,
             display_order: 99,
@@ -463,17 +596,24 @@ Generate a complete revenue plan as JSON.`;
           .single();
 
         typeId = newType?.id;
-        if (typeId) channelTypeMap.set(init.channel, typeId);
+        if (typeId) channelTypeMap.set(channel, typeId);
       }
 
       if (!typeId) continue;
 
-      // Calculate activation date relative to the current month
-      const activationOffset = (init.activationMonth || 1) - 1; // 0-indexed offset
-      const actualMonth = ((startMonth - 1) + activationOffset) % 12; // 0-indexed month
-      const actualYear = startYear + Math.floor(((startMonth - 1) + activationOffset) / 12);
-      const activationDate = new Date(actualYear, actualMonth, 1).toISOString().split("T")[0];
-      const eventDate = new Date(actualYear, actualMonth, 15).toISOString().split("T")[0];
+      // Dates come from the sequenced schedule above, not from the raw AI output.
+      const slot = schedule[initIdx];
+      // Activation is the start of the month the initiative runs in; the EVENT
+      // is the day it actually happens. The event day used to be hardcoded to
+      // the 15th, so every task hung off a placeholder rather than the real
+      // date. Clamped so a model-supplied 31 is valid in a 30-day month.
+      // toDateOnly (not toISOString) so the local calendar day is preserved.
+      // Activation is the start of the preparation window (event minus the
+      // runway its tasks require), never earlier than today.
+      const activationDateObj = slot.activationDate;
+      const eventDateObj = slot.eventDate;
+      const activationDate = toDateOnly(activationDateObj);
+      const eventDate = toDateOnly(eventDateObj);
 
       const { data: newInit, error: initErr } = await supabase
         .from("initiatives")
@@ -505,24 +645,38 @@ Generate a complete revenue plan as JSON.`;
       }
       if (!newInit) continue;
 
-      // Insert tasks for this initiative
-      for (let i = 0; i < (init.tasks || []).length; i++) {
-        const task = init.tasks[i];
-        const dueDate = new Date(actualYear, actualMonth, 15 + (task.daysBeforeEvent || 0));
-        const dueDateStr = dueDate.toISOString().split("T")[0];
-
-        await supabase.from("tasks").insert({
-          initiative_id: newInit.id,
-          company_id: companyId,
-          name: task.name,
-          description: task.description || "",
-          due_date: dueDateStr,
-          estimated_hours: task.estimatedHours || 2,
-          status: "not_started",
-          priority: task.priority || "medium",
-          display_order: i,
-          dependency_ids: [],
-        });
+      // Tasks come from the workbook's authored template for this initiative,
+      // including the lead time for each one. Previously the model invented both.
+      const templates = templatesByKey.get(init.libraryKey || "") || [];
+      // The workbook wins where it has been authored. Where it has not, the
+      // model's own task list is used rather than saving an initiative with no
+      // project plan at all - both go through identical date handling.
+      const tasks = templates.length > 0
+        ? materialiseTasks(templates, { eventDate: eventDateObj, floor: planFloor })
+        : materialiseAiTasks(init.tasks, { eventDate: eventDateObj, floor: planFloor });
+      if (templates.length === 0) {
+        console.log("[generate-plan] No workbook template for", init.libraryKey || init.name, "- used", tasks.length, "AI-suggested tasks");
+      }
+      if (tasks.length > 0) {
+        const { error: taskErr } = await supabase.from("tasks").insert(
+          tasks.map((t) => ({
+            id: t.id,
+            initiative_id: newInit.id,
+            company_id: companyId,
+            name: t.name,
+            description: t.description,
+            due_date: t.dueDate,
+            estimated_hours: t.estimatedHours,
+            status: "not_started",
+            priority: t.priority,
+            display_order: t.displayOrder,
+            dependency_ids: t.dependencyIds,
+          }))
+        );
+        if (taskErr) {
+          console.error("[generate-plan] Task insert failed:", taskErr.message);
+          throw new Error("Failed to save tasks: " + taskErr.message);
+        }
       }
     }
 
@@ -554,8 +708,9 @@ Generate a complete revenue plan as JSON.`;
         const scenarioArr: number[] = Array.isArray(rawScenario) ? rawScenario : [];
 
         const monthly = scenarioArr.map((rev: number, idx: number) => {
-          const mOffset = ((startMonth - 1) + idx) % 12; // 0-indexed
-          const mYear = startYear + Math.floor(((startMonth - 1) + idx) / 12);
+          const pc = planMonthToCalendar(startYear, startMonth, idx + 1);
+          const mOffset = pc.month - 1; // 0-indexed
+          const mYear = pc.year;
           return {
             year: mYear,
             month: mOffset + 1,
@@ -600,27 +755,51 @@ Generate a complete revenue plan as JSON.`;
     }
 
     // 7g. Log this generation event for admin metrics + activity feed.
-    //     Non-fatal: if the table doesn't exist yet, we just skip it.
-    try {
-      await supabase.from("generation_events").insert({
-        company_id: companyId,
-        user_id: user.id,
-        event_type: "plan_generation",
-        initiatives_created: (plan.initiatives || []).length,
-        model: MODEL,
-      });
-    } catch (logErr) {
-      console.log("[generate-plan] generation_events log skipped:", logErr);
-    }
+    //     Goes through the service-role writer: the user-scoped insert that
+    //     used to live here was rejected by RLS (42501) on every single run,
+    //     silently, which is why generation_events was empty.
+    await logGenerationEvent({
+      companyId,
+      userId: check.userId,
+      eventType,
+      status: "success",
+      initiativesCreated: (plan.initiatives || []).length,
+      durationMs,
+      model: MODEL,
+      tokensInput,
+      tokensOutput,
+    });
 
     return NextResponse.json({ success: true, productsCreated: productIds.length, initiativesCreated: (plan.initiatives || []).length });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const e = err as {
+      status?: number;
+      message?: string;
+      name?: string;
+      error?: { type?: string; error?: { type?: string } };
+    } | null;
+
+    // Record the failure. Previously a failed generation left no trace at all,
+    // so the dashboard could not distinguish "nobody generated" from "every
+    // generation is crashing". Guarded on eventCompanyId: if we failed before
+    // authorization resolved, there is no company to attribute it to.
+    if (eventCompanyId) {
+      await logGenerationEvent({
+        companyId: eventCompanyId,
+        userId: eventUserId,
+        eventType,
+        status: "failed",
+        errorMessage: String(e?.message || "Internal error").slice(0, 500),
+        model: MODEL,
+      });
+    }
+
     // Surface auth failures against the AI provider in plain language, since
     // an invalid/expired key is by far the most common cause of failure here.
     const isAuthError =
-      err?.status === 401 ||
-      err?.error?.error?.type === "authentication_error" ||
-      String(err?.message || "").includes("API key is invalid");
+      e?.status === 401 ||
+      e?.error?.error?.type === "authentication_error" ||
+      String(e?.message || "").includes("API key is invalid");
 
     if (isAuthError) {
       console.error("[generate-plan] Anthropic rejected the API key (401). Set a valid ANTHROPIC_API_KEY.");
@@ -637,9 +816,9 @@ Generate a complete revenue plan as JSON.`;
     }
 
     const detail = {
-      error: err?.message || "Internal error",
-      status: err?.status,
-      type: err?.error?.type ?? err?.name,
+      error: e?.message || "Internal error",
+      status: e?.status,
+      type: e?.error?.type ?? e?.name,
       model: MODEL,
     };
     console.error("[generate-plan] Error:", detail);

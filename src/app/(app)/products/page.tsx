@@ -1,6 +1,7 @@
 'use client';
 
 import { useCompanyId } from '@/hooks/use-auth';
+import { cacheInvalidatePrefix, CacheKeys } from '@/lib/client-cache';
 import { usePermissions } from '@/hooks/use-permission';
 import { useEffect, useState, useCallback } from 'react';
 import {
@@ -215,6 +216,10 @@ export default function ProductsPage() {
       setDeleteError(null);
       await productService.deleteProduct(id);
       setProducts((prev) => prev.filter((p) => p.id !== id));
+      // Year-at-a-Glance caches its dashboard payload per company+year, so
+      // without this it keeps serving pre-delete revenue totals from
+      // localStorage until the TTL lapses.
+      cacheInvalidatePrefix(CacheKeys.planPrefix);
       setDeletingId(null);
     } catch (err: any) {
       const msg = err?.message || 'Failed to delete product';

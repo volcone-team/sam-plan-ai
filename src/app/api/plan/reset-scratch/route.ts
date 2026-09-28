@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { requirePlanEditor } from "@/lib/require-plan-editor";
+import { toDateOnly, todayDateOnly } from '@/lib/plan-dates';
 
 /**
  * DELETE /api/plan/reset-scratch
@@ -24,6 +26,10 @@ export async function DELETE(request: Request) {
   try {
     console.log("[plan/reset-scratch] Starting selective reset...");
 
+    // Authorization: only owner/operator may reset plan data.
+    const check = await requirePlanEditor();
+    if (!check.ok) return NextResponse.json({ error: check.error }, { status: check.status });
+
     const cookieStore = await cookies();
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -38,25 +44,8 @@ export async function DELETE(request: Request) {
       }
     );
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      console.log("[plan/reset-scratch] No user session");
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("company_id")
-      .eq("id", user.id)
-      .single();
-
-    if (!profile?.company_id) {
-      console.log("[plan/reset-scratch] No company for user:", user.email);
-      return NextResponse.json({ error: "No company found" }, { status: 400 });
-    }
-
-    const companyId = profile.company_id;
-    const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+    const companyId = check.companyId;
+    const today = toDateOnly(todayDateOnly()); // local calendar day, not UTC
     console.log("[plan/reset-scratch] Company:", companyId, "| today:", today);
 
     // Which year are we resetting? Scope to that year's plan so a future-year
@@ -204,8 +193,9 @@ export async function DELETE(request: Request) {
 
     console.log("[plan/reset-scratch] Complete. Deleted:", deleteIds.length, "| kept:", toKeep.length);
     return NextResponse.json({ success: true, deleted: deleteIds.length, kept: toKeep.length });
-  } catch (err: any) {
-    console.error("[plan/reset-scratch] Error:", err?.message || err);
-    return NextResponse.json({ error: err?.message || "Internal error" }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[plan/reset-scratch] Error:", message);
+    return NextResponse.json({ error: message || "Internal error" }, { status: 500 });
   }
 }

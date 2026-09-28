@@ -106,12 +106,29 @@ export interface QuestionnaireData {
   obstacleNotes: string;
 }
 
+/**
+ * A blank product row, ready to type into.
+ *
+ * The products step used to start empty behind an "Add Product" button, so the
+ * first thing a user met was a form they had to summon. Everyone adds at least
+ * one product - validation requires it - so the first row is there from the
+ * start and "Add Product" is only for the second onwards.
+ */
+export function createEmptyProduct(): ProductEntry {
+  return {
+    id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: "",
+    type: "service",
+    price: null,
+  };
+}
+
 export function createEmptyQuestionnaireData(): QuestionnaireData {
   return {
     annualRevenueGoal: null,
     priorYearRevenue: null,
     planningPeriod: null,
-    products: [],
+    products: [createEmptyProduct()],
     whatsWorked: [],
     whatsWorkedNotes: "",
     idealCustomer: "",

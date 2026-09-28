@@ -18,8 +18,11 @@ import { resultService } from '@/services/result.service';
 import { initiativeService } from '@/services/initiative.service';
 import { exportToCSV } from '@/lib/csv-export';
 import type { Initiative, Projection } from '@/types';
+import { usePlanYears } from '@/hooks/use-plan-years';
 
-const YEAR = new Date().getFullYear();
+// Year comes from the shared PlanYearProvider, not a module-level constant.
+// The old `const YEAR = new Date().getFullYear()` was evaluated once when this
+// chunk was parsed, which made a plan spanning into the next year unviewable.
 
 const QUARTER_MONTHS: Record<number, number[]> = {
   1: [1, 2, 3],
@@ -62,6 +65,8 @@ function formatPercent(value: number): string {
 
 interface QuarterData {
   quarter: number;
+  /** True when the quarter has initiatives, so its targets are real. */
+  planned: boolean;
   good: number;
   better: number;
   best: number;
@@ -82,6 +87,9 @@ const STATUS_COLORS: Record<string, { dot: string; badge: string }> = {
 
 export function QuarterlySummaryTable() {
   const companyId = useCompanyId() || "";
+  // Shared with Year-at-a-Glance: the plan year being viewed, which may be a
+  // year the plan spans into rather than the current calendar year.
+  const { selectedYear: YEAR, setSelectedYear, years: planYears } = usePlanYears(companyId);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [quartersData, setQuartersData] = useState<QuarterData[]>([]);
@@ -105,7 +113,8 @@ export function QuarterlySummaryTable() {
         const sumMonths = (proj: Projection | undefined, months: number[]) => {
           if (!proj?.monthly) return 0;
           return (proj.monthly as any[])
-            .filter((m: any) => months.includes(m.month))
+            // Year-aware: without this a 2027 entry was summed into 2026's quarter.
+            .filter((m: any) => months.includes(m.month) && (m.year === undefined || m.year === YEAR))
             .reduce((sum: number, m: any) => sum + m.revenue, 0);
         };
 
@@ -119,15 +128,18 @@ export function QuarterlySummaryTable() {
             initiativeService.getInitiativesByDateRange(companyId, start, end),
           ]);
 
-          const good = sumMonths(goodProj, months);
-          const better = sumMonths(betterProj, months);
-          const best = sumMonths(bestProj, months);
+          // A quarter with no initiatives has no plan, so it shows no targets.
+          const planned = initiatives.length > 0;
+          const good = planned ? sumMonths(goodProj, months) : 0;
+          const better = planned ? sumMonths(betterProj, months) : 0;
+          const best = planned ? sumMonths(bestProj, months) : 0;
           const actual = results.reduce((sum, r) => sum + r.actualRevenue, 0);
           const variance = actual - better;
           const variancePercent = better > 0 ? ((actual - better) / better) * 100 : null;
 
           return {
             quarter: q,
+            planned,
             good,
             better,
             best,
@@ -150,7 +162,7 @@ export function QuarterlySummaryTable() {
     };
 
     loadAllQuarters();
-  }, [companyId]);
+  }, [companyId, YEAR]);
 
   const handleExportCSV = () => {
     const headers = [
@@ -166,7 +178,14 @@ export function QuarterlySummaryTable() {
     ];
 
     const rows = quartersData.map((q) => {
-      const status = q.quarter === currentQuarter ? 'Current' : q.quarter < currentQuarter ? 'Complete' : 'Upcoming';
+      const nowYear = new Date().getFullYear();
+      const status = !q.planned
+        ? 'Not planned'
+        : YEAR < nowYear || (YEAR === nowYear && q.quarter < currentQuarter)
+          ? 'Complete'
+          : YEAR === nowYear && q.quarter === currentQuarter
+            ? 'Current'
+            : 'Upcoming';
       return [
         `Q${q.quarter} ${YEAR}`,
         q.good.toFixed(2),
@@ -330,7 +349,7 @@ interface QuarterRowProps {
 }
 
 function QuarterRow({ data, year, isCurrent, isExpanded, onToggle }: QuarterRowProps) {
-  const { quarter, good, better, best, actual, variance, variancePercent, initiatives } = data;
+  const { quarter, planned, good, better, best, actual, variance, variancePercent, initiatives } = data;
 
   return (
     <>
@@ -353,9 +372,9 @@ function QuarterRow({ data, year, isCurrent, isExpanded, onToggle }: QuarterRowP
             )}
           </div>
         </td>
-        <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(good)}</td>
-        <td className="text-right py-3 px-3 font-bold text-[hsl(var(--foreground))]">{formatCurrency(better)}</td>
-        <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(best)}</td>
+        <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{planned ? formatCurrency(good) : '—'}</td>
+        <td className="text-right py-3 px-3 font-bold text-[hsl(var(--foreground))]">{planned ? formatCurrency(better) : '—'}</td>
+        <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{planned ? formatCurrency(best) : '—'}</td>
         <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(actual)}</td>
         <td className={`text-right py-3 px-3 font-medium ${variance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
           {formatCurrency(variance)}
@@ -365,7 +384,7 @@ function QuarterRow({ data, year, isCurrent, isExpanded, onToggle }: QuarterRowP
         </td>
         <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{initiatives.length}</td>
         <td className="text-center py-3 px-3">
-          <QuarterStatusBadge quarter={quarter} currentQuarter={getCurrentQuarter()} />
+          <QuarterStatusBadge quarter={quarter} year={year} planned={planned} />
         </td>
       </tr>
       {/* Expanded initiative rows */}
@@ -445,15 +464,41 @@ function InitiativeChildRow({ initiative }: InitiativeChildRowProps) {
 
 /* --- Quarter Status Badge --- */
 
-function QuarterStatusBadge({ quarter, currentQuarter }: { quarter: number; currentQuarter: number }) {
-  if (quarter < currentQuarter) {
+function QuarterStatusBadge({
+  quarter,
+  year,
+  planned,
+}: {
+  quarter: number;
+  year: number;
+  planned: boolean;
+}) {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentQuarter = Math.floor(now.getMonth() / 3) + 1;
+
+  // Same rule as the monthly badge: a quarter the plan does not cover has no
+  // status, and the comparison accounts for the YEAR rather than comparing bare
+  // quarter numbers across different years.
+  if (!planned) {
+    return (
+      <span className="text-xs font-medium text-[hsl(var(--foreground-subtle))]">
+        Not planned
+      </span>
+    );
+  }
+
+  const isPast = year < currentYear || (year === currentYear && quarter < currentQuarter);
+  const isCurrent = year === currentYear && quarter === currentQuarter;
+
+  if (isPast) {
     return (
       <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">
         Complete
       </span>
     );
   }
-  if (quarter === currentQuarter) {
+  if (isCurrent) {
     return (
       <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700">
         In Progress

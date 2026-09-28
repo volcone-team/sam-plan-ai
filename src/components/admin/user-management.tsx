@@ -36,13 +36,6 @@ const ROLE_STYLES: Record<string, string> = {
   team_member: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
 };
 
-function genPw(): string {
-  const c = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let pw = "";
-  for (let i = 0; i < 10; i++) pw += c[Math.floor(Math.random() * c.length)];
-  return pw;
-}
-
 export function UserManagement({ filter = "all" }: { filter?: "all" | "internal" | "customers" } = {}) {
   const router = useRouter();
   const { userId: currentUserId, adminLevel } = useAuth();
@@ -58,7 +51,8 @@ export function UserManagement({ filter = "all" }: { filter?: "all" | "internal"
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [addSuccess, setAddSuccess] = useState<string | null>(null);
-  const [addForm, setAddForm] = useState({ companyId: "", email: "", firstName: "", lastName: "", password: "", role: "operator" });
+  const [addWarning, setAddWarning] = useState<string | null>(null);
+  const [addForm, setAddForm] = useState({ companyId: "", email: "", firstName: "", lastName: "", role: "operator" });
   const [companiesList, setCompaniesList] = useState<{ id: string; name: string }[]>([]);
 
   async function loadCompaniesForDropdown() {
@@ -75,6 +69,7 @@ export function UserManagement({ filter = "all" }: { filter?: "all" | "internal"
     e.preventDefault();
     setAddError(null);
     setAddSuccess(null);
+    setAddWarning(null);
     setAddLoading(true);
     try {
       const res = await fetch("/api/admin/users/create", {
@@ -84,8 +79,13 @@ export function UserManagement({ filter = "all" }: { filter?: "all" | "internal"
       });
       const data = await res.json();
       if (!res.ok) { setAddError(data.error || "Failed"); return; }
-      setAddSuccess("User " + data.user.email + " created (" + data.user.role + " at " + data.user.companyName + "). Password: " + addForm.password);
-      setAddForm({ companyId: "", email: "", firstName: "", lastName: "", password: genPw(), role: "operator" });
+      const displayName = [data.user.firstName, data.user.lastName].filter(Boolean).join(" ") || data.user.email;
+      if (data.invited) {
+        setAddSuccess(`${displayName} was created — an invite email was sent to ${data.user.email}.`);
+      } else {
+        setAddWarning(`${displayName} was created, but the invite email couldn\u2019t be sent. You can resend it from the customer\u2019s team settings.`);
+      }
+      setAddForm({ companyId: "", email: "", firstName: "", lastName: "", role: "operator" });
       loadUsers(search);
     } catch { setAddError("Network error"); }
     finally { setAddLoading(false); }
@@ -246,7 +246,7 @@ export function UserManagement({ filter = "all" }: { filter?: "all" | "internal"
     <div className="space-y-6">
       {/* Add User */}
       <div className="flex items-center justify-end mb-4">
-        <button onClick={() => { setShowAddForm(!showAddForm); if (!addForm.password) setAddForm(f => ({ ...f, password: genPw() })); }} className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Add User</button>
+        <button onClick={() => setShowAddForm(!showAddForm)} className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Add User</button>
       </div>
 
       {showAddForm && (
@@ -254,6 +254,7 @@ export function UserManagement({ filter = "all" }: { filter?: "all" | "internal"
           <h4 className="text-sm font-semibold mb-4">Add User to Company</h4>
           {addError && <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{addError}</div>}
           {addSuccess && <div className="mb-3 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{addSuccess}</div>}
+          {addWarning && <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">{addWarning}</div>}
           <form onSubmit={handleAddUser} className="space-y-3">
             <div><label className="mb-1 block text-xs font-medium">Company *</label><select required value={addForm.companyId} onChange={(e) => setAddForm(f => ({ ...f, companyId: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"><option value="">Select company...</option>{companiesList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
             <div className="grid grid-cols-2 gap-3">
@@ -262,7 +263,7 @@ export function UserManagement({ filter = "all" }: { filter?: "all" | "internal"
             </div>
             <div><label className="mb-1 block text-xs font-medium">Email *</label><input type="email" required value={addForm.email} onChange={(e) => setAddForm(f => ({ ...f, email: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" /></div>
             <div><label className="mb-1 block text-xs font-medium">Role *</label><select value={addForm.role} onChange={(e) => setAddForm(f => ({ ...f, role: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"><option value="owner">Owner</option><option value="operator">Operator</option><option value="team_member">Team Member</option><option value="viewer">Viewer</option></select></div>
-            <div><label className="mb-1 block text-xs font-medium">Password *</label><div className="flex gap-2"><input type="text" required value={addForm.password} onChange={(e) => setAddForm(f => ({ ...f, password: e.target.value }))} className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm font-mono" /><button type="button" onClick={() => setAddForm(f => ({ ...f, password: genPw() }))} className="rounded-md border border-border px-3 py-2 text-xs">Generate</button></div></div>
+            <p className="text-xs text-[hsl(var(--foreground-muted))]">They&rsquo;ll receive an invite email with a link to set their own password.</p>
             <div className="flex gap-2 pt-2">
               <button type="submit" disabled={addLoading} className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{addLoading ? "Creating..." : "Create User"}</button>
               <button type="button" onClick={() => setShowAddForm(false)} className="rounded-md border border-border px-4 py-2 text-sm font-medium">Cancel</button>

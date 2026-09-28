@@ -3,17 +3,31 @@
 import { useState, useMemo } from 'react';
 import { Rocket } from 'lucide-react';
 import type { Initiative } from '@/types';
+import type { DifficultyDimensions } from '@/types/initiative-type.types';
+import { findPerformerByName, type RankedPerformer } from '@/lib/top-performers';
 import { InitiativeCard } from './initiative-card';
 import { InitiativesFilters, type FilterOptions } from './initiatives-filters';
 import { EmptyState } from '@/components/empty-state';
 import { LoadingState } from '@/components/loading-state';
 
+/** Initiative type fields the list needs: name and channel for display, difficulty for the cards. */
+export interface InitiativeTypeOption {
+  id: string;
+  name: string;
+  channel?: string;
+  difficulty?: Partial<DifficultyDimensions>;
+}
+
 export interface InitiativesListProps {
   initiatives: Initiative[];
-  initiativeTypes: Array<{ id: string; name: string }>;
+  initiativeTypes: InitiativeTypeOption[];
   products: Array<{ id: string; name: string }>;
   loading?: boolean;
   error?: string | null;
+  /** Actual revenue and spend per initiative id, summed from this year's results. */
+  actualsByInitiative?: Map<string, { revenue: number; spend: number }>;
+  /** Last year's ranking, used to badge cards whose name matches a top performer. */
+  lastYearRanking?: RankedPerformer[];
   onInitiativeClick?: (id: string) => void;
   onRemoveInitiative?: (id: string) => void;
 }
@@ -30,6 +44,8 @@ export function InitiativesList({
   products,
   loading = false,
   error = null,
+  actualsByInitiative,
+  lastYearRanking,
   onInitiativeClick,
   onRemoveInitiative,
 }: InitiativesListProps) {
@@ -201,19 +217,31 @@ export function InitiativesList({
           }
         />
       ) : (
-        <div className="grid gap-4 sm:gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:gap-6 grid-cols-1 md:grid-cols-2">
           {sortedInitiatives.map(initiative => {
             const initiativeType = initiativeTypes.find(
               t => t.id === initiative.initiativeTypeId
             );
             const product = products.find(p => p.id === initiative.productId);
+            // Name-based lookup into last year's ranking - see @/lib/top-performers.
+            const lastYearPerformer = lastYearRanking
+              ? findPerformerByName(lastYearRanking, initiative.name)
+              : undefined;
 
             return (
               <InitiativeCard
                 key={initiative.id}
                 initiative={initiative}
                 initiativeTypeName={initiativeType?.name || 'Unknown Type'}
+                channel={initiativeType?.channel}
+                difficulty={initiativeType?.difficulty}
                 productName={product?.name || 'Unknown Product'}
+                actuals={actualsByInitiative?.get(initiative.id)}
+                lastYear={
+                  lastYearPerformer
+                    ? { rank: lastYearPerformer.rank, revenue: lastYearPerformer.revenue }
+                    : undefined
+                }
                 onViewDetails={onInitiativeClick}
                 onRemove={onRemoveInitiative}
               />

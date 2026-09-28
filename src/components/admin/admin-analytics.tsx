@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Users,
   BarChart3,
@@ -37,6 +37,33 @@ interface ActivityEntry {
   actor: string;
 }
 
+/** Shape of GET /api/admin/analytics/ai. Mirrors AiMetrics in generation-metrics.ts. */
+interface AiMetrics {
+  totalGenerations: number;
+  generationsPerDay: number;
+  successRatePct: number | null;
+  avgDurationMs: number | null;
+}
+
+interface AiRecentRow {
+  id: string;
+  createdAt: string;
+  eventType: string;
+  status: string;
+  model: string | null;
+  durationMs: number | null;
+  tokensInput: number | null;
+  tokensOutput: number | null;
+  userEmail: string | null;
+  companyName: string | null;
+}
+
+interface AiAnalyticsResponse {
+  metrics: AiMetrics;
+  recent: AiRecentRow[];
+  migrationRequired: boolean;
+}
+
 /* ------------------------------------------------------------------
    Mock Data
    ------------------------------------------------------------------ */
@@ -63,14 +90,6 @@ const featureUsageData = [
   { page: "Quarterly", views: 22 },
   { page: "Settings", views: 15 },
   { page: "Calendar", views: 12 },
-];
-
-const aiLogData = [
-  { timestamp: "2024-01-15 14:32", user: "Sarah M.", promptType: "Plan Generation", tokens: 3240, status: "success" as const },
-  { timestamp: "2024-01-15 13:15", user: "John D.", promptType: "Initiative Suggestion", tokens: 1850, status: "success" as const },
-  { timestamp: "2024-01-15 11:48", user: "Sarah M.", promptType: "Weekly Plan", tokens: 2100, status: "success" as const },
-  { timestamp: "2024-01-15 10:22", user: "Mike R.", promptType: "Plan Generation", tokens: 3450, status: "failed" as const },
-  { timestamp: "2024-01-15 09:05", user: "John D.", promptType: "Report Summary", tokens: 1810, status: "success" as const },
 ];
 
 const activityLogData: ActivityEntry[] = [
@@ -217,16 +236,107 @@ function FeatureUsageTab() {
   );
 }
 
+/** Readable labels for generation_events.event_type. */
+const AI_EVENT_LABELS: Record<string, string> = {
+  plan_generation: "Plan Generation",
+  plan_regeneration: "Plan Regeneration",
+  plan_enhancement: "Plan Enhancement",
+};
+
+function aiEventLabel(eventType: string): string {
+  return AI_EVENT_LABELS[eventType] ?? eventType;
+}
+
+/** Seconds with one decimal; an em dash when the duration was never measured. */
+function formatDuration(ms: number | null): string {
+  if (ms === null || !Number.isFinite(ms)) return "—";
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function AIAnalyticsTab() {
+  const [data, setData] = useState<AiAnalyticsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Abort on unmount. Switching tabs mid-request otherwise surfaces the
+    // cancelled fetch as a bogus "TypeError: Failed to fetch".
+    const controller = new AbortController();
+
+    const load = async () => {
+      try {
+        const res = await fetch("/api/admin/analytics/ai", {
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`Request failed (${res.status})`);
+        setData((await res.json()) as AiAnalyticsResponse);
+      } catch (err) {
+        // Navigated away mid-request — not a real failure.
+        if ((err as Error)?.name === "AbortError") return;
+        console.error("[AdminAnalytics] Failed to load AI analytics:", err);
+        setError("Could not load AI analytics.");
+      }
+      setLoading(false);
+    };
+
+    load();
+    return () => controller.abort();
+  }, []);
+
+  const metrics = data?.metrics ?? null;
+  const recent = data?.recent ?? [];
+
+  // Dash, not 0: "no data yet" and "zero" are different facts.
+  const dash = "—";
+  const totalValue = loading ? dash : metrics ? metrics.totalGenerations.toLocaleString() : dash;
+  const perDayValue = loading ? dash : metrics ? metrics.generationsPerDay.toFixed(1) : dash;
+  const successValue =
+    loading || !metrics || metrics.successRatePct === null ? dash : `${metrics.successRatePct}%`;
+  const avgValue = loading || !metrics ? dash : formatDuration(metrics.avgDurationMs);
+
   return (
     <div className="space-y-8">
+      {/* Migration notice — the numbers are incomplete until 016 is applied. */}
+      {data?.migrationRequired && (
+        <div
+          role="status"
+          className="rounded-[var(--radius-lg)] border border-yellow-400 bg-yellow-50 px-4 py-3 text-sm text-yellow-900 dark:border-yellow-500/50 dark:bg-yellow-900/20 dark:text-yellow-200"
+        >
+          AI analytics is unavailable until database migration 016
+          (<code>016_generation_events_hardening.sql</code>) is applied. Run it in the
+          Supabase SQL editor, then reload this page.
+        </div>
+      )}
+
+      {error && (
+        <div
+          role="status"
+          className="rounded-[var(--radius-lg)] border border-border bg-card px-4 py-3 text-sm text-[hsl(var(--foreground-muted))]"
+        >
+          {error}
+        </div>
+      )}
+
       {/* AI Metrics */}
-      <section aria-label="AI performance metrics">
+      <section aria-label="AI performance metrics" aria-busy={loading}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <MetricCard label="Generations / Day" value="3.2" icon={Sparkles} />
-          <MetricCard label="Success Rate" value="95%" icon={CheckCircle} />
-          <MetricCard label="Avg Time" value="4.2s" icon={Clock} />
-          <MetricCard label="Total Tokens" value="12,450" icon={Zap} />
+          <MetricCard label="Total Generations" value={totalValue} icon={Sparkles} />
+          <MetricCard label="Generations / Day" value={perDayValue} icon={Zap} />
+          <MetricCard label="Success Rate" value={successValue} icon={CheckCircle} />
+          <MetricCard label="Avg Time" value={avgValue} icon={Clock} />
         </div>
       </section>
 
@@ -240,53 +350,85 @@ function AIAnalyticsTab() {
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
+              <caption className="sr-only">
+                The ten most recent AI generation events, newest first.
+              </caption>
               <thead>
                 <tr className="border-b border-border">
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
                     Timestamp
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
                     User
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
-                    Prompt Type
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
+                    Company
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
+                    Type
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
+                    Duration
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
                     Tokens
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
                     Status
                   </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {aiLogData.map((row, i) => (
-                  <tr key={i}>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-[hsl(var(--foreground-muted))]">
-                      {row.timestamp}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-[hsl(var(--foreground))]">
-                      {row.user}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-[hsl(var(--foreground))]">
-                      {row.promptType}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-[hsl(var(--foreground-muted))]">
-                      {row.tokens.toLocaleString()}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4">
-                      {row.status === "success" ? (
-                        <span className="inline-flex items-center gap-1 text-sm text-green-600 dark:text-green-400">
-                          <CheckCircle className="h-4 w-4" /> Success
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-sm text-red-600 dark:text-red-400">
-                          <XCircle className="h-4 w-4" /> Failed
-                        </span>
-                      )}
+                {loading && (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-8 text-center text-sm text-[hsl(var(--foreground-muted))]">
+                      Loading AI generations…
                     </td>
                   </tr>
-                ))}
+                )}
+                {!loading && recent.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-8 text-center text-sm text-[hsl(var(--foreground-muted))]">
+                      No AI generations recorded yet
+                    </td>
+                  </tr>
+                )}
+                {!loading &&
+                  recent.map((row) => (
+                    <tr key={row.id}>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-[hsl(var(--foreground-muted))]">
+                        {formatTimestamp(row.createdAt)}
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-[hsl(var(--foreground))]">
+                        {row.userEmail ?? dash}
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-[hsl(var(--foreground))]">
+                        {row.companyName ?? dash}
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-[hsl(var(--foreground))]">
+                        {aiEventLabel(row.eventType)}
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-[hsl(var(--foreground-muted))]">
+                        {formatDuration(row.durationMs)}
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4 text-sm text-[hsl(var(--foreground-muted))]">
+                        {row.tokensOutput === null && row.tokensInput === null
+                          ? dash
+                          : `${(row.tokensInput ?? 0).toLocaleString()} / ${(row.tokensOutput ?? 0).toLocaleString()}`}
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4">
+                        {row.status === "success" ? (
+                          <span className="inline-flex items-center gap-1 text-sm text-green-600 dark:text-green-400">
+                            <CheckCircle className="h-4 w-4" aria-hidden="true" /> Success
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-sm text-red-600 dark:text-red-400">
+                            <XCircle className="h-4 w-4" aria-hidden="true" /> Failed
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>

@@ -50,12 +50,15 @@ async function requestCode(): Promise<SendResult> {
       return { kind: 'cooldown', retryAfter };
     }
 
+    // Two-factor now applies to every authenticated user, so the backend no
+    // longer returns this. Kept as a harmless fallback in case an older
+    // deployment answers mid-rollout.
     if (res.status === 400 && body.error === 'not_required') {
       return {
         kind: 'not_required',
         message:
           body.message ??
-          'Two-factor verification is not required for this account.',
+          'This device does not need verification right now.',
       };
     }
 
@@ -89,7 +92,10 @@ async function requestCode(): Promise<SendResult> {
 function VerifyCodeForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get('next') || '/admin';
+  // Middleware always supplies an explicit ?next=, so this fallback only covers
+  // someone landing here directly. Most accounts are customers, so send them to
+  // the app home rather than the admin panel.
+  const nextPath = searchParams.get('next') || '/year-at-a-glance';
 
   const [code, setCode] = useState('');
   const [initialSending, setInitialSending] = useState(true);
@@ -135,7 +141,7 @@ function VerifyCodeForm() {
     [router]
   );
 
-  // Auto-send a code as soon as the admin lands here.
+  // Auto-send a code as soon as the user lands here.
   useEffect(() => {
     if (autoSentRef.current) return;
     autoSentRef.current = true;
@@ -236,7 +242,8 @@ function VerifyCodeForm() {
     router.push('/auth/login');
   };
 
-  // This account does not need two-factor verification at all.
+  // Fallback path: the backend reported no verification needed. Unreachable in
+  // normal operation now that two-factor covers all users.
   if (notRequired) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center px-4">

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { logActivity } from "@/lib/activity-log";
 
 /**
  * GET /api/admin/companies/[id]
@@ -228,6 +229,13 @@ export async function DELETE(
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
+    // Snapshot the company name BEFORE the cascade — it is unreadable after.
+    const { data: doomedCompany } = await adminClient
+      .from("companies")
+      .select("name")
+      .eq("id", id)
+      .maybeSingle();
+
     // 1. Get all members (auth users) of this company
     const { data: members } = await adminClient
       .from("profiles")
@@ -258,6 +266,22 @@ export async function DELETE(
     }
 
     console.log("[admin/companies/id] Company deleted:", id);
+
+    // Audit trail — never throws, never affects this response. company_id is
+    // left null: the company row is gone, so an FK reference cannot survive.
+    await logActivity(
+      {
+        actorUserId: user.id,
+        actorEmail: user.email ?? null,
+        action: "company.deleted",
+        targetType: "company",
+        targetId: id,
+        targetLabel: doomedCompany?.name ?? null,
+        companyId: null,
+        metadata: { membersDeleted: members?.length || 0 },
+      },
+      adminClient
+    );
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

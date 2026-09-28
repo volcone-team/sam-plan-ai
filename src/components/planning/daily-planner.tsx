@@ -9,7 +9,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Star,
-  Rocket,
   ListTodo,
   Loader2,
   AlertCircle,
@@ -18,11 +17,15 @@ import {
   CheckCircle2,
   AlertTriangle,
   Ban,
+  Download,
+  Plus,
+  ArrowRight,
 } from 'lucide-react';
 import { initiativeService } from '@/services/initiative.service';
 import { taskService } from '@/services/task.service';
 import { planService } from '@/services/plan.service';
 import { updateInitiativeStatusFromTasks } from '@/lib/update-initiative-status';
+import { PaceCards } from '@/components/planning/pace-cards';
 import type { Initiative, Task, TaskStatus, WeeklyPlan } from '@/types';
 
 
@@ -31,15 +34,6 @@ const PRIORITY_COLORS: Record<string, string> = {
   high: 'text-amber-600',
   medium: 'text-blue-600',
   low: 'text-gray-500',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  planned: 'bg-blue-100 text-blue-700',
-  in_progress: 'bg-amber-100 text-amber-700',
-  launched: 'bg-emerald-100 text-emerald-700',
-  completed: 'bg-gray-100 text-gray-700',
-  paused: 'bg-red-100 text-red-700',
-  retired: 'bg-gray-100 text-gray-500',
 };
 
 const TASK_STATUS_ORDER: TaskStatus[] = ['not_started', 'in_progress', 'completed', 'blocked', 'cancelled'];
@@ -106,8 +100,11 @@ export function DailyPlanner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskWithInitiative[]>([]);
-  const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null);
+  /** Past due and still open. The plan's real backlog. */
+  const [slipped, setSlipped] = useState<TaskWithInitiative[]>([]);
+  /** The next three days, so nothing sneaks up. */
+  const [upcoming, setUpcoming] = useState<TaskWithInitiative[]>([]);
 
   const goToPrevDay = useCallback(() => {
     setSelectedDate(prev => {
@@ -147,30 +144,17 @@ export function DailyPlanner() {
 
         setWeeklyPlan(plan);
 
-        // Filter initiatives active on the selected date
-        const dayInitiatives = activeInitiatives.filter(init => {
-          const activation = new Date(init.activationDate);
-          const eventDate = init.eventDate ? new Date(init.eventDate) : null;
-
-          if (init.kind === 'evergreen') {
-            return activation <= selectedDate;
-          }
-          if (eventDate) {
-            return activation <= selectedDate && eventDate >= selectedDate;
-          }
-          return activation <= selectedDate;
-        });
-        setInitiatives(dayInitiatives);
-
-        // Get tasks due on the selected date
-        const allTasks: TaskWithInitiative[] = [];
-        for (const init of dayInitiatives) {
-          const initTasks = await taskService.getTasksByInitiative(init.id);
-          const dueToday = initTasks.filter(t => isSameDay(new Date(t.dueDate), selectedDate));
-          dueToday.forEach(t => {
-            allTasks.push({ ...t, initiativeName: init.name });
-          });
-        }
+        // Tasks due today, for the WHOLE COMPANY. Same fix as the weekly view:
+        // a task's own due date decides whether it shows, not whether its
+        // parent initiative happens to overlap today.
+        const dayTasks = await taskService.getTasksByCompanyDueBetween(
+          companyId, selectedDate, selectedDate
+        );
+        const nameById = new Map(activeInitiatives.map(i => [i.id, i.name]));
+        const allTasks: TaskWithInitiative[] = dayTasks.map(t => ({
+          ...t,
+          initiativeName: nameById.get(t.initiativeId) || 'Unassigned',
+        }));
 
         // Sort by priority then status
         const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -180,6 +164,33 @@ export function DailyPlanner() {
         });
         console.log("[DailyPlanner] Found", allTasks.length, "tasks for today");
         setTasks(allTasks);
+
+        // Slipped: due before the selected day and still open. Anything already
+        // closed out is not slipping, so completed/cancelled are excluded.
+        const backlogStart = new Date(selectedDate);
+        backlogStart.setFullYear(backlogStart.getFullYear() - 2);
+        const before = new Date(selectedDate);
+        before.setDate(before.getDate() - 1);
+        const past = await taskService.getTasksByCompanyDueBetween(companyId, backlogStart, before);
+        setSlipped(
+          past
+            .filter((t) => t.status !== 'completed' && t.status !== 'cancelled')
+            .map((t) => ({ ...t, initiativeName: nameById.get(t.initiativeId) || 'Unassigned' }))
+            .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+        );
+
+        // Next three days, excluding the selected day itself.
+        const soonStart = new Date(selectedDate);
+        soonStart.setDate(soonStart.getDate() + 1);
+        const soonEnd = new Date(selectedDate);
+        soonEnd.setDate(soonEnd.getDate() + 3);
+        const soon = await taskService.getTasksByCompanyDueBetween(companyId, soonStart, soonEnd);
+        setUpcoming(
+          soon
+            .filter((t) => t.status !== 'completed' && t.status !== 'cancelled')
+            .map((t) => ({ ...t, initiativeName: nameById.get(t.initiativeId) || 'Unassigned' }))
+            .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load daily data';
         setError(message);
@@ -233,176 +244,274 @@ export function DailyPlanner() {
 
   // Get top priority from weekly plan
   const topPriority = weeklyPlan?.topPriorities?.[0] || null;
-  const topPriorityInitiative = topPriority
-    ? initiatives.find(i => i.id === topPriority || i.id.includes(topPriority))
-    : null;
+
+  /**
+   * The single task the day is about. Prefers the week's stated top priority when
+   * it matches a task due today, otherwise the highest-priority open task - so the
+   * card is never empty while there is work on the board.
+   */
+  const focusTask =
+    tasks.find((t) => topPriority && t.name === topPriority) ||
+    tasks.find((t) => t.status !== 'completed' && t.status !== 'cancelled') ||
+    null;
+
+  /** Today's board as CSV: what was due, for whom, and where it stands. */
+  const exportCsv = () => {
+    const rows = [
+      ['Task', 'Initiative', 'Status', 'Priority', 'Due date'],
+      ...[...tasks, ...slipped, ...upcoming].map((t) => [
+        t.name,
+        t.initiativeName,
+        t.status,
+        t.priority,
+        formatDateShort(new Date(t.dueDate)),
+      ]),
+    ];
+    const csv = rows
+      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `sam-daily-${formatDateShort(selectedDate).replace(/\s+/g, '-')}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const doneToday = tasks.filter((t) => t.status === 'completed').length;
+  const donePct = tasks.length > 0 ? Math.round((doneToday / tasks.length) * 100) : 0;
+
+  /** Whole days between a due date and the day being viewed. */
+  const daysOverdue = (due: Date | string): number => {
+    const d = new Date(due);
+    d.setHours(0, 0, 0, 0);
+    return Math.max(0, Math.round((selectedDate.getTime() - d.getTime()) / 86_400_000));
+  };
 
   return (
     <div className="space-y-6">
-      {/* Date Selector */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={goToPrevDay}
-          className="p-2 rounded-[var(--radius-lg)] bg-[hsl(var(--muted))] hover:bg-[hsl(var(--muted))]/80 transition-colors"
-          aria-label="Previous day"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
-        <div className="flex-1 text-center">
-          <p className="text-sm font-semibold">
+      {/* Header: title, day nav, actions */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
             {formatDate(selectedDate)}
           </p>
-          <input
-            type="date"
-            value={selectedDate.toISOString().split('T')[0]}
-            onChange={e => {
-              const d = new Date(e.target.value + 'T00:00:00');
-              if (!isNaN(d.getTime())) setSelectedDate(d);
-            }}
-            className="mt-1 px-2 py-1 rounded-[var(--radius-md)] border border-border bg-background text-xs text-center outline-none focus:border-[hsl(var(--primary))] cursor-pointer"
-          />
+          <h1 className="mt-1 text-3xl font-bold tracking-tight">Today &mdash; what moves the plan</h1>
+          <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">
+            The day-level operating view. One focus, what&apos;s due, what slipped.
+          </p>
         </div>
-        <button
-          onClick={goToNextDay}
-          className="p-2 rounded-[var(--radius-lg)] bg-[hsl(var(--muted))] hover:bg-[hsl(var(--muted))]/80 transition-colors"
-          aria-label="Next day"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
-        {!isToday && (
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={goToPrevDay}
+            aria-label="Previous day"
+            className="rounded-[var(--radius-md)] border border-border p-1.5 transition-colors hover:bg-[hsl(var(--background-muted))]"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
           <button
             onClick={goToToday}
-            className="px-3 py-1.5 rounded-[var(--radius-lg)] text-xs font-medium bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90 transition-opacity"
+            disabled={isToday}
+            className="rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-[hsl(var(--background-muted))] disabled:opacity-50"
           >
             Today
           </button>
-        )}
+          <button
+            onClick={goToNextDay}
+            aria-label="Next day"
+            className="rounded-[var(--radius-md)] border border-border p-1.5 transition-colors hover:bg-[hsl(var(--background-muted))]"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <button
+            onClick={exportCsv}
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-[hsl(var(--background-muted))]"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export CSV
+          </button>
+          <button
+            onClick={() => router.push('/initiatives')}
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-1.5 text-sm font-medium text-white transition-opacity hover:opacity-90"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New initiative
+          </button>
+        </div>
       </div>
 
-      {/* Today's Focus */}
-      <div className="rounded-[var(--radius-lg)] border border-border bg-card p-6 space-y-3">
-        <div className="flex items-center gap-2">
-          <Star className="h-5 w-5 text-amber-500" />
-          <h3 className="text-lg font-semibold">Today&apos;s Focus</h3>
-        </div>
-        {topPriorityInitiative ? (
-          <div className="rounded-[var(--radius-lg)] bg-amber-50 border border-amber-200 p-4">
-            <p className="text-sm font-semibold text-amber-900">
-              #1 Priority: {topPriorityInitiative.name}
+      {/* The one thing that matters today */}
+      <section className="rounded-[var(--radius-lg)] bg-[hsl(var(--foreground))] p-6 text-[hsl(var(--background))]">
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider opacity-70">
+          <Star className="h-3.5 w-3.5" />
+          The top priority for today
+        </p>
+        {focusTask ? (
+          <>
+            <h2 className="mt-2 text-xl font-bold">{focusTask.name}</h2>
+            <p className="mt-1 flex items-center gap-1.5 text-sm opacity-70">
+              <span className="h-1.5 w-1.5 rounded-full bg-current" />
+              {focusTask.initiativeName}
             </p>
-            <p className="text-xs text-amber-700 mt-1">
-              {topPriorityInitiative.description?.slice(0, 100)}
-              {(topPriorityInitiative.description?.length || 0) > 100 ? '…' : ''}
-            </p>
-          </div>
-        ) : topPriority ? (
-          <div className="rounded-[var(--radius-lg)] bg-amber-50 border border-amber-200 p-4">
-            <p className="text-sm font-semibold text-amber-900">
-              #1 Priority: {topPriority}
-            </p>
-          </div>
-        ) : (
-          <p className="text-sm text-[hsl(var(--foreground-muted))] py-2">
-            No focus set for this week. Set top priorities in your weekly plan.
-          </p>
-        )}
-      </div>
-
-      {/* Today's Tasks */}
-      <div className="rounded-[var(--radius-lg)] border border-border bg-card p-6 space-y-4">
-        <div className="flex items-center gap-2">
-          <ListTodo className="h-5 w-5 text-[hsl(var(--foreground-muted))]" />
-          <h3 className="text-lg font-semibold">Today&apos;s Tasks</h3>
-          <span className="ml-auto text-sm text-[hsl(var(--foreground-muted))]">
-            {tasks.length} task{tasks.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-
-        {tasks.length === 0 ? (
-          <p className="text-sm text-[hsl(var(--foreground-muted))] py-4 text-center">
-            No tasks due {isToday ? 'today' : 'on this day'}.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {tasks.map(task => {
-              const StatusIcon = getStatusIcon(task.status);
-              return (
-                <div
-                  key={task.id}
-                  className="flex items-center gap-3 py-2 px-3 rounded-[var(--radius-lg)] border border-border hover:bg-[hsl(var(--muted))]/30 transition-colors"
-                >
-                  <button
-                    onClick={() => handleStatusToggle(task.id, task.status)}
-                    className={`shrink-0 transition-colors ${getStatusColor(task.status)}`}
-                    title={`Status: ${task.status.replace('_', ' ')} — click to change`}
-                    aria-label={`Toggle status for ${task.name}`}
-                  >
-                    <StatusIcon className="h-5 w-5" />
-                  </button>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-medium truncate ${task.status === 'completed' ? 'line-through text-[hsl(var(--foreground-muted))]' : ''}`}>
-                      {task.name}
-                    </p>
-                    <p className="text-xs text-[hsl(var(--foreground-muted))] truncate">
-                      {task.initiativeName}
-                    </p>
-                  </div>
-                  <span className={`text-xs font-medium capitalize ${PRIORITY_COLORS[task.priority] || ''}`}>
-                    {task.priority}
-                  </span>
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${STATUS_COLORS[task.status] || 'bg-gray-100 text-gray-700'}`}
-                  >
-                    {task.status.replace('_', ' ')}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Active Initiatives */}
-      <div className="rounded-[var(--radius-lg)] border border-border bg-card p-6 space-y-4">
-        <div className="flex items-center gap-2">
-          <Rocket className="h-5 w-5 text-[hsl(var(--foreground-muted))]" />
-          <h3 className="text-lg font-semibold">Active Initiatives</h3>
-          <span className="ml-auto text-sm text-[hsl(var(--foreground-muted))]">
-            {initiatives.length} active
-          </span>
-        </div>
-
-        {initiatives.length === 0 ? (
-          <p className="text-sm text-[hsl(var(--foreground-muted))] py-4 text-center">
-            No initiatives active {isToday ? 'today' : 'on this day'}.
-          </p>
-        ) : (
-          <div className="divide-y divide-border">
-            {initiatives.map(initiative => (
+            <div className="mt-4 flex flex-wrap items-center gap-2">
               <button
-                key={initiative.id}
-                onClick={() => router.push(`/initiatives/${initiative.id}`)}
-                className="w-full flex items-center gap-3 py-3 px-2 text-left hover:bg-[hsl(var(--muted))]/50 rounded-[var(--radius-lg)] transition-colors group"
+                onClick={() => handleStatusToggle(focusTask.id, focusTask.status)}
+                className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-emerald-500 px-3 py-1.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
               >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate group-hover:text-[hsl(var(--primary))]">
-                    {initiative.name}
-                  </p>
-                  <span className="text-xs text-[hsl(var(--foreground-muted))] capitalize">
-                    {initiative.kind.replace('_', ' ')}
-                  </span>
-                </div>
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${STATUS_COLORS[initiative.status] || 'bg-gray-100 text-gray-700'}`}
-                >
-                  {initiative.status.replace('_', ' ')}
-                </span>
-                <ChevronRight className="h-4 w-4 text-[hsl(var(--foreground-muted))] group-hover:text-[hsl(var(--primary))] shrink-0" />
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {focusTask.status === 'completed' ? 'Done' : 'Mark done'}
               </button>
-            ))}
-          </div>
+              <span className="text-sm opacity-70">
+                {focusTask.status === 'in_progress' ? 'Working on it' : 'Not started'}
+              </span>
+            </div>
+          </>
+        ) : (
+          <p className="mt-2 text-sm opacity-70">
+            {topPriority
+              ? topPriority
+              : 'Nothing set. Pick a focus in the weekly planner and it shows here.'}
+          </p>
         )}
+      </section>
+
+      {/* Done / Overdue */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="rounded-[var(--radius-lg)] border border-border bg-card p-5">
+          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Done today
+          </p>
+          <p className="mt-1.5 text-2xl font-bold tracking-tight">
+            {doneToday} / {tasks.length}
+          </p>
+          <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">{donePct}% complete</p>
+        </div>
+        <div className="rounded-[var(--radius-lg)] border border-border bg-card p-5">
+          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
+            <Clock className="h-3.5 w-3.5" />
+            Overdue
+          </p>
+          <p className="mt-1.5 text-2xl font-bold tracking-tight">{slipped.length}</p>
+          <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">
+            {slipped.length > 0 ? 'Triage below' : 'Nothing slipping'}
+          </p>
+        </div>
       </div>
+
+      {/* Where you are - shared with Year-at-a-Glance */}
+      <PaceCards companyId={companyId} asOf={selectedDate} />
+
+      {/* Due today */}
+      <TaskGroup
+        icon={<ListTodo className="h-4 w-4" />}
+        title="Due today"
+        subtitle={tasks.length === 0 ? 'Empty board. Pull from upcoming.' : 'What the plan asks of you today.'}
+        tasks={tasks}
+        onToggle={handleStatusToggle}
+      />
+
+      {/* Slipped */}
+      <TaskGroup
+        icon={<AlertTriangle className="h-4 w-4" />}
+        title="Slipped"
+        subtitle="Past due and still open. Close them out or push the date."
+        tasks={slipped}
+        onToggle={handleStatusToggle}
+        trailing={(t) => (
+          <span className="shrink-0 text-xs font-medium text-red-600">
+            {daysOverdue(t.dueDate)}d overdue
+          </span>
+        )}
+      />
+
+      {/* Next 3 days */}
+      <TaskGroup
+        icon={<ArrowRight className="h-4 w-4" />}
+        title="Next 3 days"
+        subtitle="So nothing sneaks up on you."
+        tasks={upcoming}
+        onToggle={handleStatusToggle}
+        trailing={(t) => (
+          <span className="shrink-0 text-xs text-[hsl(var(--foreground-muted))]">
+            {formatDateShort(new Date(t.dueDate))}
+          </span>
+        )}
+      />
     </div>
+  );
+}
+
+/**
+ * One list of tasks with a heading. Used for Due today / Slipped / Next 3 days so
+ * the three sections behave identically - same checkbox, same empty state.
+ */
+function TaskGroup({
+  icon,
+  title,
+  subtitle,
+  tasks,
+  onToggle,
+  trailing,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+  tasks: TaskWithInitiative[];
+  onToggle: (id: string, status: TaskStatus) => void;
+  trailing?: (task: TaskWithInitiative) => React.ReactNode;
+}) {
+  return (
+    <section>
+      <p className="flex items-center gap-1.5 text-sm font-semibold">
+        {icon}
+        {title}
+      </p>
+      <p className="mt-0.5 text-sm text-[hsl(var(--foreground-muted))]">{subtitle}</p>
+
+      {tasks.length === 0 ? (
+        <div className="mt-3 rounded-[var(--radius-lg)] border border-border bg-card py-10 text-center text-sm text-[hsl(var(--foreground-muted))]">
+          Nothing here.
+        </div>
+      ) : (
+        <div className="mt-3 divide-y divide-border overflow-hidden rounded-[var(--radius-lg)] border border-border bg-card">
+          {tasks.map((task) => {
+            const StatusIcon = getStatusIcon(task.status);
+            const done = task.status === 'completed';
+            return (
+              <div key={task.id} className="flex items-center gap-3 px-4 py-3">
+                <button
+                  onClick={() => onToggle(task.id, task.status)}
+                  className={getStatusColor(task.status) + ' shrink-0 transition-colors'}
+                  aria-label={`Mark ${task.name} as ${cycleStatus(task.status).replace('_', ' ')}`}
+                >
+                  <StatusIcon className="h-4 w-4" />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={
+                      'truncate text-sm font-medium ' +
+                      (done ? 'text-[hsl(var(--foreground-muted))] line-through' : '')
+                    }
+                  >
+                    {task.name}
+                  </p>
+                  <p className="truncate text-xs text-[hsl(var(--foreground-muted))]">
+                    {task.initiativeName}
+                    {task.priority !== 'medium' && (
+                      <span className={'ml-2 ' + (PRIORITY_COLORS[task.priority] || '')}>
+                        {task.priority}
+                      </span>
+                    )}
+                  </p>
+                </div>
+                {trailing?.(task)}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }

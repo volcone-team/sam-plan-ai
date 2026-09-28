@@ -1,4 +1,5 @@
 export { InitiativeCard } from './initiative-card';
+export { TopPerformersBand } from './top-performers-band';
 export { InitiativesFilters } from './initiatives-filters';
 export { InitiativesList } from './initiatives-list';
 export { InitiativeDetail } from './initiative-detail';
@@ -12,8 +13,9 @@ export { InitiativeResults } from './initiative-results';
 export { AddInitiativePanel } from './add-initiative-panel';
 
 export type { InitiativeCardProps } from './initiative-card';
+export type { TopPerformersBandProps } from './top-performers-band';
 export type { InitiativesFiltersProps, FilterOptions } from './initiatives-filters';
-export type { InitiativesListProps } from './initiatives-list';
+export type { InitiativesListProps, InitiativeTypeOption } from './initiatives-list';
 export type { InitiativeDetailProps } from './initiative-detail';
 export type { InitiativeOverviewProps } from './initiative-overview';
 export type { InitiativeWhyProps } from './initiative-why';

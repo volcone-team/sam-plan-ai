@@ -47,6 +47,8 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
   const [initiative, setInitiative] = useState<Initiative | null>(null);
   const [initiativeType, setInitiativeType] = useState<InitiativeType | null>(null);
   const [productName, setProductName] = useState<string>('');
+  const [initiativeTypes, setInitiativeTypes] = useState<InitiativeType[]>([]);
+  const [products, setProducts] = useState<Array<{ id: string; name: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
@@ -60,13 +62,17 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
         const initiativeData = await initiativeService.getInitiative(initiativeId);
         setInitiative(initiativeData);
 
-        const [typeData, productData] = await Promise.all([
+        const [typeData, productData, allTypes, allProducts] = await Promise.all([
           initiativeTypeService.getInitiativeType(initiativeData.initiativeTypeId),
           productService.getProduct(initiativeData.productId),
+          initiativeTypeService.getAllInitiativeTypes(),
+          productService.getProductsByCompany(initiativeData.companyId),
         ]);
 
         setInitiativeType(typeData);
         setProductName(productData.name);
+        setInitiativeTypes(allTypes);
+        setProducts(allProducts.map(p => ({ id: p.id, name: p.name })));
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load initiative';
         setError(message);
@@ -78,6 +84,21 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
 
     loadData();
   }, [initiativeId]);
+
+  /**
+   * Apply a saved initiative and re-derive the display values (type + product name)
+   * from the already-loaded lists, so the header and overview reflect changes
+   * without a full reload.
+   */
+  const handleSaved = (updated: Initiative) => {
+    setInitiative(updated);
+
+    const matchedType = initiativeTypes.find(t => t.id === updated.initiativeTypeId);
+    if (matchedType) setInitiativeType(matchedType);
+
+    const matchedProduct = products.find(p => p.id === updated.productId);
+    setProductName(matchedProduct ? matchedProduct.name : '');
+  };
 
   if (loading) {
     return (
@@ -153,6 +174,9 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
               initiative={initiative}
               initiativeType={initiativeType}
               productName={productName}
+              initiativeTypes={initiativeTypes}
+              products={products}
+              onSaved={handleSaved}
             />
             <InitiativeWhy initiativeType={initiativeType} />
           </div>

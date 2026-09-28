@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { toDateOnly, clampNotBefore, todayDateOnly, clampDayOfMonth } from "@/lib/plan-dates";
+import { loadTaskTemplates } from "@/lib/workbook/read";
+import { materialiseTasks, materialiseAiTasks, templateRunwayDays } from "@/lib/workbook/materialise";
 
 /**
  * PATCH /api/plan/suggestions/[id]
@@ -142,7 +145,7 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
       const month = Number(raw);
       if (!month || month < 1 || month > 12) throw new Error("Invalid activation month: " + raw);
       const year = new Date().getFullYear();
-      activationDate = new Date(year, month - 1, 1).toISOString().split("T")[0];
+      activationDate = toDateOnly(new Date(year, month - 1, 1));
     }
     console.log("[applySuggestion] date_change:", s.target_id, "->", activationDate);
     const { error } = await db.from("initiatives").update({ activation_date: activationDate }).eq("id", s.target_id).eq("company_id", companyId);
@@ -188,7 +191,9 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
     const productId = products?.[0]?.id;
     if (!productId) throw new Error("No product to attach the initiative to");
 
-    const channel = String(proposed.channel || "custom");
+    // The workbook library key IS the channel. `channel` is only a fallback for
+    // suggestions generated before the library was wired in.
+    const channel = String(proposed.libraryKey || proposed.channel || "custom");
     let typeId = (initTypes || []).find((t: any) => t.channel === channel)?.id || (initTypes || [])[0]?.id;
 
     if (!typeId) {
@@ -198,7 +203,8 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
         owner: "system",
         benchmarks: {},
         project_template: { tasks: [], totalEstimatedHours: 0 },
-        difficulty: { effortToImplement: 5, skillExpertiseRequired: 5, timeToResults: 5, costToRun: 5 },
+        // Workbook scale is 1-5, where 5 means "very hard". 3 is the neutral default.
+        difficulty: { effortToImplement: 3, skillExpertiseRequired: 3, timeToResults: 3, costToRun: 3 },
         ai_context: {},
         tier: 1,
         display_order: 99,
@@ -209,28 +215,47 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
     if (!typeId) throw new Error("Could not resolve an initiative type");
 
     // AI may return a full ISO date string ("2025-04-30") or a month number (1-12).
+    // Tasks come from the workbook template for this library key, exactly as in
+    // generation. Accepting a suggestion used to create an initiative with NO
+    // tasks at all, so the plan looked generated but had no project plan behind it.
+    const templates = (await loadTaskTemplates(db, [channel])).get(channel) || [];
+    const runway = templateRunwayDays(templates);
+
+    // Dates floored at today, so accepting a suggestion never back-dates work.
+    // The event was previously hardcoded to the 15th (or activation + 14 days)
+    // and written via toISOString(), which shifts the calendar day.
+    const today = todayDateOnly();
     const rawMonth = proposed.activationMonth;
-    let activationDate: string;
-    let eventDate: string;
+    let eventDateObj: Date;
     if (typeof rawMonth === "string" && /^\d{4}-\d{2}-\d{2}/.test(rawMonth)) {
-      // Full date - use it (strip time), event 14 days later
-      activationDate = rawMonth.split("T")[0];
-      const evD = new Date(activationDate);
-      evD.setDate(evD.getDate() + 14);
-      eventDate = evD.toISOString().split("T")[0];
+      eventDateObj = clampNotBefore(rawMonth.split("T")[0], today);
     } else {
-      // Month number or fallback
-      const month = Number(rawMonth) || (new Date().getMonth() + 1);
+      const month = Number(rawMonth) || new Date().getMonth() + 1;
       const mClamped = Math.min(Math.max(month, 1), 12);
       const year = new Date().getFullYear();
-      activationDate = new Date(year, mClamped - 1, 1).toISOString().split("T")[0];
-      eventDate = new Date(year, mClamped - 1, 15).toISOString().split("T")[0];
+      // Mid-month only as a placeholder, when no day is supplied at all.
+      const day = clampDayOfMonth(year, mClamped, 15);
+      eventDateObj = clampNotBefore(new Date(year, mClamped - 1, day), today);
     }
+    // The event must leave room for its own preparation.
+    if (runway > 0) {
+      eventDateObj = clampNotBefore(
+        eventDateObj,
+        new Date(today.getFullYear(), today.getMonth(), today.getDate() + runway)
+      );
+    }
+    // Activation is when preparation starts.
+    const activationDateObj = clampNotBefore(
+      new Date(eventDateObj.getFullYear(), eventDateObj.getMonth(), eventDateObj.getDate() - runway),
+      today
+    );
+    const activationDate = toDateOnly(activationDateObj);
+    const eventDate = toDateOnly(eventDateObj);
     const revenueBetter = Number(proposed.revenueBetter) || 0;
 
     console.log("[applySuggestion] new_initiative:", proposed.name, "| channel:", channel, "| date:", activationDate);
 
-    const { error } = await db.from("initiatives").insert({
+    const { data: created, error } = await db.from("initiatives").insert({
       company_id: companyId,
       annual_plan_id: annualPlan.id,
       product_id: productId,
@@ -247,8 +272,42 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
       planned_budget: Number(proposed.plannedBudget) || 0,
       actual_spend: 0,
       display_order: 0,
-    });
+    }).select("id").single();
     if (error) throw new Error(error.message);
+
+    // Attach the project plan: workbook template where it exists, the
+    // suggestion's own fallback list otherwise, so an accepted suggestion is
+    // never an initiative with nothing to do.
+    const tasks = templates.length > 0
+      ? materialiseTasks(templates, { eventDate: eventDateObj, floor: today })
+      : materialiseAiTasks(proposed.tasks, { eventDate: eventDateObj, floor: today });
+
+    if (!created?.id) {
+      console.error("[applySuggestion] initiative id missing - tasks not attached");
+      return;
+    }
+    if (tasks.length === 0) {
+      console.warn("[applySuggestion] no workbook template and no fallback tasks for", channel);
+      return;
+    }
+    const { error: taskErr } = await db.from("tasks").insert(
+      tasks.map((t) => ({
+        id: t.id,
+        initiative_id: created.id,
+        company_id: companyId,
+        name: t.name,
+        description: t.description,
+        due_date: t.dueDate,
+        estimated_hours: t.estimatedHours,
+        status: "not_started",
+        priority: t.priority,
+        display_order: t.displayOrder,
+        dependency_ids: t.dependencyIds,
+      }))
+    );
+    if (taskErr) throw new Error("Initiative saved but its tasks failed: " + taskErr.message);
+    console.log("[applySuggestion] attached", tasks.length,
+      templates.length > 0 ? "workbook tasks" : "fallback tasks", "to", proposed.name);
     return;
   }
 

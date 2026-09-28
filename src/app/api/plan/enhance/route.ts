@@ -4,6 +4,8 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { randomUUID } from "crypto";
+import { logGenerationEvent } from "@/lib/generation-events";
+import { loadLibrary, loadAiContext, renderLibraryForPrompt } from "@/lib/workbook/read";
 
 export const maxDuration = 60;
 
@@ -41,7 +43,10 @@ Return ONLY valid JSON (no markdown) in this exact shape:
 
 Rules:
 - Suggest 3-8 high-value improvements. Quality over quantity.
-- new_initiative: propose "proposed" as { name, description, channel, activationMonth, plannedBudget, revenueBetter }
+- new_initiative: propose "proposed" as { name, description, libraryKey, activationMonth, plannedBudget, revenueBetter, tasks }
+  - libraryKey MUST be one of the key= values from the INITIATIVE LIBRARY below. Do not invent one.
+  - tasks is a FALLBACK only: [{ name, description, daysBeforeEvent (positive), estimatedHours, priority }].
+    Where the workbook has an authored task template for the chosen libraryKey it is used instead of yours.
 - budget_change: "current" as { plannedBudget }, "proposed" as { plannedBudget }
 - date_change: "current" as { activationMonth }, "proposed" as { activationMonth }
 - target_change: "current" as { baselineRevenue?, stretchRevenue? }, "proposed" as { baselineRevenue?, stretchRevenue? }
@@ -52,6 +57,12 @@ Rules:
 `;
 
 export async function POST() {
+  // Hoisted so the outer catch can log a FAILED enhancement event. They stay
+  // null until auth resolves, so an early failure logs nothing rather than
+  // logging an unattributable row.
+  let eventCompanyId: string | null = null;
+  let eventUserId: string | null = null;
+
   try {
     console.log("[plan/enhance] Starting enhance run...");
 
@@ -90,6 +101,8 @@ export async function POST() {
     }
 
     const companyId = profile.company_id;
+    eventCompanyId = companyId;
+    eventUserId = user.id;
     console.log("[plan/enhance] Company:", companyId, "| user:", user.email);
 
     // 2. Load the current plan (products, initiatives, annual plan)
@@ -143,13 +156,34 @@ Suggest improvements to this plan as JSON.`;
     }
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+    // Suggestions must come from the workbook library, same as generation.
+    let libraryContext = "";
+    try {
+      const [library, aiContext] = await Promise.all([loadLibrary(supabase), loadAiContext(supabase)]);
+      if (library.length > 0) {
+        libraryContext =
+          "\n\nINITIATIVE LIBRARY (the ONLY initiatives you may propose - return libraryKey verbatim):\n" +
+          renderLibraryForPrompt(library, aiContext);
+      } else {
+        console.error("[plan/enhance] Initiative library is empty - suggestions will not be workbook-grounded.");
+      }
+    } catch (wbErr) {
+      console.error("[plan/enhance] Workbook load failed:", wbErr);
+    }
+
     console.log("[plan/enhance] Calling Claude...");
+    const claudeStart = Date.now();
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 3000,
-      system: ENHANCE_SYSTEM_PROMPT,
+      system: ENHANCE_SYSTEM_PROMPT + libraryContext,
       messages: [{ role: "user", content: planSummary }],
     });
+    // Duration + token usage for the admin AI metrics.
+    const durationMs = Date.now() - claudeStart;
+    const tokensInput = response.usage?.input_tokens ?? null;
+    const tokensOutput = response.usage?.output_tokens ?? null;
+    console.log("[plan/enhance] Claude responded in", durationMs, "ms | output tokens:", tokensOutput);
 
     const textBlock = response.content.find((b) => b.type === "text");
     if (!textBlock || textBlock.type !== "text") {
@@ -223,20 +257,38 @@ Suggest improvements to this plan as JSON.`;
 
     console.log("[plan/enhance] Saved batch", batchId, "with", rows.length, "suggestions");
 
-    // Log this enhancement event for admin metrics (non-fatal if table missing).
-    try {
-      await supabase.from("generation_events").insert({
-        company_id: companyId,
-        user_id: user.id,
-        event_type: "plan_enhancement",
-        suggestions_created: rows.length,
-      });
-    } catch (logErr) {
-      console.log("[plan/enhance] generation_events log skipped:", logErr);
-    }
+    // Log this enhancement for admin metrics. Reuses adminClient: the previous
+    // user-scoped insert here was rejected by RLS on every run, silently.
+    await logGenerationEvent(
+      {
+        companyId,
+        userId: user.id,
+        eventType: "plan_enhancement",
+        status: "success",
+        suggestionsCreated: rows.length,
+        durationMs,
+        model: MODEL,
+        tokensInput,
+        tokensOutput,
+      },
+      adminClient
+    );
 
     return NextResponse.json({ success: true, batchId, count: rows.length });
   } catch (err: any) {
+    // Record the failure so a broken enhance path is visible on the dashboard
+    // instead of just absent. Guarded: no company resolved means no attribution.
+    if (eventCompanyId) {
+      await logGenerationEvent({
+        companyId: eventCompanyId,
+        userId: eventUserId,
+        eventType: "plan_enhancement",
+        status: "failed",
+        errorMessage: String(err?.message || "Internal error").slice(0, 500),
+        model: MODEL,
+      });
+    }
+
     const isAuthError =
       err?.status === 401 ||
       err?.error?.error?.type === "authentication_error" ||

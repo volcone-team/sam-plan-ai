@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { logActivity } from "@/lib/activity-log";
+import { getInviteContext, sendMemberInvite } from "@/lib/team-invite";
 
 /**
  * POST /api/admin/companies/create
@@ -9,25 +11,26 @@ import { cookies } from "next/headers";
  * Admin creates a new company + owner user.
  * Used for onboarding customers who need a ready-made dashboard.
  *
- * Body: { companyName, ownerEmail, ownerFirstName, ownerLastName, ownerPassword }
+ * The owner is created WITHOUT a password. They receive a branded invite email
+ * with a link to set their own password. Creation never fails just because the
+ * invite email couldn't be sent — the response reports whether the invite went
+ * out via the `invited` flag.
+ *
+ * Body: { companyName, ownerEmail, ownerFirstName, ownerLastName }
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { companyName, ownerEmail, ownerFirstName, ownerLastName, ownerPassword } = body;
+    const { companyName, ownerEmail, ownerFirstName, ownerLastName } = body;
 
     console.log("[admin/companies/create] Creating:", companyName, "| owner:", ownerEmail);
 
     // Validate
-    if (!companyName || !ownerEmail || !ownerFirstName || !ownerPassword) {
+    if (!companyName || !ownerEmail || !ownerFirstName) {
       return NextResponse.json(
-        { error: "Company name, owner email, first name, and password are required." },
+        { error: "Company name, owner email, and first name are required." },
         { status: 400 }
       );
-    }
-
-    if (ownerPassword.length < 6) {
-      return NextResponse.json({ error: "Password must be at least 6 characters." }, { status: 400 });
     }
 
     // 1. Auth check — only admins
@@ -50,7 +53,7 @@ export async function POST(request: Request) {
 
     const { data: adminProfile } = await supabase
       .from("profiles")
-      .select("is_admin")
+      .select("is_admin, first_name, last_name")
       .eq("id", user.id)
       .single();
 
@@ -86,12 +89,14 @@ export async function POST(request: Request) {
 
     console.log("[admin/companies/create] Company created:", company.id, company.name);
 
-    // 4. Create the auth user (skip email verification)
+    // 4. Create the auth user (no password — invite flow, skip email verification)
     const { data: newUser, error: authError } = await adminClient.auth.admin.createUser({
       email: ownerEmail,
-      password: ownerPassword,
       email_confirm: true,
       user_metadata: {
+        // No password chosen yet — middleware confines this session to
+        // /auth/set-password until they pick one.
+        needs_password: true,
         first_name: ownerFirstName,
         last_name: ownerLastName || "",
         company_name: companyName,
@@ -152,7 +157,60 @@ export async function POST(request: Request) {
       status: "draft",
     });
 
-    console.log("[admin/companies/create] Complete:", companyName, "| owner:", ownerEmail);
+    // 7. Generate the invite link and email it. Best-effort — the company and
+    // owner already exist, so an email failure must NOT fail the request.
+    let invited = false;
+    try {
+      const { inviterName, companyName: contextCompanyName } = await getInviteContext(
+        adminClient,
+        {
+          first_name:
+            adminProfile.first_name ??
+            (user.user_metadata?.first_name as string | undefined) ??
+            null,
+          last_name:
+            adminProfile.last_name ??
+            (user.user_metadata?.last_name as string | undefined) ??
+            null,
+        },
+        company.id
+      );
+
+      invited = await sendMemberInvite(adminClient, {
+        email: ownerEmail,
+        inviterName,
+        companyName: contextCompanyName ?? company.name,
+        role: "owner",
+      });
+    } catch (inviteErr: unknown) {
+      const message = inviteErr instanceof Error ? inviteErr.message : String(inviteErr);
+      console.error("[admin/companies/create] Invite send failed:", message);
+      invited = false;
+    }
+
+    console.log(
+      "[admin/companies/create] Complete:",
+      companyName,
+      "| owner:",
+      ownerEmail,
+      "| invited:",
+      invited
+    );
+
+    // Audit trail — never throws, never affects this response.
+    await logActivity(
+      {
+        actorUserId: user.id,
+        actorEmail: user.email ?? null,
+        action: "company.created",
+        targetType: "company",
+        targetId: company.id,
+        targetLabel: company.name,
+        companyId: company.id,
+        metadata: { ownerEmail, ownerUserId: newUser.user.id, invited },
+      },
+      adminClient
+    );
 
     return NextResponse.json({
       success: true,
@@ -166,6 +224,7 @@ export async function POST(request: Request) {
         firstName: ownerFirstName,
         lastName: ownerLastName || "",
       },
+      invited,
     });
   } catch (err: any) {
     console.error("[admin/companies/create] Error:", err?.message || err);

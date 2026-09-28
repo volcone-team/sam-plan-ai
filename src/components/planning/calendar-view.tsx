@@ -111,14 +111,15 @@ export function CalendarView() {
         const allInitiatives = await initiativeService.getInitiativesByCompany(companyId);
         setInitiatives(allInitiatives);
 
-        // Load tasks for all initiatives
-        const tasks: TaskWithInit[] = [];
-        for (const init of allInitiatives) {
-          const initTasks = await taskService.getTasksByInitiative(init.id);
-          initTasks.forEach(t => {
-            tasks.push({ ...t, initiativeName: init.name });
-          });
-        }
+        // One company-scoped query instead of one per initiative. The old loop
+        // issued N+1 requests and, like the weekly/daily views, tied a task's
+        // visibility to its parent initiative being in the list it iterated.
+        const companyTasks = await taskService.getTasksByCompany(companyId);
+        const nameById = new Map(allInitiatives.map(i => [i.id, i.name]));
+        const tasks: TaskWithInit[] = companyTasks.map(t => ({
+          ...t,
+          initiativeName: nameById.get(t.initiativeId) || 'Unassigned',
+        }));
         setAllTasks(tasks);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load calendar data';

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireSuperAdmin } from "@/lib/require-admin";
+import { logActivity } from "@/lib/activity-log";
 
 /**
  * PATCH /api/admin/users/[id]/admin-level
@@ -48,6 +49,13 @@ export async function PATCH(
 
     const isAdmin = adminLevel !== null;
 
+    // Snapshot the previous admin level BEFORE updating, for the audit trail.
+    const { data: before } = await adminClient
+      .from("profiles")
+      .select("email, admin_level, company_id")
+      .eq("id", id)
+      .maybeSingle();
+
     const { error } = await adminClient
       .from("profiles")
       .update({ admin_level: adminLevel, is_admin: isAdmin })
@@ -59,6 +67,27 @@ export async function PATCH(
     }
 
     console.log("[admin-level] User", id, "set to", adminLevel, "(is_admin:", isAdmin, ")");
+
+    // Audit trail — never throws, never affects this response.
+    const { data: actor } = await adminClient
+      .from("profiles")
+      .select("email")
+      .eq("id", check.userId)
+      .maybeSingle();
+
+    await logActivity(
+      {
+        actorUserId: check.userId,
+        actorEmail: actor?.email ?? null,
+        action: "user.admin_level_changed",
+        targetType: "user",
+        targetId: id,
+        targetLabel: before?.email ?? null,
+        companyId: before?.company_id ?? null,
+        metadata: { from: before?.admin_level ?? null, to: adminLevel, isAdmin },
+      },
+      adminClient
+    );
 
     return NextResponse.json({ success: true, adminLevel, isAdmin });
   } catch (err: any) {

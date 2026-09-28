@@ -15,6 +15,7 @@ import {
   CreditCard,
   TrendingUp,
   Bell,
+  ScrollText,
   Settings,
   Shield,
   Menu,
@@ -42,6 +43,7 @@ const navItems: NavItem[] = [
   { label: "Subscriptions", href: "/admin/subscriptions", icon: CreditCard },
   { label: "Analytics", href: "/admin/analytics", icon: TrendingUp },
   { label: "Notifications", href: "/admin/notifications", icon: Bell },
+  { label: "Activity Log", href: "/admin/activity", icon: ScrollText },
   { label: "Settings", href: "/admin/settings", icon: Settings },
 ];
 

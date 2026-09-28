@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireAdmin } from "@/lib/require-admin";
+import { logActivity } from "@/lib/activity-log";
 
 /**
  * PATCH /api/admin/users/[id]/role
@@ -35,6 +36,13 @@ export async function PATCH(
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
+    // Snapshot the previous role BEFORE updating, for the audit trail.
+    const { data: before } = await adminClient
+      .from("profiles")
+      .select("role, company_id")
+      .eq("id", id)
+      .maybeSingle();
+
     const { data, error } = await adminClient
       .from("profiles")
       .update({ role })
@@ -48,6 +56,27 @@ export async function PATCH(
     }
 
     console.log("[user/role] User", data?.email, "role set to", data?.role);
+
+    // Audit trail — never throws, never affects this response.
+    const { data: actor } = await adminClient
+      .from("profiles")
+      .select("email")
+      .eq("id", check.userId)
+      .maybeSingle();
+
+    await logActivity(
+      {
+        actorUserId: check.userId,
+        actorEmail: actor?.email ?? null,
+        action: "user.role_changed",
+        targetType: "user",
+        targetId: id,
+        targetLabel: data?.email ?? null,
+        companyId: before?.company_id ?? null,
+        metadata: { from: before?.role ?? null, to: data?.role ?? role },
+      },
+      adminClient
+    );
 
     return NextResponse.json({ success: true, role: data?.role });
   } catch (err: any) {

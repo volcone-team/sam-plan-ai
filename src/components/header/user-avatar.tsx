@@ -64,6 +64,9 @@ export function UserAvatar({
     const supabase = createClient();
     // Drop cached profile/plan data so the next user never sees it.
     cacheClearAll();
+    // Also drop any anonymous questionnaire draft. It is not user-scoped, so
+    // leaving it behind let the next account in this browser inherit it.
+    try { localStorage.removeItem('sam-plan-data'); } catch {}
     await supabase.auth.signOut();
     router.push("/auth/login");
   };

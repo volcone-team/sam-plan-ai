@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ingestWorkbook } from "@/lib/workbook/ingest";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
@@ -158,6 +159,14 @@ export async function POST(request: Request) {
 
     console.log("[admin/workbook] POST - Saved workbook:", data.id, "| sheets:", data.total_sheets);
 
+    // Project the raw sheets into the wb_* tables that plan generation reads.
+    // Non-fatal by design: the upload has already been stored, so an ingest
+    // problem must not fail the request and lose it. The result is returned so
+    // the admin UI can show what was extracted and what did not match, instead
+    // of the workbook silently having no effect - which is exactly how the old
+    // 3-sheets/8-rows prompt injection behaved.
+    const ingest = await ingestWorkbook(sheets, adminClient);
+
     return NextResponse.json({
       success: true,
       workbook: {
@@ -166,6 +175,7 @@ export async function POST(request: Request) {
         uploadedAt: data.uploaded_at,
         totalSheets: data.total_sheets,
       },
+      ingest,
     });
   } catch (err: any) {
     console.error("[admin/workbook] POST Error:", err?.message || err);

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AlertTriangle, Sparkles, RefreshCw, X } from "lucide-react";
+import { usePermission } from "@/hooks/use-permission";
 
 interface RegenerateModalProps {
   open: boolean;
@@ -32,6 +33,8 @@ export function RegenerateModal({
   onEnhance,
 }: RegenerateModalProps) {
   const [step, setStep] = useState<Step>("choice");
+  /** Only owner/operator may regenerate or reset the plan. */
+  const canEditPlan = usePermission("plan.regenerate");
 
   if (!open) return null;
 
@@ -57,6 +60,40 @@ export function RegenerateModal({
     setStep("choice");
     onStartFromScratch();
   };
+
+  // Read-only roles (team member / viewer) get an explanation instead of the
+  // destructive choices. The entry point is hidden for them too; this is the
+  // backstop in case the modal is opened some other way.
+  if (!canEditPlan) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="w-full max-w-md rounded-[var(--radius-lg)] border border-border bg-card p-6 shadow-xl">
+          <div className="flex items-start justify-between">
+            <h3 className="text-lg font-semibold">Regenerating isn&apos;t available</h3>
+            <button
+              onClick={close}
+              className="rounded-md p-1 text-[hsl(var(--foreground-muted))] hover:bg-[hsl(var(--background-muted))]"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <p className="mt-3 text-sm text-[hsl(var(--foreground-muted))]">
+            Your role has read-only access to the plan. Ask an owner or operator to regenerate
+            or enhance it.
+          </p>
+          <div className="mt-5 flex justify-end">
+            <button
+              onClick={close}
+              className="rounded-[var(--radius-md)] border border-border px-4 py-2 text-sm font-medium hover:bg-[hsl(var(--background-muted))]"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">

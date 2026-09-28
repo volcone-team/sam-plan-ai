@@ -23,8 +23,12 @@ import { initiativeService } from '@/services/initiative.service';
 import { resultService } from '@/services/result.service';
 import { MonthlySummaryTable } from './monthly-summary-table';
 import type { MonthlyPlan, Initiative, Projection, Result } from '@/types';
+import { usePlanYears } from '@/hooks/use-plan-years';
+import { PlanYearTabs } from '@/components/planning/plan-year-tabs';
 
-const YEAR = new Date().getFullYear();
+// Year comes from the shared PlanYearProvider, not a module-level constant.
+// The old `const YEAR = new Date().getFullYear()` was evaluated once when this
+// chunk was parsed, which made a plan spanning into the next year unviewable.
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -103,6 +107,9 @@ type TrendStatus = 'on_track' | 'behind' | 'ahead';
 
 export function MonthlyPlanner() {
   const companyId = useCompanyId() || "";
+  // Shared with Year-at-a-Glance: the plan year being viewed, which may be a
+  // year the plan spans into rather than the current calendar year.
+  const { selectedYear: YEAR, setSelectedYear, years: planYears } = usePlanYears(companyId);
   const router = useRouter();
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [loading, setLoading] = useState(true);
@@ -145,7 +152,11 @@ export function MonthlyPlanner() {
 
         const getMonthRevenue = (proj: Projection | undefined): number => {
           if (!proj?.monthly) return 0;
-          const monthEntry = (proj.monthly as any[]).find((m: any) => m.month === selectedMonth);
+          // Year-aware: projection entries carry { year, month, revenue }, so
+          // matching on month alone pulled a 2027 figure into 2026.
+          const monthEntry = (proj.monthly as any[]).find(
+            (m: any) => m.month === selectedMonth && (m.year === undefined || m.year === YEAR)
+          );
           return monthEntry?.revenue || 0;
         };
 
@@ -205,7 +216,7 @@ export function MonthlyPlanner() {
     };
 
     loadMonthData();
-  }, [selectedMonth, companyId]);
+  }, [selectedMonth, companyId, YEAR]);
 
   if (loading) {
     return (
@@ -230,6 +241,13 @@ export function MonthlyPlanner() {
 
   return (
     <div className="space-y-6">
+      {/* Year tabs first: which year you are looking at governs everything below. */}
+      <PlanYearTabs
+        years={planYears}
+        selectedYear={YEAR}
+        onSelect={setSelectedYear}
+        currentYear={new Date().getFullYear()}
+      />
       {/* Monthly Summary Table */}
       <MonthlySummaryTable />
 

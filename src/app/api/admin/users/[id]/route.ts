@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { logActivity } from "@/lib/activity-log";
 
 /**
  * GET /api/admin/users/[id]
@@ -142,6 +143,14 @@ export async function DELETE(
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
+    // Snapshot the target's identity BEFORE the mutation — after a hard
+    // delete the profile row is gone and this is no longer readable.
+    const { data: targetProfile } = await adminClient
+      .from("profiles")
+      .select("email, company_id")
+      .eq("id", id)
+      .maybeSingle();
+
     if (hard) {
       console.log("[admin/users/id] Hard deleting user:", id);
       const { error } = await adminClient.auth.admin.deleteUser(id);
@@ -160,6 +169,21 @@ export async function DELETE(
         return NextResponse.json({ error: error.message }, { status: 500 });
       }
     }
+
+    // Audit trail — never throws, never affects this response.
+    await logActivity(
+      {
+        actorUserId: user.id,
+        actorEmail: user.email ?? null,
+        action: hard ? "user.deleted" : "user.deactivated",
+        targetType: "user",
+        targetId: id,
+        targetLabel: targetProfile?.email ?? null,
+        companyId: targetProfile?.company_id ?? null,
+        metadata: { hard },
+      },
+      adminClient
+    );
 
     return NextResponse.json({ success: true, action: hard ? "deleted" : "deactivated" });
   } catch (err: any) {

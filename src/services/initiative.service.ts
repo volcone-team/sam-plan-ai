@@ -14,6 +14,7 @@ import type {
   InitiativeKind,
 } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
+import { toDateOnly, parseDateOnly } from '@/lib/plan-dates';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -217,8 +218,8 @@ export class InitiativeService {
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
-        const startStr = startDate.toISOString().split('T')[0];
-        const endStr = endDate.toISOString().split('T')[0];
+        const startStr = toDateOnly(startDate);
+        const endStr = toDateOnly(endDate);
 
         const { data, error } = await supabase
           .from('initiatives')
@@ -291,8 +292,8 @@ export class InitiativeService {
         description: dto.description || '',
         kind: dto.kind,
         status: 'planned',
-        activation_date: dto.activationDate instanceof Date ? dto.activationDate.toISOString().split('T')[0] : dto.activationDate,
-        event_date: dto.eventDate ? (dto.eventDate instanceof Date ? dto.eventDate.toISOString().split('T')[0] : dto.eventDate) : null,
+        activation_date: toDateOnly(dto.activationDate),
+        event_date: dto.eventDate ? toDateOnly(dto.eventDate) : null,
         traffic_input: dto.trafficInput || null,
         revenue_good: dto.revenueScenarios?.good || 0,
         revenue_better: dto.revenueScenarios?.better || 0,
@@ -331,8 +332,10 @@ export class InitiativeService {
         if (d.description !== undefined) updateData.description = d.description;
         if (d.status !== undefined) updateData.status = d.status;
         if (d.kind !== undefined) updateData.kind = d.kind;
-        if (d.activationDate !== undefined) updateData.activation_date = d.activationDate instanceof Date ? d.activationDate.toISOString().split('T')[0] : d.activationDate;
-        if (d.eventDate !== undefined) updateData.event_date = d.eventDate instanceof Date ? d.eventDate.toISOString().split('T')[0] : d.eventDate;
+        if (d.initiativeTypeId !== undefined) updateData.initiative_type_id = d.initiativeTypeId;
+        if (d.productId !== undefined) updateData.product_id = d.productId;
+        if (d.activationDate !== undefined) updateData.activation_date = toDateOnly(d.activationDate);
+        if (d.eventDate !== undefined) updateData.event_date = toDateOnly(d.eventDate);
         if (d.trafficInput !== undefined) updateData.traffic_input = d.trafficInput;
         if (d.plannedBudget !== undefined) updateData.planned_budget = d.plannedBudget;
         if (d.actualSpend !== undefined) updateData.actual_spend = d.actualSpend;
@@ -419,8 +422,8 @@ export class InitiativeService {
       description: (row.description as string) || '',
       kind: row.kind as InitiativeKind,
       status: row.status as InitiativeStatus,
-      activationDate: new Date(row.activation_date as string),
-      eventDate: row.event_date ? new Date(row.event_date as string) : undefined,
+      activationDate: parseDateOnly(row.activation_date as string),
+      eventDate: row.event_date ? parseDateOnly(row.event_date as string) : undefined,
       trafficInput: row.traffic_input as number | undefined,
       revenueScenarios: {
         good: Number(row.revenue_good) || 0,

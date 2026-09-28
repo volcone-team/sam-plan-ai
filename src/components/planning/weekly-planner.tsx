@@ -203,18 +203,23 @@ export function WeeklyPlanner() {
 
         console.log("[WeeklyPlanner] Loaded", weekInitiatives.length, "initiatives for week");
 
-        // Load tasks for all active initiatives, filter those due this week
-        const allTasks: TaskWithInitiative[] = [];
-        for (const init of weekInitiatives) {
-          const initTasks = await taskService.getTasksByInitiative(init.id);
-          const dueThisWeek = initTasks.filter(t => {
-            const due = new Date(t.dueDate);
-            return due >= weekStart && due <= end;
-          });
-          dueThisWeek.forEach(t => {
-            allTasks.push({ ...t, initiativeName: init.name });
-          });
-        }
+        // Tasks due this week, for the WHOLE COMPANY.
+        //
+        // This used to loop `weekInitiatives` and pull tasks per initiative, so
+        // a task due this week whose initiative activates months later could
+        // never appear - the reported "I set tasks due for the week and they
+        // don't show up in weekly, daily or monthly". Inclusion now depends on
+        // the task's own due date and nothing else.
+        const weekTasks = await taskService.getTasksByCompanyDueBetween(
+          companyId, weekStart, end
+        );
+        // Names come from every active initiative, not just this week's, or a
+        // task from an out-of-window initiative would render unlabelled.
+        const nameById = new Map(activeInitiatives.map(i => [i.id, i.name]));
+        const allTasks: TaskWithInitiative[] = weekTasks.map(t => ({
+          ...t,
+          initiativeName: nameById.get(t.initiativeId) || 'Unassigned',
+        }));
         // Sort by priority (critical first) then due date
         const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
         allTasks.sort((a, b) => {

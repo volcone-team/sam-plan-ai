@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { sendEmail } from "@/lib/mailgun";
+import { requireAdmin } from "@/lib/require-admin";
 
 /**
  * POST /api/test-email
@@ -7,11 +8,22 @@ import { sendEmail } from "@/lib/mailgun";
  * Test endpoint to verify Mailgun configuration.
  * Body: { to: "recipient@example.com" }
  *
+ * Dev/debug only: disabled entirely in production and restricted to
+ * authenticated admins elsewhere, so it cannot be used to send mail freely.
+ *
  * NOTE: For sandbox domains, the recipient must be in your
  * Mailgun Authorized Recipients list.
  */
 export async function POST(request: Request) {
+  // Never available in production - this endpoint exists for local verification.
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "not_available" }, { status: 404 });
+  }
+
   try {
+    const check = await requireAdmin();
+    if (!check.ok) return NextResponse.json({ error: check.error }, { status: check.status });
+
     const body = await request.json();
     const to = body.to;
 
@@ -41,7 +53,8 @@ export async function POST(request: Request) {
         error: "Failed to send - check server logs. For sandbox domains, make sure the recipient is authorized in Mailgun.",
       }, { status: 500 });
     }
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || "Internal error" }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message || "Internal error" }, { status: 500 });
   }
 }

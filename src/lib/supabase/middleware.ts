@@ -43,6 +43,25 @@ function extractAuthMethod(claims: unknown): string | null {
 }
 
 /**
+ * Does this account still need to CHOOSE a password?
+ *
+ * Set to true when we create a user without one (team invite, admin-created
+ * customer) and cleared once they set it on /auth/set-password.
+ *
+ * This exists because `amr` CANNOT distinguish the three email-link flows —
+ * signup confirmation, password recovery and invite all produce
+ * `amr: [{ method: 'otp' }]`. Keying confinement on amr alone meant a brand-new
+ * user confirming their signup email was mistaken for an invitee and shoved to
+ * /auth/set-password, which broke signup entirely.
+ */
+function needsPasswordSetup(claims: unknown): boolean {
+  if (!claims || typeof claims !== 'object') return false;
+  const meta = (claims as { user_metadata?: unknown }).user_metadata;
+  if (!meta || typeof meta !== 'object') return false;
+  return (meta as { needs_password?: unknown }).needs_password === true;
+}
+
+/**
  * Edge-safe JWT payload decode (no verification — the payload is only ever used
  * to read `amr`; authentication itself is established by `getClaims()`, which
  * verifies the token signature, or by `getUser()` on the fallback path).
@@ -202,7 +221,15 @@ export async function updateSession(request: NextRequest) {
    * no reachable verification, etc.) we do NOT treat the session as link-only.
    * Guessing wrong here would lock every legitimate user out of the product.
    */
-  const isLinkOnlySession = isAuthenticated && authMethod !== null && authMethod !== 'password';
+  /**
+   * Confine only sessions that (a) came from an email link rather than a
+   * password sign-in, AND (b) belong to an account that still has no password
+   * of its own. Requiring BOTH is what lets a signup confirmation through while
+   * still trapping a forwarded invite link.
+   */
+  const needsPassword = needsPasswordSetup(verifiedClaims);
+  const isLinkOnlySession =
+    isAuthenticated && authMethod !== null && authMethod !== 'password' && needsPassword;
 
   // Protected routes: redirect to login if not authenticated
   const isAuthRoute = request.nextUrl.pathname.startsWith('/auth');
@@ -233,13 +260,51 @@ export async function updateSession(request: NextRequest) {
   //  - Password-setting pages: an invite or recovery link signs the user in
   //    first (that's how they're authorized to set a password), so bouncing
   //    authenticated users away made it impossible to finish the flow.
-  //  - The two-factor challenge: an admin reaching it ALWAYS holds a session
-  //    by definition, and the admin gate below redirects here. Bouncing them
-  //    away would make the 2FA gate an infinite loop.
+  //  - The two-factor challenge: anyone reaching it ALWAYS holds a session by
+  //    definition, and the universal 2FA gate below redirects here. Bouncing
+  //    them away would make that gate an infinite loop.
   const isAuthFlowRoute =
     request.nextUrl.pathname.startsWith('/auth/set-password') ||
     request.nextUrl.pathname.startsWith('/auth/reset-password') ||
     request.nextUrl.pathname.startsWith('/auth/verify-code');
+
+  /**
+   * TWO-FACTOR EXEMPTIONS
+   *
+   * Everything an authenticated user can reach WITHOUT a trusted-device cookie.
+   * Get this list wrong and a user can never obtain the cookie in the first
+   * place, which means they can never use the product.
+   *
+   *  1. isAuthFlowRoute — /auth/set-password, /auth/reset-password and the
+   *     challenge page itself (/auth/verify-code). Gating the challenge page on
+   *     having already passed the challenge is an infinite redirect loop.
+   *  2. any /auth/* route — login, signup, forgot-password, callback. These ARE
+   *     how people authenticate; a session can linger on them (e.g. mid
+   *     sign-out) and they must never be blocked.
+   *  3. /api/auth/2fa/* — LOAD-BEARING. The send and verify endpoints are the
+   *     only way to get a `sam_2fa` cookie. If the gate covered them, the
+   *     challenge page could not request a code and could not submit one, so
+   *     the cookie could never be issued and every user would be permanently
+   *     locked out. This exemption is what makes the whole gate escapable.
+   *  4. exactly /api/me — the AuthProvider calls it to render any page,
+   *     including the challenge page. Not /api/me/* (e.g. /api/me/password
+   *     stays gated).
+   *  5. isPublicApiRoute — /api/cron/*, /api/notifications/unsubscribe. These
+   *     enforce their own authorization (Bearer secret / signed token) and are
+   *     not user-session routes at all.
+   *  6. isPublicRoute — /, /sample-plan*, /admin-login*. Public by design; a
+   *     signed-in visitor should still see them.
+   *  7. isOnboardingRoute — DELIBERATE PRODUCT DECISION: do not interrupt a
+   *     brand-new user mid-questionnaire. They get challenged the moment they
+   *     reach an app route afterwards.
+   */
+  const isTwoFactorExempt =
+    isAuthFlowRoute ||
+    isAuthRoute ||
+    request.nextUrl.pathname.startsWith('/api/auth/2fa') ||
+    request.nextUrl.pathname === '/api/me' ||
+    isPublicApiRoute ||
+    isPublicRoute;
 
   // Unauthenticated API calls get a JSON 401, never a redirect — except public
   // API routes, which own their own authorization and must reach their handler.
@@ -292,6 +357,43 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
+  /**
+   * UNIVERSAL TWO-FACTOR GATE
+   *
+   * Every authenticated user — customer or admin, page or API — must prove this
+   * device passed the emailed code challenge. The `sam_2fa` cookie is that
+   * proof: it carries its own HMAC and issue timestamp (30-day trust window),
+   * so the check is a single signature verification with no DB lookup.
+   *
+   * This replaces the two admin-scoped checks that used to live here and in the
+   * /admin page gate; one gate now covers /admin/*, /api/admin/*, the customer
+   * app, and every other non-exempt API.
+   *
+   * Placement matters: it runs AFTER the link-only session confinement above,
+   * so a session minted by a recovery or invite link is sent to
+   * /auth/set-password rather than to the code challenge — password setup takes
+   * precedence. It runs BEFORE the onboarding / app / auth / admin gates below.
+   */
+  // userId (not isAuthenticated) so TypeScript narrows it to string here.
+  if (userId && !isTwoFactorExempt) {
+    const token = request.cookies.get(TWO_FACTOR_COOKIE)?.value ?? null;
+    const trusted = await verifyDeviceToken(token, userId);
+
+    if (!trusted) {
+      // APIs get JSON, never an HTML redirect — a client fetching data must see
+      // a real error, not a login page body.
+      if (isApiRoute) {
+        return NextResponse.json({ error: 'two_factor_required' }, { status: 403 });
+      }
+
+      const url = request.nextUrl.clone();
+      const intended = request.nextUrl.pathname + request.nextUrl.search;
+      url.pathname = '/auth/verify-code';
+      url.search = `?next=${encodeURIComponent(intended)}`;
+      return NextResponse.redirect(url);
+    }
+  }
+
   // Onboarding requires an account. Send guests to SIGNUP (not login), since
   // the whole point of the new flow is that the account is created first.
   if (!isAuthenticated && isOnboardingRoute) {
@@ -325,7 +427,7 @@ export async function updateSession(request: NextRequest) {
   // Admin route protection
   if (isAdminRoute && !request.nextUrl.pathname.startsWith('/admin/login') && !request.nextUrl.pathname.startsWith('/admin-login')) {
     // Same check as `!isAuthenticated`, written against `userId` directly so the
-    // profile query and 2FA check below see it as a non-null string.
+    // profile query below sees it as a non-null string.
     if (!userId) {
       const url = request.nextUrl.clone();
       url.pathname = '/admin-login';
@@ -345,20 +447,9 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    // Confirmed admin — now require a trusted device. The `sam_2fa` cookie is
-    // the only proof this device passed the emailed code challenge; it carries
-    // its own HMAC + issue timestamp, so no extra DB lookup is needed here (we
-    // reuse the `profile` row fetched above).
-    const twoFactorToken = request.cookies.get(TWO_FACTOR_COOKIE)?.value ?? null;
-    const trusted = await verifyDeviceToken(twoFactorToken, userId);
-
-    if (!trusted) {
-      const url = request.nextUrl.clone();
-      const intended = request.nextUrl.pathname + request.nextUrl.search;
-      url.pathname = '/auth/verify-code';
-      url.search = `?next=${encodeURIComponent(intended)}`;
-      return NextResponse.redirect(url);
-    }
+    // No 2FA check here any more — the universal gate above already required a
+    // trusted device for /admin/* (and /api/admin/*). What remains in this
+    // block is authorization: is_admin, not device trust.
   }
 
   return supabaseResponse;
