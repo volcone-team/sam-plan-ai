@@ -50,6 +50,18 @@ async function requestCode(): Promise<SendResult> {
       return { kind: 'cooldown', retryAfter };
     }
 
+    // Per-user send limit (distinct from the short per-browser cooldown): too
+    // many codes requested in the last few minutes. Not retryable on a timer,
+    // so surface it as an error rather than starting a countdown.
+    if (res.status === 429 && body.error === 'too_many_requests') {
+      return {
+        kind: 'error',
+        message:
+          body.message ??
+          'Too many codes requested. Please wait a few minutes and try again.',
+      };
+    }
+
     // Two-factor now applies to every authenticated user, so the backend no
     // longer returns this. Kept as a harmless fallback in case an older
     // deployment answers mid-rollout.
@@ -142,24 +154,37 @@ function VerifyCodeForm() {
   );
 
   // Auto-send a code as soon as the user lands here.
+  //
+  // Deliberately no `mounted` cleanup guard. There used to be one, and combined
+  // with `autoSentRef` it left the spinner running forever in development:
+  // Strict Mode mounts effects twice, so the first mount fired the request and
+  // then unmounted (flipping its guard to false), while the second mount saw
+  // `autoSentRef` already set and returned early. When the in-flight request
+  // resolved, the stale guard made it bail out before `setInitialSending(false)`
+  // — so nothing ever cleared the flag and "Sending a code to your email…"
+  // stayed on screen (which also kept Resend disabled) even though the email had
+  // been sent and the code worked.
+  //
+  // `autoSentRef` alone is enough to keep this to one request per page load. A
+  // state update after unmount is a harmless no-op in React 18+, which is what
+  // the removed guard was originally defending against.
   useEffect(() => {
     if (autoSentRef.current) return;
     autoSentRef.current = true;
 
-    let mounted = true;
-
     const sendInitialCode = async () => {
-      const result = await requestCode();
-      if (!mounted) return;
-      applySendResult(result, { isResend: false });
-      setInitialSending(false);
+      try {
+        applySendResult(await requestCode(), { isResend: false });
+      } finally {
+        // In `finally` so the spinner clears even on an unexpected throw.
+        // `requestCode` is written to return an error result rather than throw,
+        // but a stuck spinner also disables Resend, which leaves the user with
+        // no way forward — too costly to depend on that guarantee.
+        setInitialSending(false);
+      }
     };
 
     sendInitialCode();
-
-    return () => {
-      mounted = false;
-    };
   }, [applySendResult]);
 
   // Resend countdown.
@@ -221,6 +246,14 @@ function VerifyCodeForm() {
 
       if (body.error === 'invalid_code_format') {
         setError('Enter the 8-digit code from your email.');
+      } else if (body.error === 'too_many_attempts') {
+        // The code is burnt — a fresh one is the only way forward, so clear the
+        // input and let them resend immediately rather than retry a dead code.
+        setCode('');
+        setCooldown(0);
+        setError(
+          body.message ?? 'Too many incorrect attempts. Request a new code.'
+        );
       } else {
         setError(
           body.message ?? body.error ?? 'Something went wrong. Please try again.'
