@@ -3,6 +3,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { requirePlanEditor } from "@/lib/require-plan-editor";
+import { checkEntitlement, recordUsage, statusForCode, serviceClient } from "@/lib/billing/enforce";
+import { LIMIT_KEYS } from "@/lib/billing/limits";
 import { logGenerationEvent, type GenerationEventType } from "@/lib/generation-events";
 import { toDateOnly, clampDayOfMonth, resolvePlanStart, planMonthToCalendar, todayDateOnly, requiredRunwayDays } from "@/lib/plan-dates";
 import { sequenceEventDates } from "@/lib/plan-schedule";
@@ -179,6 +181,38 @@ export async function POST(request: Request) {
     const companyId = check.companyId;
     eventCompanyId = companyId;
     eventUserId = check.userId;
+
+    /**
+     * 2. Billing entitlement: is this account allowed to generate, and has it
+     *    any allowance left this period?
+     *
+     * Runs BEFORE the body is parsed and long before Claude is called, because a
+     * refusal must not cost money. Usage is recorded only after a SUCCESSFUL
+     * generation (see recordUsage below), so a failed run does not burn an
+     * allowance the customer never received.
+     *
+     * No-ops entirely while billing is disabled, so today's behaviour is
+     * unchanged until a super admin turns Stripe on.
+     */
+    const billingDb = serviceClient();
+    const entitlement = await checkEntitlement(
+      billingDb,
+      companyId,
+      LIMIT_KEYS.AI_USES_MONTH
+    );
+    if (!entitlement.ok) {
+      console.log(
+        "[generate-plan] Blocked by billing for company", companyId, "|", entitlement.code
+      );
+      return NextResponse.json(
+        {
+          error: entitlement.code,
+          message: entitlement.message,
+          limit: entitlement.limit,
+        },
+        { status: statusForCode(entitlement.code) }
+      );
+    }
 
     // 3. Parse the request body first - we need targetYear to resolve the plan.
     const body = await request.json();
@@ -769,6 +803,17 @@ Generate a complete revenue plan as JSON.`;
       tokensInput,
       tokensOutput,
     });
+
+    // Meter the generation now that it has actually succeeded. Deliberately not
+    // before the Claude call: a failed or timed-out run must not consume an
+    // allowance the customer never got value from. recordUsage never throws, so
+    // a metering fault cannot turn this success into an error.
+    await recordUsage(
+      billingDb,
+      companyId,
+      LIMIT_KEYS.AI_USES_MONTH,
+      entitlement.period
+    );
 
     return NextResponse.json({ success: true, productsCreated: productIds.length, initiativesCreated: (plan.initiatives || []).length });
   } catch (err: unknown) {

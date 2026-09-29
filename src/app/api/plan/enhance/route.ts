@@ -6,6 +6,8 @@ import { cookies } from "next/headers";
 import { randomUUID } from "crypto";
 import { logGenerationEvent } from "@/lib/generation-events";
 import { loadLibrary, loadAiContext, renderLibraryForPrompt } from "@/lib/workbook/read";
+import { checkEntitlement, recordUsage, statusForCode, serviceClient } from "@/lib/billing/enforce";
+import { LIMIT_KEYS } from "@/lib/billing/limits";
 
 export const maxDuration = 60;
 
@@ -104,6 +106,28 @@ export async function POST() {
     eventCompanyId = companyId;
     eventUserId = user.id;
     console.log("[plan/enhance] Company:", companyId, "| user:", user.email);
+
+    /**
+     * Billing entitlement, before any paid work. Enhancement counts against the
+     * same ai_uses_month allowance as generation, because both are Claude calls
+     * that cost real money — metering only generation would leave an unbounded
+     * path to the API.
+     *
+     * No-ops entirely while billing is disabled.
+     */
+    const billingDb = serviceClient();
+    const entitlement = await checkEntitlement(
+      billingDb,
+      companyId,
+      LIMIT_KEYS.AI_USES_MONTH
+    );
+    if (!entitlement.ok) {
+      console.log("[plan/enhance] Blocked by billing:", entitlement.code);
+      return NextResponse.json(
+        { error: entitlement.code, message: entitlement.message, limit: entitlement.limit },
+        { status: statusForCode(entitlement.code) }
+      );
+    }
 
     // 2. Load the current plan (products, initiatives, annual plan)
     const [
@@ -273,6 +297,10 @@ Suggest improvements to this plan as JSON.`;
       },
       adminClient
     );
+
+    // Metered only on success, for the same reason as generation: a failed run
+    // must not consume the customer's allowance.
+    await recordUsage(billingDb, companyId, LIMIT_KEYS.AI_USES_MONTH, entitlement.period);
 
     return NextResponse.json({ success: true, batchId, count: rows.length });
   } catch (err: any) {

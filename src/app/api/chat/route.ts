@@ -6,6 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { buildChatSystemPrompt, trimHistory, deriveTitle, MAX_MESSAGE_CHARS } from "@/lib/chat-context";
 import { evaluateBudget, sumTokens, effectiveCap, startOfUtcDayISO } from "@/lib/chat-budget";
 import { estimateCostUsd, resolveChatModel } from "@/lib/ai-pricing";
+import { checkEntitlement, statusForCode } from "@/lib/billing/enforce";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -103,6 +104,24 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     const companyId = profile?.company_id ?? null;
+
+    /**
+     * Billing access. Checked WITHOUT a limit key: chat volume is governed by its
+     * own pooled token budget below, which is a better fit than a monthly call
+     * count. What matters here is only whether the account is entitled to the
+     * product at all — an expired trial or a long-dead subscription should not
+     * keep talking to a paid API.
+     *
+     * No-ops while billing is disabled.
+     */
+    const entitlement = await checkEntitlement(db, companyId, "chat_access");
+    if (!entitlement.ok) {
+      console.log("[chat] Blocked by billing:", entitlement.code);
+      return NextResponse.json(
+        { error: entitlement.code, message: entitlement.message },
+        { status: statusForCode(entitlement.code) }
+      );
+    }
 
     const budget = await loadBudget(db, companyId, settings.chat_daily_token_cap);
     if (!budget.allowed) {
