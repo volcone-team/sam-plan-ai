@@ -276,7 +276,26 @@ export function BillingManagement() {
           `Completed with problems: ${body.errors.map((e: { plan?: string; message?: string }) => e.message ?? e).join("; ")}`
         );
       } else {
-        flash(ok);
+        // Report what the sync actually did. A bare "synced" message was
+        // confusing when everything was already current or deliberately skipped,
+        // because nothing visibly changed in Stripe.
+        const parts: string[] = [];
+        if (Array.isArray(body?.created) && body.created.length) {
+          parts.push(`${body.created.length} created`);
+        }
+        if (Array.isArray(body?.updated) && body.updated.length) {
+          parts.push(`${body.updated.length} price change(s) — existing subscribers keep their old price`);
+        }
+        if (Array.isArray(body?.unchanged) && body.unchanged.length) {
+          parts.push(`${body.unchanged.length} already current`);
+        }
+        if (Array.isArray(body?.skipped) && body.skipped.length) {
+          parts.push(`${body.skipped.length} not offered (price 0)`);
+        }
+        if (typeof body?.migrated === "number") {
+          parts.push(`${body.migrated} moved, ${body.skipped ?? 0} skipped`);
+        }
+        flash(parts.length ? `${ok} ${parts.join(" · ")}` : ok);
       }
       await load();
     } catch {
@@ -655,12 +674,39 @@ export function BillingManagement() {
                     <td className="px-4 py-2">${p.monthly_price}</td>
                     <td className="px-4 py-2">${p.annual_price}</td>
                     <td className="px-4 py-2">
+                      {/*
+                        Distinguishes "not offered" from "needs a sync". A price of
+                        0 means the plan is deliberately not sold on that cycle, so
+                        showing "Not synced" made a valid setup look broken.
+                      */}
                       {synced ? (
                         <span className="text-xs text-green-700 dark:text-green-400">
                           {monthly ? "monthly" : ""}{monthly && annual ? " + " : ""}{annual ? "annual" : ""}
                         </span>
+                      ) : p.monthly_price <= 0 && p.annual_price <= 0 ? (
+                        <span className="text-xs text-[hsl(var(--foreground-muted))]">
+                          No price set
+                        </span>
                       ) : (
-                        <span className="text-xs text-[hsl(var(--foreground-muted))]">Not synced</span>
+                        <span className="text-xs text-amber-700 dark:text-amber-400">
+                          Sync needed
+                        </span>
+                      )}
+                      {/* Flags a DB price that has not reached Stripe yet. */}
+                      {p.monthly_price > 0 && !monthly && (
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          monthly pending
+                        </p>
+                      )}
+                      {p.annual_price > 0 && !annual && (
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          annual pending
+                        </p>
+                      )}
+                      {p.monthly_price <= 0 && p.annual_price > 0 && (
+                        <p className="text-xs text-[hsl(var(--foreground-muted))]">
+                          annual only
+                        </p>
                       )}
                     </td>
                     <td className="px-4 py-2 text-right">

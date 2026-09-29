@@ -24,6 +24,8 @@ export interface SyncResult {
   created: string[];
   updated: string[];
   unchanged: string[];
+  /** Cycles deliberately not offered (price 0) — reported, not an error. */
+  skipped: string[];
   errors: { plan: string; message: string }[];
 }
 
@@ -55,7 +57,9 @@ export async function syncPlansToStripe(
   mode: StripeMode
 ): Promise<SyncResult> {
   const stripe = getStripe(mode);
-  const result: SyncResult = { mode, created: [], updated: [], unchanged: [], errors: [] };
+  const result: SyncResult = {
+    mode, created: [], updated: [], unchanged: [], skipped: [], errors: [],
+  };
 
   const { data: plans, error: plansErr } = await db
     .from("subscription_plans")
@@ -84,10 +88,18 @@ export async function syncPlansToStripe(
       const amount = toMinorUnits(Number(plan[field]) || 0);
       const label = `${plan.name} (${cycle})`;
 
-      // A zero price cannot be a Stripe subscription price. Free plans are
-      // expressed by comping instead, so skip rather than fail.
+      /**
+       * A price of 0 means "this plan is not offered on this billing cycle" —
+       * e.g. Mastery sold annually only. That is a legitimate configuration, not
+       * an error, so the cycle is skipped and the plan stays unpurchasable on it.
+       *
+       * Stripe cannot express a recurring price of 0 as a subscription anyway;
+       * genuinely free access is granted by comping instead.
+       */
       if (amount <= 0) {
-        result.unchanged.push(`${label} — no price set, skipped`);
+        result.skipped.push(
+          `${label} — not offered (price 0), so no Stripe price created`
+        );
         continue;
       }
 

@@ -1,7 +1,17 @@
 /**
  * Subscription Plan Service
- * Admin-configurable plans with limits and features.
- * Uses localStorage for now — swap to Supabase later.
+ *
+ * NOW BACKED BY THE DATABASE via /api/admin/plans.
+ *
+ * This used to keep plans, limits and features in localStorage with a note
+ * saying "swap to Supabase later". The consequence was subtle and expensive:
+ * editing a price in Manage Plans only changed the admin's own browser. The real
+ * `subscription_plans` table — which Stripe price sync reads, and which every
+ * limit check reads — was never touched. Prices appeared to save and then had no
+ * effect anywhere, and the ids did not even match (localStorage used
+ * 'plan-mastery', the database uses UUIDs).
+ *
+ * All methods now go through the API, which is super-admin gated and audit-logged.
  */
 
 import type {
@@ -11,119 +21,119 @@ import type {
   PlanFeature,
   CreateSubscriptionPlanDTO,
   UpdateSubscriptionPlanDTO,
-  LimitKey,
-  FeatureKey,
 } from '@/types/subscription-plan.types';
 import { LIMIT_KEYS, FEATURE_KEYS } from '@/types/subscription-plan.types';
 
-const STORAGE_PLANS = 'sam-subscription-plans';
-const STORAGE_LIMITS = 'sam-plan-limits';
-const STORAGE_FEATURES = 'sam-plan-features';
-
-function genId(): string {
-  return `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+interface ApiPlan {
+  id: string; name: string; description: string | null; tagline: string | null;
+  monthly_price: number; annual_price: number;
+  is_active: boolean; is_default: boolean; display_order: number;
+}
+interface ApiLimit {
+  id: string; plan_id: string; limit_key: string; limit_label: string; limit_value: number;
+}
+interface ApiFeature {
+  id: string; plan_id: string; feature_key: string; feature_label: string; enabled: boolean;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+interface PlansResponse {
+  plans: ApiPlan[];
+  limits: ApiLimit[];
+  features: ApiFeature[];
+  stripePrices: {
+    plan_id: string; billing_cycle: string; unit_amount: number;
+    stripe_mode: string; is_current: boolean;
+  }[];
 }
 
-// ─── Default Data ─────────────────────────────────────────────
-const DEFAULT_PLANS: SubscriptionPlan[] = [
-  { id: 'plan-starter', name: 'Starter', description: 'For solo operators getting started with revenue planning.', tagline: 'Get started', monthlyPrice: 49, annualPrice: 490, isActive: true, isDefault: true, displayOrder: 1, createdAt: new Date(), updatedAt: new Date() },
-  { id: 'plan-pro', name: 'Pro', description: 'For growing teams that need collaboration and deeper analytics.', tagline: 'Most popular', monthlyPrice: 149, annualPrice: 1490, isActive: true, isDefault: false, displayOrder: 2, createdAt: new Date(), updatedAt: new Date() },
-  { id: 'plan-mastery', name: 'Mastery', description: 'For serious operators who want the full system plus expert reviews.', tagline: 'Full access', monthlyPrice: 0, annualPrice: 4997, isActive: true, isDefault: false, displayOrder: 3, createdAt: new Date(), updatedAt: new Date() },
-];
-
-const DEFAULT_LIMITS: Record<string, Record<LimitKey, number>> = {
-  'plan-starter': { max_users: 1, max_initiatives: 10, plan_regenerations: 1, ai_uses_month: 5, max_products: 3, csv_exports_month: 0 },
-  'plan-pro': { max_users: 5, max_initiatives: -1, plan_regenerations: 3, ai_uses_month: 20, max_products: 10, csv_exports_month: -1 },
-  'plan-mastery': { max_users: 10, max_initiatives: -1, plan_regenerations: -1, ai_uses_month: -1, max_products: -1, csv_exports_month: -1 },
-};
-
-const DEFAULT_FEATURES: Record<string, Record<FeatureKey, boolean>> = {
-  'plan-starter': { advanced_analytics: false, custom_initiative_types: false, ai_weekly_insights: false, multi_user: false, benchmark_contribution: true, priority_support: false, annual_reviews: false },
-  'plan-pro': { advanced_analytics: true, custom_initiative_types: false, ai_weekly_insights: true, multi_user: true, benchmark_contribution: true, priority_support: false, annual_reviews: false },
-  'plan-mastery': { advanced_analytics: true, custom_initiative_types: true, ai_weekly_insights: true, multi_user: true, benchmark_contribution: true, priority_support: true, annual_reviews: true },
-};
-
-// ─── Init from localStorage or defaults ───────────────────────
-function getPlans(): SubscriptionPlan[] {
-  if (typeof window === 'undefined') return DEFAULT_PLANS;
-  const stored = localStorage.getItem(STORAGE_PLANS);
-  if (stored) return JSON.parse(stored);
-  localStorage.setItem(STORAGE_PLANS, JSON.stringify(DEFAULT_PLANS));
-  return DEFAULT_PLANS;
+function toPlan(p: ApiPlan): SubscriptionPlan {
+  return {
+    id: p.id,
+    name: p.name,
+    description: p.description ?? '',
+    tagline: p.tagline ?? '',
+    monthlyPrice: Number(p.monthly_price) || 0,
+    annualPrice: Number(p.annual_price) || 0,
+    isActive: p.is_active,
+    isDefault: p.is_default,
+    displayOrder: p.display_order,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
 }
 
-function getLimits(): PlanLimit[] {
-  if (typeof window === 'undefined') return [];
-  const stored = localStorage.getItem(STORAGE_LIMITS);
-  if (stored) return JSON.parse(stored);
-
-  const limits: PlanLimit[] = [];
-  for (const [planId, vals] of Object.entries(DEFAULT_LIMITS)) {
-    for (const lk of LIMIT_KEYS) {
-      limits.push({ id: genId(), planId, limitKey: lk.key, limitLabel: lk.label, limitValue: vals[lk.key] });
-    }
+async function fetchAll(): Promise<PlansResponse> {
+  const res = await fetch('/api/admin/plans', { credentials: 'same-origin' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error || 'Could not load plans');
   }
-  localStorage.setItem(STORAGE_LIMITS, JSON.stringify(limits));
-  return limits;
+  return (await res.json()) as PlansResponse;
 }
 
-function getFeatures(): PlanFeature[] {
-  if (typeof window === 'undefined') return [];
-  const stored = localStorage.getItem(STORAGE_FEATURES);
-  if (stored) return JSON.parse(stored);
-
-  const features: PlanFeature[] = [];
-  for (const [planId, vals] of Object.entries(DEFAULT_FEATURES)) {
-    for (const fk of FEATURE_KEYS) {
-      features.push({ id: genId(), planId, featureKey: fk.key, featureLabel: fk.label, enabled: vals[fk.key] });
-    }
-  }
-  localStorage.setItem(STORAGE_FEATURES, JSON.stringify(features));
-  return features;
-}
-
-// ─── Service ──────────────────────────────────────────────────
 class SubscriptionPlanService {
   async getAllPlans(): Promise<SubscriptionPlan[]> {
-    await delay(50);
-    return getPlans().sort((a, b) => a.displayOrder - b.displayOrder);
+    const data = await fetchAll();
+    return data.plans.map(toPlan);
   }
 
   async getActivePlans(): Promise<SubscriptionPlan[]> {
-    const plans = await this.getAllPlans();
-    return plans.filter(p => p.isActive);
-  }
-
-  async getPlanFull(planId: string): Promise<SubscriptionPlanFull | null> {
-    await delay(50);
-    const plans = getPlans();
-    const plan = plans.find(p => p.id === planId);
-    if (!plan) return null;
-
-    const limits = getLimits().filter(l => l.planId === planId);
-    const features = getFeatures().filter(f => f.planId === planId);
-    return { plan, limits, features };
+    return (await this.getAllPlans()).filter((p) => p.isActive);
   }
 
   async getAllPlansFull(): Promise<SubscriptionPlanFull[]> {
-    const plans = await this.getAllPlans();
-    const results: SubscriptionPlanFull[] = [];
-    for (const plan of plans) {
-      const full = await this.getPlanFull(plan.id);
-      if (full) results.push(full);
-    }
-    return results;
+    const data = await fetchAll();
+
+    return data.plans.map((p) => {
+      // Missing rows are filled from the known key list so the editor always
+      // renders every limit and feature, even for a plan created before a new
+      // key existed. Default 0 for limits (not -1) so a new key is never
+      // accidentally unlimited.
+      const limits: PlanLimit[] = LIMIT_KEYS.map((lk) => {
+        const row = data.limits.find((l) => l.plan_id === p.id && l.limit_key === lk.key);
+        return {
+          id: row?.id ?? `${p.id}-${lk.key}`,
+          planId: p.id,
+          limitKey: lk.key,
+          limitLabel: row?.limit_label ?? lk.label,
+          limitValue: row?.limit_value ?? 0,
+        };
+      });
+
+      const features: PlanFeature[] = FEATURE_KEYS.map((fk) => {
+        const row = data.features.find((f) => f.plan_id === p.id && f.feature_key === fk.key);
+        return {
+          id: row?.id ?? `${p.id}-${fk.key}`,
+          planId: p.id,
+          featureKey: fk.key,
+          featureLabel: row?.feature_label ?? fk.label,
+          enabled: row?.enabled ?? false,
+        };
+      });
+
+      return { plan: toPlan(p), limits, features };
+    });
+  }
+
+  async getPlanFull(planId: string): Promise<SubscriptionPlanFull | null> {
+    const all = await this.getAllPlansFull();
+    return all.find((p) => p.plan.id === planId) ?? null;
   }
 
   async createPlan(dto: CreateSubscriptionPlanDTO): Promise<SubscriptionPlan> {
-    await delay(100);
-    const plans = getPlans();
-    const newPlan: SubscriptionPlan = {
-      id: genId(),
+    const res = await fetch('/api/admin/plans', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dto),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error || 'Could not create plan');
+    }
+    const body = await res.json();
+    return {
+      id: body.planId,
       name: dto.name,
       description: dto.description || '',
       tagline: dto.tagline || '',
@@ -131,89 +141,80 @@ class SubscriptionPlanService {
       annualPrice: dto.annualPrice,
       isActive: true,
       isDefault: false,
-      displayOrder: plans.length + 1,
+      displayOrder: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    plans.push(newPlan);
-    localStorage.setItem(STORAGE_PLANS, JSON.stringify(plans));
-
-    // Create default limits and features for new plan
-    const limits = getLimits();
-    for (const lk of LIMIT_KEYS) {
-      limits.push({ id: genId(), planId: newPlan.id, limitKey: lk.key, limitLabel: lk.label, limitValue: 0 });
-    }
-    localStorage.setItem(STORAGE_LIMITS, JSON.stringify(limits));
-
-    const features = getFeatures();
-    for (const fk of FEATURE_KEYS) {
-      features.push({ id: genId(), planId: newPlan.id, featureKey: fk.key, featureLabel: fk.label, enabled: false });
-    }
-    localStorage.setItem(STORAGE_FEATURES, JSON.stringify(features));
-
-    return newPlan;
   }
 
-  async updatePlan(planId: string, dto: UpdateSubscriptionPlanDTO): Promise<SubscriptionPlan | null> {
-    await delay(100);
-    const plans = getPlans();
-    const idx = plans.findIndex(p => p.id === planId);
-    if (idx < 0) return null;
-
-    plans[idx] = { ...plans[idx], ...dto, updatedAt: new Date() };
-    localStorage.setItem(STORAGE_PLANS, JSON.stringify(plans));
-    return plans[idx];
+  async updatePlan(
+    planId: string,
+    dto: UpdateSubscriptionPlanDTO
+  ): Promise<SubscriptionPlan | null> {
+    const res = await fetch('/api/admin/plans', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planId, ...dto }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error || 'Could not update plan');
+    }
+    return null;
   }
 
   async deletePlan(planId: string): Promise<void> {
-    await delay(100);
-    const plans = getPlans().filter(p => p.id !== planId);
-    localStorage.setItem(STORAGE_PLANS, JSON.stringify(plans));
-    const limits = getLimits().filter(l => l.planId !== planId);
-    localStorage.setItem(STORAGE_LIMITS, JSON.stringify(limits));
-    const features = getFeatures().filter(f => f.planId !== planId);
-    localStorage.setItem(STORAGE_FEATURES, JSON.stringify(features));
+    const res = await fetch(`/api/admin/plans?planId=${encodeURIComponent(planId)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(
+        body?.error === 'plan_in_use'
+          ? `Cannot delete: ${body.subscribers} account(s) are on this plan.`
+          : body?.error || 'Could not delete plan'
+      );
+    }
   }
 
   async updateLimit(planId: string, limitKey: string, value: number): Promise<void> {
-    await delay(50);
-    const limits = getLimits();
-    const idx = limits.findIndex(l => l.planId === planId && l.limitKey === limitKey);
-    if (idx >= 0) {
-      limits[idx].limitValue = value;
-    } else {
-      const lk = LIMIT_KEYS.find(l => l.key === limitKey);
-      limits.push({ id: genId(), planId, limitKey, limitLabel: lk?.label || limitKey, limitValue: value });
+    const label = LIMIT_KEYS.find((l) => l.key === limitKey)?.label;
+    const res = await fetch('/api/admin/plans', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planId, limitKey, limitValue: value, limitLabel: label }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error || 'Could not update limit');
     }
-    localStorage.setItem(STORAGE_LIMITS, JSON.stringify(limits));
   }
 
   async updateFeature(planId: string, featureKey: string, enabled: boolean): Promise<void> {
-    await delay(50);
-    const features = getFeatures();
-    const idx = features.findIndex(f => f.planId === planId && f.featureKey === featureKey);
-    if (idx >= 0) {
-      features[idx].enabled = enabled;
-    } else {
-      const fk = FEATURE_KEYS.find(f => f.key === featureKey);
-      features.push({ id: genId(), planId, featureKey, featureLabel: fk?.label || featureKey, enabled });
+    const label = FEATURE_KEYS.find((f) => f.key === featureKey)?.label;
+    const res = await fetch('/api/admin/plans', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planId, featureKey, enabled, featureLabel: label }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error || 'Could not update feature');
     }
-    localStorage.setItem(STORAGE_FEATURES, JSON.stringify(features));
   }
 
-  // ─── Limit checking (for customer-side enforcement) ─────────
   async getLimitForPlan(planId: string, limitKey: string): Promise<number> {
-    await delay(20);
-    const limits = getLimits();
-    const limit = limits.find(l => l.planId === planId && l.limitKey === limitKey);
-    return limit?.limitValue ?? 0;
+    const full = await this.getPlanFull(planId);
+    return full?.limits.find((l) => l.limitKey === limitKey)?.limitValue ?? 0;
   }
 
   async isFeatureEnabled(planId: string, featureKey: string): Promise<boolean> {
-    await delay(20);
-    const features = getFeatures();
-    const feature = features.find(f => f.planId === planId && f.featureKey === featureKey);
-    return feature?.enabled ?? false;
+    const full = await this.getPlanFull(planId);
+    return full?.features.find((f) => f.featureKey === featureKey)?.enabled ?? false;
   }
 }
 
