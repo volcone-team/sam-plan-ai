@@ -107,15 +107,43 @@ export async function syncPlansToStripe(
       const current = currentByKey.get(key);
 
       try {
-        if (current && current.unit_amount === amount) {
+        /**
+         * VERIFY the stored price still exists in Stripe before trusting it.
+         *
+         * A price deleted or removed in Stripe's dashboard leaves a row here that
+         * still looks current. Checkout then fails with "No such price: ..." on
+         * every attempt, and it is unrecoverable through the UI, because a
+         * re-sync would compare the matching amount and skip the plan as already
+         * done. Treating a vanished price as "needs recreating" makes re-syncing
+         * the fix.
+         */
+        const priceMissing = current
+          ? !(await resourceExists(() => stripe.prices.retrieve(current.stripe_price_id)))
+          : false;
+
+        if (current && priceMissing) {
+          console.warn(
+            "[sync-prices] Stored price no longer exists in Stripe, recreating:",
+            current.stripe_price_id
+          );
+          await db.from("stripe_prices").update({ is_current: false }).eq("id", current.id);
+        } else if (current && current.unit_amount === amount) {
           result.unchanged.push(label);
           continue;
         }
 
-        // Reuse the product across price changes so Stripe's dashboard keeps one
-        // coherent product with a price history, rather than a new product per
-        // price edit.
+        // Reuse the product across price changes so Stripe keeps one coherent
+        // product with a price history rather than a new product per edit — but
+        // only if that product still exists, for the same reason as above.
         let productId = current?.stripe_product_id;
+
+        if (
+          productId &&
+          !(await resourceExists(() => stripe.products.retrieve(productId as string)))
+        ) {
+          console.warn("[sync-prices] Stored product is gone from Stripe:", productId);
+          productId = undefined;
+        }
 
         if (!productId) {
           const product = await stripe.products.create({
@@ -159,7 +187,9 @@ export async function syncPlansToStripe(
           continue;
         }
 
-        if (current) {
+        if (current && priceMissing) {
+          result.updated.push(`${label} — price was missing in Stripe, recreated`);
+        } else if (current) {
           result.updated.push(`${label} — new price, existing subscribers keep the old one`);
         } else {
           result.created.push(label);
@@ -261,4 +291,23 @@ export async function migrateSubscribersToCurrentPrice(
   }
 
   return out;
+}
+
+/**
+ * True when a Stripe retrieve succeeds, false when the resource does not exist.
+ *
+ * Only a genuine "missing" result returns false — any other failure (network,
+ * auth, rate limit) is re-thrown. Swallowing those would make a transient blip
+ * look like a deleted price and trigger needless recreation, quietly multiplying
+ * prices in Stripe.
+ */
+async function resourceExists(retrieve: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await retrieve();
+    return true;
+  } catch (err: unknown) {
+    const e = err as { statusCode?: number; code?: string; type?: string };
+    if (e?.statusCode === 404 || e?.code === "resource_missing") return false;
+    throw err;
+  }
 }

@@ -160,7 +160,10 @@ export function BillingPanel() {
             ? 'You already have a subscription — use Change plan instead.'
             : body?.error === 'not_permitted'
               ? 'Only the account owner can manage billing.'
-              : 'Could not start checkout. Please try again.'
+              // Configuration fault, not something the customer did wrong.
+              : body?.error === 'price_stale' || body?.error === 'price_not_found'
+                ? (body?.message ?? 'This plan is not available yet. Please contact support.')
+                : 'Could not start checkout. Please try again.'
         );
         return;
       }

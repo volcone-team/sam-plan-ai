@@ -201,6 +201,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ url: session.url });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    const code = (err as { code?: string })?.code;
+
+    /**
+     * "No such price" means our stored price id points at something that no
+     * longer exists in Stripe — deleted in the dashboard, or created under a
+     * different account. Raw Stripe wording is meaningless to a customer and
+     * gives an operator no next step, so translate it into the actual fix.
+     */
+    if (code === "resource_missing" || /No such price/i.test(message)) {
+      console.error(
+        "[stripe/checkout] Stored price is stale — re-run the price sync in " +
+        "Admin > Subscriptions > Billing & Stripe. Stripe said:", message
+      );
+      return NextResponse.json(
+        {
+          error: "price_stale",
+          message:
+            "This plan is not set up correctly in Stripe yet. Please contact support.",
+        },
+        { status: 503 }
+      );
+    }
+
     console.error("[stripe/checkout] Error:", message);
     return NextResponse.json({ error: message || "Internal error" }, { status: 500 });
   }
