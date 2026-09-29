@@ -553,7 +553,51 @@ Generate a complete revenue plan as JSON.`;
     // a pile-up rather than a plan. sequenceEventDates guarantees distinct
     // launch days, non-overlapping prep windows, each initiative's own runway,
     // and nothing in the past, all derived from the plan's own task leads.
-    const generatedInitiatives = plan.initiatives || [];
+    /**
+     * TRIAL CAP. A trial account may only ever hold `trial_initiative_cap`
+     * initiatives (3 by default), counting quickstart and full together.
+     *
+     * Trimmed here rather than refused outright: the model has already run and
+     * been paid for, so returning an error would waste the call and leave the
+     * user with nothing. They get the best N of the plan and a clear message
+     * that upgrading unlocks the rest.
+     *
+     * Only applies while the subscription is actually in trial — paid and comped
+     * accounts use their plan's own max_initiatives.
+     */
+    let generatedInitiatives = plan.initiatives || [];
+    let trialTrimmed = 0;
+
+    if (entitlement.access.reason === "trialing") {
+      const { data: trialSettings } = await billingDb
+        .from("app_settings")
+        .select("trial_initiative_cap")
+        .eq("id", "global")
+        .maybeSingle();
+
+      const cap =
+        typeof trialSettings?.trial_initiative_cap === "number"
+          ? trialSettings.trial_initiative_cap
+          : 3;
+
+      // Existing rows count too, so regenerating cannot be used to accumulate
+      // more than the cap.
+      const { count: existing } = await billingDb
+        .from("initiatives")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId);
+
+      const room = Math.max(0, cap - (existing ?? 0));
+
+      if (generatedInitiatives.length > room) {
+        trialTrimmed = generatedInitiatives.length - room;
+        generatedInitiatives = generatedInitiatives.slice(0, room);
+        console.log(
+          "[generate-plan] Trial cap", cap, "— kept", generatedInitiatives.length,
+          "of", generatedInitiatives.length + trialTrimmed
+        );
+      }
+    }
 
     // Task templates for everything the model selected. Tasks and their lead
     // times come from here, not from the model.
@@ -815,7 +859,13 @@ Generate a complete revenue plan as JSON.`;
       entitlement.period
     );
 
-    return NextResponse.json({ success: true, productsCreated: productIds.length, initiativesCreated: (plan.initiatives || []).length });
+    return NextResponse.json({
+      success: true,
+      productsCreated: productIds.length,
+      initiativesCreated: generatedInitiatives.length,
+      // Lets the UI explain why fewer initiatives appeared than the plan implied.
+      trialTrimmed: trialTrimmed > 0 ? trialTrimmed : undefined,
+    });
   } catch (err: unknown) {
     const e = err as {
       status?: number;

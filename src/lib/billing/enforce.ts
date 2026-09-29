@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { loadBillingConfig } from "./stripe-client";
 import { evaluateAccess, type AccessDecision } from "./entitlement";
-import { checkLimit, resolveUsagePeriod, type LimitCheck } from "./limits";
+import { checkLimit, resolveUsagePeriod, LIMIT_KEYS, type LimitCheck } from "./limits";
 
 /**
  * Server-side enforcement: the bridge between billing state and paid features.
@@ -36,7 +36,8 @@ export interface EnforcementResult {
     | "comp_expired"
     | "incomplete"
     | "limit_reached"
-    | "not_included";
+    | "not_included"
+    | "trial_limit_reached";
   message: string;
   /** Echoed back so a route can increment the same period it checked. */
   period: { periodStart: string; periodEnd: string };
@@ -138,6 +139,56 @@ export async function checkEntitlement(
     };
   }
 
+  /**
+   * TRIAL: initiatives are capped for the whole trial rather than per period.
+   *
+   * Checked before plan limits because a trial account's plan_id points at the
+   * plan whose limits it is previewing — using those numbers would give a trial
+   * the full Starter allowance instead of the small evaluation cap.
+   *
+   * Only `max_initiatives` is special-cased. Everything else (AI uses, products)
+   * falls through to the previewed plan's own limits.
+   */
+  if (
+    (access.reason === "trialing") &&
+    companyId &&
+    limitKey === LIMIT_KEYS.MAX_INITIATIVES
+  ) {
+    const { data: settings } = await db
+      .from("app_settings")
+      .select("trial_initiative_cap")
+      .eq("id", "global")
+      .maybeSingle();
+
+    const cap =
+      typeof settings?.trial_initiative_cap === "number"
+        ? settings.trial_initiative_cap
+        : 3;
+
+    // Counts ACTUAL initiative rows rather than a usage counter: the cap is a
+    // ceiling on how many exist, so deleting one should free a slot. A counter
+    // would keep climbing and strand the account below its own limit.
+    const { count } = await db
+      .from("initiatives")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId);
+
+    const trialLimit = checkLimit(cap, count ?? 0, requested);
+
+    if (!trialLimit.allowed) {
+      return {
+        ok: false,
+        access,
+        limit: trialLimit,
+        code: "trial_limit_reached",
+        message: `Your trial includes ${cap} initiative${cap === 1 ? "" : "s"}. Upgrade to a plan to add more.`,
+        period,
+      };
+    }
+
+    return { ok: true, access, limit: trialLimit, code: "ok", message: "", period };
+  }
+
   // No company means no plan to read limits from. Allowed rather than blocked:
   // this is a data-shape problem, not a billing decision, and blocking would
   // break the product for an account that has merely lost its company link.
@@ -229,6 +280,7 @@ export function statusForCode(code: EnforcementResult["code"]): number {
   switch (code) {
     case "limit_reached":
       return 429; // retryable next period
+    case "trial_limit_reached":
     case "not_included":
       return 403; // needs a different plan
     default:

@@ -120,6 +120,8 @@ export interface BillingConfig {
   trialDays: number;
   trialPlanId: string | null;
   trialRequiresCard: boolean;
+  /** Initiatives allowed for the WHOLE trial, not per period. */
+  trialInitiativeCap: number;
   dunningGraceDays: number;
 }
 
@@ -134,6 +136,7 @@ const FALLBACK_CONFIG: BillingConfig = {
   trialDays: 14,
   trialPlanId: null,
   trialRequiresCard: false,
+  trialInitiativeCap: 3,
   dunningGraceDays: 7,
 };
 
@@ -147,7 +150,8 @@ export async function loadBillingConfig(db: SupabaseClient): Promise<BillingConf
   const { data, error } = await db
     .from("app_settings")
     .select(
-      "stripe_enabled, stripe_mode, trial_enabled, trial_days, trial_plan_id, trial_requires_card, dunning_grace_days"
+      "stripe_enabled, stripe_mode, trial_enabled, trial_days, trial_plan_id, " +
+      "trial_requires_card, trial_initiative_cap, dunning_grace_days"
     )
     .eq("id", "global")
     .maybeSingle();
@@ -157,17 +161,28 @@ export async function loadBillingConfig(db: SupabaseClient): Promise<BillingConf
     return FALLBACK_CONFIG;
   }
 
-  const mode: StripeMode = data.stripe_mode === "live" ? "live" : "test";
+  // Cast via `unknown`: supabase-js cannot infer a row shape from a concatenated
+  // select string and falls back to a union including an error type.
+  const row = data as unknown as {
+    stripe_enabled: boolean | null; stripe_mode: string | null;
+    trial_enabled: boolean | null; trial_days: number | null;
+    trial_plan_id: string | null; trial_requires_card: boolean | null;
+    trial_initiative_cap: number | null; dunning_grace_days: number | null;
+  };
+
+  const mode: StripeMode = row.stripe_mode === "live" ? "live" : "test";
 
   return {
-    stripeEnabled: data.stripe_enabled === true,
+    stripeEnabled: row.stripe_enabled === true,
     mode,
-    trialEnabled: data.trial_enabled !== false,
-    trialDays: typeof data.trial_days === "number" ? data.trial_days : 14,
-    trialPlanId: data.trial_plan_id ?? null,
-    trialRequiresCard: data.trial_requires_card === true,
+    trialEnabled: row.trial_enabled !== false,
+    trialDays: typeof row.trial_days === "number" ? row.trial_days : 14,
+    trialPlanId: row.trial_plan_id ?? null,
+    trialRequiresCard: row.trial_requires_card === true,
+    trialInitiativeCap:
+      typeof row.trial_initiative_cap === "number" ? row.trial_initiative_cap : 3,
     dunningGraceDays:
-      typeof data.dunning_grace_days === "number" ? data.dunning_grace_days : 7,
+      typeof row.dunning_grace_days === "number" ? row.dunning_grace_days : 7,
   };
 }
 

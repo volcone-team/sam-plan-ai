@@ -78,6 +78,7 @@ export async function GET() {
         trialDays: config.trialDays,
         trialPlanId: config.trialPlanId,
         trialRequiresCard: config.trialRequiresCard,
+        trialInitiativeCap: config.trialInitiativeCap,
         dunningGraceDays: config.dunningGraceDays,
       },
       // Never the keys themselves — only whether each mode is usable.
@@ -193,6 +194,15 @@ export async function PUT(req: Request) {
       }
       patch.trial_requires_card = body.trialRequiresCard;
       changed.trialRequiresCard = body.trialRequiresCard;
+    }
+
+    if (body.trialInitiativeCap !== undefined) {
+      const cap = Number(body.trialInitiativeCap);
+      if (!Number.isFinite(cap) || cap < 0 || cap > 1000) {
+        return NextResponse.json({ error: "trialInitiativeCap" }, { status: 400 });
+      }
+      patch.trial_initiative_cap = Math.floor(cap);
+      changed.trialInitiativeCap = Math.floor(cap);
     }
 
     if (body.dunningGraceDays !== undefined) {

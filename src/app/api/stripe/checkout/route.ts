@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import {
   getStripe,
@@ -119,7 +119,7 @@ export async function POST(request: Request) {
 
     const { data: subscription } = await db
       .from("subscriptions")
-      .select("id, stripe_customer_id, stripe_subscription_id, stripe_status, stripe_mode, trial_ends_at")
+      .select("id, stripe_customer_id, stripe_subscription_id, stripe_status, stripe_mode")
       .eq("company_id", companyId)
       .maybeSingle();
 
@@ -161,8 +161,6 @@ export async function POST(request: Request) {
         .eq("company_id", companyId);
     }
 
-    const trialDays = await resolveTrialDays(db, config, subscription?.trial_ends_at ?? null);
-
     const baseUrl = getAppUrl();
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
@@ -171,9 +169,17 @@ export async function POST(request: Request) {
       // Carried on both the session and the subscription so the webhook can
       // resolve the company from either object.
       metadata: { company_id: companyId, plan_id: planId },
+      /**
+       * NO trial_period_days.
+       *
+       * The trial runs locally from the moment someone registers (migration 023),
+       * so by the time they reach checkout they have already had it. Adding a
+       * Stripe trial here would hand them a second free period on top.
+       *
+       * Checkout is therefore always an UPGRADE: payment starts immediately.
+       */
       subscription_data: {
         metadata: { company_id: companyId, plan_id: planId },
-        ...(trialDays > 0 ? { trial_period_days: trialDays } : {}),
       },
       // ?checkout=success is a UI hint ONLY. Entitlement is read from the
       // database, which the webhook writes, so forging this URL grants nothing.
@@ -200,21 +206,4 @@ export async function POST(request: Request) {
   }
 }
 
-/**
- * Trial length for a NEW subscription.
- *
- * Returns 0 when trials are disabled, or when this company has already had one.
- * Without the second check a customer could cancel and re-subscribe repeatedly
- * to get an unlimited free trial.
- */
-async function resolveTrialDays(
-  db: SupabaseClient,
-  config: { trialEnabled: boolean; trialDays: number },
-  existingTrialEndsAt: string | null
-): Promise<number> {
-  if (!config.trialEnabled || config.trialDays <= 0) return 0;
-  // A recorded trial end date means one was already granted.
-  if (existingTrialEndsAt) return 0;
-  void db;
-  return config.trialDays;
-}
+

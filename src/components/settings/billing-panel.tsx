@@ -74,7 +74,12 @@ function accessNotice(me: BillingMe): { tone: 'warn' | 'error'; text: string } |
   if (!access.allowed) {
     switch (access.reason) {
       case 'trial_expired':
-        return { tone: 'error', text: 'Your free trial has ended. Choose a plan below to carry on.' };
+        return {
+          tone: 'error',
+          // Accurate about what they CAN still do: the dashboard stays readable,
+          // only creating new work is blocked.
+          text: 'Your free trial has ended. You can still view your dashboard — upgrade to a plan to keep building.',
+        };
       case 'past_due_expired':
         return { tone: 'error', text: 'We could not take your last payment. Update your card to restore access.' };
       case 'comp_expired':
@@ -82,7 +87,7 @@ function accessNotice(me: BillingMe): { tone: 'warn' | 'error'; text: string } |
       case 'canceled':
         return { tone: 'error', text: 'Your subscription has been cancelled. Pick a plan to start again.' };
       case 'no_subscription':
-        return { tone: 'error', text: 'You do not have an active plan yet.' };
+        return { tone: 'error', text: 'Choose a plan below to start using SAM.' };
       default:
         return { tone: 'error', text: 'Your subscription is not active yet.' };
     }
@@ -469,14 +474,16 @@ export function BillingPanel() {
                         }
                         className="w-full rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
                       >
+                        {/*
+                          Never "Start trial": the trial already began at signup,
+                          so every button here is an upgrade to a paid plan.
+                        */}
                         {busy ? (
                           <Loader2 className="mx-auto h-4 w-4 animate-spin" />
                         ) : me.subscription?.hasStripeSubscription ? (
                           'Switch to this plan'
-                        ) : me.trial.enabled && !me.subscription?.trialEndsAt ? (
-                          `Start ${me.trial.days}-day trial`
                         ) : (
-                          'Choose plan'
+                          'Upgrade to this plan'
                         )}
                       </button>
                     )}

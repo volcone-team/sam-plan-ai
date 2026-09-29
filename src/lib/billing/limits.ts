@@ -30,6 +30,17 @@ export const LIMIT_KEYS = {
 
 export const UNLIMITED = -1;
 
+/**
+ * Pseudo limit key for the trial initiative allowance.
+ *
+ * Not a `plan_limits` row: the trial cap is a single platform-wide setting
+ * (app_settings.trial_initiative_cap) rather than a per-plan value, because a
+ * trial is one evaluation window rather than a tier anyone buys. Counted across
+ * the WHOLE trial, not per month, and quickstart and full initiatives both count
+ * against it.
+ */
+export const TRIAL_INITIATIVE_KEY = "trial_initiatives";
+
 export interface LimitCheck {
   allowed: boolean;
   limit: number;

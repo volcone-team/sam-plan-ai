@@ -26,6 +26,7 @@ interface BillingSettings {
   trialDays: number;
   trialPlanId: string | null;
   trialRequiresCard: boolean;
+  trialInitiativeCap: number;
   dunningGraceDays: number;
 }
 
@@ -179,6 +180,7 @@ export function BillingManagement() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const [trialDaysDraft, setTrialDaysDraft] = useState("");
+  const [trialCapDraft, setTrialCapDraft] = useState("");
   const [graceDraft, setGraceDraft] = useState("");
   const [compTarget, setCompTarget] = useState<Subscriber | null>(null);
   const [compPlanId, setCompPlanId] = useState("");
@@ -202,6 +204,7 @@ export function BillingManagement() {
       setBilling(b);
       setData(s);
       setTrialDaysDraft(String(b.settings.trialDays));
+      setTrialCapDraft(String(b.settings.trialInitiativeCap));
       setGraceDraft(String(b.settings.dunningGraceDays));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -246,6 +249,12 @@ export function BillingManagement() {
       setBusy(false);
     }
   };
+
+  // Keep drafts in step after a reload so the Save buttons disable correctly.
+  useEffect(() => {
+    if (!billing) return;
+    setTrialCapDraft(String(billing.settings.trialInitiativeCap));
+  }, [billing]);
 
   const runAction = async (payload: Record<string, unknown>, ok: string) => {
     setBusy(true);
@@ -473,9 +482,9 @@ export function BillingManagement() {
                 <div className="min-w-0">
                   <p className="text-sm font-medium">Free trial</p>
                   <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">
-                    A trial grants the limits of the plan chosen below, for the number of
-                    days set. Only ever granted once per account, so cancelling and
-                    re-subscribing cannot restart it.
+                    The trial starts the moment someone registers — no card, no checkout.
+                    They get the initiative allowance set below for the number of days
+                    set, then keep read-only access to the dashboard until they upgrade.
                   </p>
                 </div>
                 <Toggle
@@ -511,8 +520,38 @@ export function BillingManagement() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
+                    <label htmlFor="trial-cap" className="text-xs text-[hsl(var(--foreground-muted))]">
+                      Initiatives allowed during the trial
+                    </label>
+                    <input
+                      id="trial-cap"
+                      type="number"
+                      min={0}
+                      max={1000}
+                      value={trialCapDraft}
+                      onChange={(e) => setTrialCapDraft(e.target.value)}
+                      className="w-24 rounded-[var(--radius-md)] border border-border bg-background px-3 py-1.5 text-sm"
+                    />
+                    <button
+                      disabled={busy || trialCapDraft === String(s.trialInitiativeCap)}
+                      onClick={() =>
+                        saveSettings(
+                          { trialInitiativeCap: Number(trialCapDraft) },
+                          "Trial initiative allowance saved."
+                        )
+                      }
+                      className="rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+                    >
+                      Save
+                    </button>
+                    <span className="text-xs text-[hsl(var(--foreground-muted))]">
+                      Total for the whole trial — quickstart and full combined.
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
                     <label htmlFor="trial-plan" className="text-xs text-[hsl(var(--foreground-muted))]">
-                      Trial gives access to
+                      Other limits mirror
                     </label>
                     <select
                       id="trial-plan"
@@ -530,18 +569,12 @@ export function BillingManagement() {
                     </select>
                   </div>
 
-                  <div className="flex items-start justify-between gap-4">
-                    <p className="text-xs text-[hsl(var(--foreground-muted))]">
-                      Require a card up front. Fewer signups, but far fewer trial
-                      abandonments and less abuse of paid AI features.
-                    </p>
-                    <Toggle
-                      checked={s.trialRequiresCard}
-                      disabled={busy}
-                      onChange={(v) => saveSettings({ trialRequiresCard: v }, "Saved.")}
-                      ariaLabel="Require a card for trials"
-                    />
-                  </div>
+                  {/*
+                    The "require a card" toggle was removed: the trial no longer
+                    runs through Stripe Checkout, so there is no point at which a
+                    card could be collected for it. Upgrading is a separate,
+                    deliberate purchase.
+                  */}
                 </div>
               )}
             </div>
