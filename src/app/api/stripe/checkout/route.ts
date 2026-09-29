@@ -186,10 +186,23 @@ export async function POST(request: Request) {
       success_url: `${baseUrl}/settings?checkout=success`,
       cancel_url: `${baseUrl}/settings?checkout=cancelled`,
       allow_promotion_codes: true,
-      // Stripe collects and remits VAT/sales tax where required. Cheaper to
-      // enable now than to retrofit after selling cross-border.
+      /**
+       * Stripe works out and remits VAT/sales tax where required. Cheaper to
+       * enable now than to retrofit after selling cross-border.
+       *
+       * automatic_tax NEEDS an address to know which jurisdiction applies, and a
+       * customer created from an email alone has none — which failed the session
+       * outright. `customer_update: { address: 'auto' }` saves the address entered
+       * during Checkout back onto the Customer, so tax can be calculated on this
+       * purchase and on every renewal after it.
+       *
+       * `billing_address_collection: 'required'` rather than 'auto': with
+       * automatic tax on, a missing address is not merely untidy, it makes the
+       * charge uncalculable.
+       */
       automatic_tax: { enabled: true },
-      billing_address_collection: "auto",
+      billing_address_collection: "required",
+      customer_update: { address: "auto", name: "auto" },
     });
 
     if (!session.url) {
