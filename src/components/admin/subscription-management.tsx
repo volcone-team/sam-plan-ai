@@ -133,13 +133,16 @@ function SubscribersByTier() {
 function SubscriptionTable() {
   const [openDropdown, setOpenDropdown] = useState<number | null>(null);
 
-  function handleChangeTier(subscriberId: number, newTier: string) {
-    alert(`Stripe not connected — cannot change to ${newTier} tier`);
+  // This table renders prototype sample data, so its row actions cannot act on
+  // anything real. They point at the Billing & Stripe tab, which is wired to
+  // actual subscribers, rather than claiming Stripe is unavailable — it is not.
+  function handleChangeTier() {
+    alert("Use the 'Billing & Stripe' tab to manage real subscriptions.");
     setOpenDropdown(null);
   }
 
   function handleCancel() {
-    alert("Stripe not connected");
+    alert("Use the 'Billing & Stripe' tab to manage real subscriptions.");
   }
 
   return (
@@ -223,7 +226,7 @@ function SubscriptionTable() {
                               .map((t) => (
                                 <button
                                   key={t.name}
-                                  onClick={() => handleChangeTier(sub.id, t.name)}
+                                  onClick={() => handleChangeTier()}
                                   className="block w-full px-4 py-2 text-left text-sm text-[hsl(var(--foreground))] hover:bg-[hsl(var(--foreground-muted)/0.1)]"
                                 >
                                   {t.name} (${t.price}/mo)
@@ -289,8 +292,11 @@ function RevenueChart() {
 }
 
 function StripeIntegration() {
+  // Stripe IS integrated now — the controls live in the 'Billing & Stripe' tab.
+  // This prototype panel is kept only for its layout, so the button explains
+  // where the real settings are instead of the old "coming in Phase 13" message.
   function handleConnectStripe() {
-    alert("Stripe integration coming in Phase 13");
+    alert("Stripe is integrated. Open the 'Billing & Stripe' tab to configure it.");
   }
 
   return (
