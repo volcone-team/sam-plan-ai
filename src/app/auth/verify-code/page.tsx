@@ -101,13 +101,34 @@ async function requestCode(): Promise<SendResult> {
   }
 }
 
+const DEFAULT_NEXT = '/year-at-a-glance';
+
+/**
+ * Constrain `?next=` to a path inside this app.
+ *
+ * The value reaches a real navigation on success, and anyone can craft the URL
+ * that lands a user here — middleware is not the only way in. Without this, a
+ * `javascript:` URL would execute in the page's context, and `//evil.com` (or
+ * any absolute URL) would be an open redirect off the back of a legitimate
+ * login. Only a single leading slash followed by a normal path is accepted;
+ * everything else falls back to the app home.
+ */
+function safeNextPath(raw: string | null): string {
+  if (!raw) return DEFAULT_NEXT;
+  // Must start with exactly one '/' — rejects '//host' and 'scheme:' URLs.
+  if (!raw.startsWith('/') || raw.startsWith('//')) return DEFAULT_NEXT;
+  // Reject control characters, which can be used to smuggle a scheme past checks.
+  if (/[\u0000-\u001F\u007F]/.test(raw)) return DEFAULT_NEXT;
+  return raw;
+}
+
 function VerifyCodeForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  // Middleware always supplies an explicit ?next=, so this fallback only covers
+  // Middleware always supplies an explicit ?next=, so the fallback only covers
   // someone landing here directly. Most accounts are customers, so send them to
   // the app home rather than the admin panel.
-  const nextPath = searchParams.get('next') || '/year-at-a-glance';
+  const nextPath = safeNextPath(searchParams.get('next'));
 
   const [code, setCode] = useState('');
   const [initialSending, setInitialSending] = useState(true);
@@ -234,8 +255,31 @@ function VerifyCodeForm() {
       }
 
       if (res.ok) {
-        router.push(nextPath);
-        router.refresh();
+        /**
+         * Full document navigation, NOT router.push().
+         *
+         * Verification just set the `sam_2fa` cookie, and middleware has to see
+         * it to stop redirecting. A client-side push could not do that
+         * reliably for two reasons:
+         *
+         *  1. `nextPath` is already in the client router cache — as the
+         *     REDIRECT middleware issued when this device was still untrusted.
+         *     Pushing replayed that cached redirect and bounced straight back
+         *     here, so the click appeared to do nothing.
+         *  2. The old code called router.refresh() immediately after push,
+         *     which fires against the current route and disrupts the
+         *     navigation that was still in flight.
+         *
+         * `location.replace` discards the client cache entirely and re-requests
+         * the page with the new cookie attached, so middleware re-evaluates and
+         * serves it. `replace` rather than `assign` keeps the challenge page out
+         * of history — Back should not return to a code that is now consumed.
+         *
+         * No setSubmitting(false): the document is being torn down, and leaving
+         * the button disabled prevents a second submit racing the navigation
+         * (the code is single-use, so a retry would fail as already consumed).
+         */
+        window.location.replace(nextPath);
         return;
       }
 
