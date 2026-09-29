@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, MailCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { revokeDeviceTrust } from '@/lib/sign-out';
 import { Button } from '@/components/ui/button';
 import { BrandLogo } from '@/components/brand-logo';
 
@@ -311,6 +312,10 @@ function VerifyCodeForm() {
   };
 
   const handleSignOut = async () => {
+    // Clear device trust too. Reaching this page means trust was absent or
+    // invalid, but a stale `sam_2fa` may still be sitting in the browser and
+    // it is httpOnly, so only the server can remove it.
+    await revokeDeviceTrust();
     try {
       await createClient().auth.signOut();
     } catch {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { CheckCircle, Settings, ToggleLeft } from "lucide-react";
+import { CheckCircle, Settings, ShieldAlert, ToggleLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RoleManagement } from "./role-management";
 
@@ -169,6 +169,9 @@ export function AdminSettings() {
   const [settings, setSettings] = useState<PlatformSettings>(DEFAULT_PLATFORM_SETTINGS);
   const [showSuccess, setShowSuccess] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<'flags' | 'platform' | 'roles'>('flags');
+  // Server-persisted, unlike the flags/settings above. Applies to every visitor.
+  const [deterDevtools, setDeterDevtools] = useState(false);
+  const [deterError, setDeterError] = useState<string | null>(null);
 
   // Load from localStorage
   useEffect(() => {
@@ -190,6 +193,50 @@ export function AdminSettings() {
       }
     }
   }, []);
+
+  // Load the server-persisted platform settings.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/settings', { credentials: 'same-origin' });
+        if (!res.ok) return;
+        const body = await res.json();
+        if (active) setDeterDevtools(body?.deterDevtools === true);
+      } catch {
+        // Leave the toggle off; the error surfaces only if a save fails.
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  /**
+   * Persist immediately rather than waiting for Save: this setting affects all
+   * users, so a silent unsaved change would be worse than an extra request. The
+   * switch is moved optimistically and rolled back if the request fails.
+   */
+  const handleToggleDeterDevtools = async (next: boolean) => {
+    setDeterDevtools(next);
+    setDeterError(null);
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deterDevtools: next }),
+      });
+      if (!res.ok) {
+        setDeterDevtools(!next);
+        setDeterError('Could not save that setting. Please try again.');
+        return;
+      }
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    } catch {
+      setDeterDevtools(!next);
+      setDeterError('Could not reach the server. Please try again.');
+    }
+  };
 
   // Toggle a feature flag
   const handleToggleFlag = (id: string) => {
@@ -260,6 +307,48 @@ export function AdminSettings() {
       {/* Platform Settings */}
       {activeSettingsTab === 'platform' && (
       <section aria-label="Platform Settings">
+        {/*
+          Browser inspection deterrent. Unlike the feature flags above (which are
+          localStorage-only and affect nobody but the admin's own browser), this
+          is persisted server-side and applies to every visitor, so it saves
+          immediately rather than waiting for the Save button below.
+        */}
+        <div className="mb-6">
+          <div className="mb-4 flex items-center gap-2">
+            <ShieldAlert className="h-5 w-5 text-[hsl(var(--primary))]" />
+            <h2 className="text-lg font-semibold text-[hsl(var(--foreground))]">Browser Protection</h2>
+          </div>
+          <div className="rounded-[var(--radius-lg)] border border-border bg-card p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-[hsl(var(--foreground))]">
+                  Discourage page inspection
+                </p>
+                <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">
+                  Blocks right-click and the F12 / Ctrl+Shift+I / Ctrl+U shortcuts for
+                  all users.
+                </p>
+                <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                  A deterrent only, not a security measure. Browser code is always
+                  readable — via view-source, the browser menu, or with JavaScript
+                  disabled — so treat nothing in the frontend as private. It also gets
+                  in the way of debugging, so leave it off unless you want it for demos.
+                </p>
+                {deterError && (
+                  <p className="mt-2 text-xs text-[hsl(var(--destructive))]" role="alert">
+                    {deterError}
+                  </p>
+                )}
+              </div>
+              <ToggleSwitch
+                checked={deterDevtools}
+                onChange={handleToggleDeterDevtools}
+                ariaLabel="Toggle inspection deterrent"
+              />
+            </div>
+          </div>
+        </div>
+
         <div className="mb-4 flex items-center gap-2">
           <Settings className="h-5 w-5 text-[hsl(var(--primary))]" />
           <h2 className="text-lg font-semibold text-[hsl(var(--foreground))]">Platform Settings</h2>

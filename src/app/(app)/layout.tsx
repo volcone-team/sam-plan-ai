@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/sidebar";
 import { AppHeader } from "@/components/header";
 import { MobileNav } from "@/components/mobile-nav";
 import { AppShell } from "@/components/app-shell";
+import { ChatWidget } from "@/components/chat/chat-widget";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -26,6 +27,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
       >
         {children}
       </AppShell>
+      {/*
+        Mounted at the layout level, OUTSIDE AppShell, so the widget persists
+        across page navigations within the app — remounting per page would drop
+        the open/minimised state on every route change. It renders null unless a
+        super admin has enabled chat.
+      */}
+      <ChatWidget />
     </ImpersonationProvider>
   );
 }

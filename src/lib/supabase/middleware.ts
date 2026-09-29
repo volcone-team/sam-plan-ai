@@ -242,7 +242,11 @@ export async function updateSession(request: NextRequest) {
   // these through so their handlers can run and apply their own auth.
   const isPublicApiRoute =
     request.nextUrl.pathname.startsWith('/api/cron/') ||
-    request.nextUrl.pathname.startsWith('/api/notifications/unsubscribe');
+    request.nextUrl.pathname.startsWith('/api/notifications/unsubscribe') ||
+    // Password reset: the caller has lost their password and therefore has no
+    // session by definition. The handler withholds whether the address exists
+    // and always answers 200, so being public leaks nothing.
+    request.nextUrl.pathname === '/api/auth/forgot-password';
   // Onboarding is NO LONGER public. The flow is account-first:
   //   Landing -> "Create an Account" -> /auth/signup -> /onboarding/welcome
   // Leaving /onboarding open let anyone walk the questionnaire with no account,

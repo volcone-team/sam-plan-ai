@@ -12,6 +12,7 @@ export { AdminAnalytics } from "./admin-analytics";
 export { AdminSettings } from "./admin-settings";
 export { NotificationSettings } from "./notification-settings";
 export { ActivityLog } from "./activity-log";
+export { AiTools } from "./ai-tools";
 export { BenchmarkManagement } from "./benchmark-management";
 export { ContentManagement } from "./content-management";
 export { SubscriptionManagement } from "./subscription-management";

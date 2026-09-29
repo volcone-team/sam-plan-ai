@@ -264,3 +264,55 @@ export async function sendTwoFactorCodeEmail(
     tags: ["two-factor"],
   });
 }
+
+/**
+ * Password reset email.
+ *
+ * Sent by /api/auth/forgot-password over the Mailgun HTTP API, replacing
+ * Supabase's `resetPasswordForEmail`, which delivered over dashboard SMTP. The
+ * recovery TOKEN is still minted by Supabase — only the delivery moved — so
+ * verification is unchanged and there is no second source of truth.
+ *
+ * `resetUrl` is a token_hash link, not Supabase's action_link. See
+ * generatePasswordResetLink for why that distinction matters.
+ */
+export async function sendPasswordResetEmail(
+  to: string,
+  resetUrl: string,
+  opts?: { firstName?: string | null }
+): Promise<string | null> {
+  const name = opts?.firstName || "there";
+
+  return sendEmail({
+    to,
+    subject: "Reset your SAM Plan AI password",
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #1a1a1a;">Hi ${name},</h1>
+        <p style="font-size: 16px; line-height: 1.6; color: #333;">
+          Someone asked to reset the password for your SAM Plan AI account. Use the
+          button below to choose a new one.
+        </p>
+        <a href="${resetUrl}"
+           style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px;
+                  border-radius: 6px; text-decoration: none; font-weight: 600; margin: 20px 0;">
+          Set a new password
+        </a>
+        <p style="font-size: 14px; line-height: 1.6; color: #666;">
+          This link can only be used once, and expires shortly. If the button does not
+          work, copy and paste this address into your browser:
+        </p>
+        <p style="font-size: 13px; line-height: 1.5; color: #2563eb; word-break: break-all;">
+          ${resetUrl}
+        </p>
+        <p style="font-size: 14px; line-height: 1.6; color: #666;">
+          If you didn't request this, you can safely ignore this email — your password
+          will not change until you use the link above.
+        </p>
+        <p style="font-size: 14px; color: #666; margin-top: 32px;">— The SAM Plan AI Team</p>
+      </div>
+    `,
+    text: `Hi ${name},\n\nSomeone asked to reset the password for your SAM Plan AI account.\n\nSet a new password:\n${resetUrl}\n\nThis link can only be used once, and expires shortly.\n\nIf you didn't request this, you can safely ignore this email — your password will not change until you use the link above.\n\n— The SAM Plan AI Team`,
+    tags: ["password-reset"],
+  });
+}

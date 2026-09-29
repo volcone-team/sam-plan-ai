@@ -9,6 +9,7 @@ import { Save, CheckCircle, Trash2, AlertTriangle, Lock, Loader2, Eye, EyeOff } 
 import { userService } from '@/services/user.service';
 import { createClient } from '@/lib/supabase/client';
 import { cacheClearAll } from '@/lib/client-cache';
+import { revokeDeviceTrust } from '@/lib/sign-out';
 import { DeleteAccountModal } from './delete-account-modal';
 
 interface ProfileFormData {
@@ -93,6 +94,9 @@ export function UserProfile() {
   const handleDeleted = async () => {
     setDeleteMode(null);
     cacheClearAll();
+    // The account no longer exists, so its device trust must not linger for
+    // whoever signs in on this browser next. httpOnly, hence the server call.
+    await revokeDeviceTrust();
     try {
       await createClient().auth.signOut();
     } catch {

@@ -18,16 +18,20 @@ import {
   ScrollText,
   Settings,
   Shield,
+  Gauge,
   Menu,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuthContext } from "@/components/auth-provider";
 
 interface NavItem {
   label: string;
   href: string;
   icon: LucideIcon;
+  /** Shown only to super admins. */
+  superAdminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -44,6 +48,9 @@ const navItems: NavItem[] = [
   { label: "Analytics", href: "/admin/analytics", icon: TrendingUp },
   { label: "Notifications", href: "/admin/notifications", icon: Bell },
   { label: "Activity Log", href: "/admin/activity", icon: ScrollText },
+  // Super admin only: shows platform-wide AI spend and controls what customers
+  // may spend on a paid API.
+  { label: "AI Usage & Tools", href: "/admin/ai-tools", icon: Gauge, superAdminOnly: true },
   { label: "Settings", href: "/admin/settings", icon: Settings },
 ];
 
@@ -53,7 +60,15 @@ const navItems: NavItem[] = [
  */
 export function AdminSidebar() {
   const pathname = usePathname();
+  const { adminLevel } = useAuthContext();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Hiding the link is presentation only — the page itself and both APIs it
+  // calls enforce super-admin server-side. This just avoids advertising a
+  // destination that would redirect.
+  const visibleNavItems = navItems.filter(
+    (item) => !item.superAdminOnly || adminLevel === "super_admin"
+  );
 
   const isActive = (href: string) => {
     if (href === "/admin") return pathname === "/admin";
@@ -102,7 +117,7 @@ export function AdminSidebar() {
         {/* Navigation */}
         <nav aria-label="Admin navigation" className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="space-y-1">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const active = isActive(item.href);
               return (
                 <li key={item.href}>

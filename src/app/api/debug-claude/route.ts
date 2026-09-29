@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { requireAdmin } from "@/lib/require-admin";
 
 export const maxDuration = 60;
 
@@ -11,8 +12,26 @@ const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5-20250929";
  * Minimal Claude connectivity test. Returns timing + any error.
  * Use this to distinguish a timeout (empty body) from an API/key error
  * (structured error) in plan generation.
+ *
+ * Dev/debug only: disabled entirely in production and restricted to
+ * authenticated admins elsewhere — matching /api/test-email.
+ *
+ * This route previously had NO authorization of any kind. Anyone on the
+ * internet could call it and get back the first 7 characters of
+ * ANTHROPIC_API_KEY plus the model name, and every call made a real (billed)
+ * Anthropic request, so it doubled as an unauthenticated way to burn API
+ * budget. The key prefix is no longer returned at all: it cannot help debug a
+ * connectivity problem that the ok/error fields do not already cover.
  */
 export async function GET() {
+  // Never available in production - this endpoint exists for local verification.
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "not_available" }, { status: 404 });
+  }
+
+  const check = await requireAdmin();
+  if (!check.ok) return NextResponse.json({ error: check.error }, { status: check.status });
+
   const started = Date.now();
   try {
     if (!process.env.ANTHROPIC_API_KEY) {
@@ -28,24 +47,22 @@ export async function GET() {
 
     const textBlock = res.content.find((b) => b.type === "text");
     const text = textBlock && textBlock.type === "text" ? textBlock.text : "(no text)";
-    const ms = Date.now() - started;
 
     return NextResponse.json({
       ok: true,
       model: MODEL,
-      elapsedMs: ms,
+      elapsedMs: Date.now() - started,
       reply: text.slice(0, 100),
-      keyPrefix: process.env.ANTHROPIC_API_KEY.slice(0, 7),
     });
-  } catch (err: any) {
-    const ms = Date.now() - started;
+  } catch (err: unknown) {
+    const e = err as { message?: string; status?: number; name?: string; error?: { type?: string } };
     return NextResponse.json({
       ok: false,
       model: MODEL,
-      elapsedMs: ms,
-      error: err?.message || String(err),
-      status: err?.status,
-      type: err?.error?.type ?? err?.name,
+      elapsedMs: Date.now() - started,
+      error: e?.message || String(err),
+      status: e?.status,
+      type: e?.error?.type ?? e?.name,
     });
   }
 }

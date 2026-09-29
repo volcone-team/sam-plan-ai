@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cacheClearAll } from '@/lib/client-cache';
+import { revokeDeviceTrust } from '@/lib/sign-out';
 
 export interface UserAvatarProps {
   /** User's display name (for initials fallback and aria-label) */
@@ -67,6 +68,13 @@ export function UserAvatar({
     // Also drop any anonymous questionnaire draft. It is not user-scoped, so
     // leaving it behind let the next account in this browser inherit it.
     try { localStorage.removeItem('sam-plan-data'); } catch {}
+    // Revoke two-factor device trust BEFORE ending the session: the revoke
+    // endpoint is exempt from the middleware gate, but clearing cookies while
+    // the session is already being torn down is needlessly racy. `sam_2fa` is
+    // httpOnly, so this server round trip is the only way to delete it —
+    // without it the next account signing in on this browser would inherit
+    // trust and skip the code challenge entirely.
+    await revokeDeviceTrust();
     await supabase.auth.signOut();
     router.push("/auth/login");
   };

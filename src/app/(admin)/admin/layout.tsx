@@ -9,6 +9,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cacheClearAll } from '@/lib/client-cache';
+import { revokeDeviceTrust } from '@/lib/sign-out';
 
 interface AdminLayoutProps {
   children: ReactNode;
@@ -32,6 +33,10 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
     const supabase = createClient();
     // Drop cached profile/plan data so the next user never sees it.
     cacheClearAll();
+    // `sam_2fa` is httpOnly, so only the server can clear it. Admins share
+    // machines more often than customers do, making inherited device trust
+    // worse here than anywhere else.
+    await revokeDeviceTrust();
     await supabase.auth.signOut();
     router.push("/admin-login");
   };

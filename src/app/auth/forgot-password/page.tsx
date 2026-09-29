@@ -3,10 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Loader2, ArrowLeft } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { BrandLogo } from '@/components/brand-logo';
-import { getAppUrl } from '@/lib/app-url';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -20,20 +18,31 @@ export default function ForgotPasswordPage() {
     setLoading(true);
 
     try {
-      const supabase = createClient();
-
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${getAppUrl()}/auth/reset-password`,
+      /**
+       * Server route rather than supabase.auth.resetPasswordForEmail(): the
+       * email now goes out over the Mailgun HTTP API instead of Supabase's
+       * dashboard SMTP. Supabase still mints the recovery token, so
+       * /auth/reset-password verifies it unchanged.
+       *
+       * The route always answers 200 so it cannot be used to discover which
+       * addresses have accounts — which also means the success screen below is
+       * shown even for an unknown address. That is intentional, and the reason
+       * no error is surfaced for a "missing" account.
+       */
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
       });
 
-      if (resetError) {
-        setError(resetError.message);
+      if (!res.ok) {
+        setError('Something went wrong. Please try again.');
         return;
       }
 
       setSuccess(true);
     } catch {
-      setError('Something went wrong. Please try again.');
+      setError('Could not reach the server. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -46,9 +55,15 @@ export default function ForgotPasswordPage() {
           <BrandLogo width={140} height={47} />
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight">Check your email</h1>
+            {/*
+              Deliberately hedged ("if an account exists"): the endpoint does not
+              disclose whether the address is registered, so promising an email
+              outright would be a claim we cannot make — and would leak the
+              answer the moment it failed to arrive.
+            */}
             <p className="text-sm text-[hsl(var(--foreground-muted))]">
-              We sent a password reset link to <strong>{email}</strong>.
-              Click the link to set a new password.
+              If an account exists for <strong>{email}</strong>, a password reset
+              link is on its way. Click the link in the email to set a new password.
             </p>
           </div>
           <Link href="/auth/login">
