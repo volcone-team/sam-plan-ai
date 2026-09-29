@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { getStripe, loadBillingConfig } from "@/lib/billing/stripe-client";
 import { classifyPlanChange, changeTiming } from "@/lib/billing/limits";
+import { findCurrentPhase, scheduleActionFor } from "@/lib/billing/plan-change";
 
 export const runtime = "nodejs";
 
@@ -150,11 +151,37 @@ export async function POST(request: Request) {
     }
 
     if (timing === "immediate") {
+      /**
+       * A pending downgrade must be cancelled before an upgrade can apply.
+       * Stripe refuses item edits on a scheduled subscription, and leaving the
+       * schedule in place would silently revert the upgrade at period end.
+       *
+       * `release` detaches the schedule and leaves the subscription running,
+       * unlike `cancel`, which would end the subscription itself.
+       */
+      if (stripeSub.schedule) {
+        const scheduleId =
+          typeof stripeSub.schedule === "string" ? stripeSub.schedule : stripeSub.schedule.id;
+        try {
+          await stripe.subscriptionSchedules.release(scheduleId);
+          console.log("[stripe/change-plan] Released pending schedule", scheduleId);
+        } catch (err: unknown) {
+          console.error(
+            "[stripe/change-plan] Could not release schedule:",
+            err instanceof Error ? err.message : String(err)
+          );
+        }
+      }
+
       await stripe.subscriptions.update(sub.stripe_subscription_id, {
         items: [{ id: itemId, price: target.stripe_price_id }],
         // Bill the difference now rather than deferring it: the customer is
         // getting the higher tier immediately, so the charge should match.
         proration_behavior: "always_invoice",
+        // Charge the prorated amount straight away instead of parking it on the
+        // next invoice. Without this an upgrade appears to cost nothing at the
+        // time, which is what made the Mastery switch look free.
+        payment_behavior: "pending_if_incomplete",
         metadata: { ...stripeSub.metadata, plan_id: targetPlanId },
       });
 
@@ -176,18 +203,61 @@ export async function POST(request: Request) {
       return NextResponse.json({ applied: "immediate", kind });
     }
 
-    // Downgrade: schedule at period end via a subscription schedule so Stripe
-    // itself performs the switch. Doing it with a cron job on our side would
-    // drift from Stripe's clock and could miss or double-apply.
-    const schedule = await stripe.subscriptionSchedules.create({
-      from_subscription: sub.stripe_subscription_id,
+    /**
+     * Downgrade: switch at period end via a subscription schedule, so Stripe
+     * performs the change on its own clock. A cron job on our side would drift
+     * and could miss or double-apply it.
+     *
+     * REUSE an existing schedule rather than creating one. A subscription can
+     * only ever be attached to a single schedule, so calling create() a second
+     * time fails with "You cannot migrate a subscription that is already attached
+     * to a schedule" — which is exactly what happened when a customer changed
+     * their mind about a pending downgrade. Retrieving and rewriting the phases
+     * makes changing a scheduled downgrade work as many times as they like.
+     */
+    const existingSchedule = stripeSub.schedule
+      ? await stripe.subscriptionSchedules.retrieve(
+          typeof stripeSub.schedule === "string" ? stripeSub.schedule : stripeSub.schedule.id
+        )
+      : null;
+
+    // Decided by a tested pure function rather than inline conditionals — this is
+    // where the "already attached to a schedule" failure came from.
+    const action = scheduleActionFor({
+      timing,
+      hasSchedule: !!existingSchedule,
+      scheduleStatus: existingSchedule?.status ?? null,
     });
 
-    const currentPhase = schedule.phases[0];
+    const schedule =
+      action === "reuse" && existingSchedule
+        ? existingSchedule
+        : await stripe.subscriptionSchedules.create({
+            from_subscription: sub.stripe_subscription_id,
+          });
+
+    // The CURRENT phase is the one containing now — not necessarily phases[0],
+    // which on a reused schedule may be a phase that has already elapsed.
+    const currentPhase = findCurrentPhase(schedule.phases, Math.floor(Date.now() / 1000));
+    if (!currentPhase) {
+      return NextResponse.json({ error: "no_schedule_phase" }, { status: 500 });
+    }
+
+    // Price the current phase from what Stripe has, not from our row: on a reused
+    // schedule our stripe_price_id may already describe a pending change.
+    const currentPhasePrice =
+      currentPhase.items?.[0]?.price ?? sub.stripe_price_id;
+    const currentPriceId =
+      typeof currentPhasePrice === "string" ? currentPhasePrice : currentPhasePrice?.id;
+
+    if (!currentPriceId) {
+      return NextResponse.json({ error: "no_current_price" }, { status: 500 });
+    }
+
     await stripe.subscriptionSchedules.update(schedule.id, {
       phases: [
         {
-          items: [{ price: sub.stripe_price_id!, quantity: 1 }],
+          items: [{ price: currentPriceId, quantity: 1 }],
           start_date: currentPhase.start_date,
           end_date: currentPhase.end_date,
         },

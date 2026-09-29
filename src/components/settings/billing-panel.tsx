@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { CreditCard, Loader2, ExternalLink, TriangleAlert, CheckCircle2, Gift } from 'lucide-react';
+import {
+  CreditCard, Loader2, ExternalLink, TriangleAlert, CheckCircle2, Gift, RefreshCw,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /**
@@ -121,10 +123,32 @@ export function BillingPanel() {
   const [error, setError] = useState<string | null>(null);
   const [cycle, setCycle] = useState<'monthly' | 'annual'>('monthly');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { reconcile?: boolean }) => {
     setLoading(true);
     setError(null);
     try {
+      /**
+       * Pull the subscription from Stripe BEFORE reading our own copy.
+       *
+       * The webhook is the only writer of subscription state, and it can be late
+       * — or absent entirely in local development, since Stripe cannot deliver to
+       * localhost. Without this, returning from a successful Checkout showed the
+       * OLD plan and looked like the payment had failed.
+       *
+       * Only on returning from Checkout, not on every page load: it costs two
+       * Stripe calls, and the webhook handles the steady state.
+       */
+      if (opts?.reconcile) {
+        try {
+          await fetch('/api/billing/reconcile', {
+            method: 'POST',
+            credentials: 'same-origin',
+          });
+        } catch {
+          // Best-effort: fall through and show whatever we already have.
+        }
+      }
+
       const res = await fetch('/api/billing/me', { credentials: 'same-origin' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -140,7 +164,23 @@ export function BillingPanel() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    // Checkout redirects back with ?checkout=success. That parameter is a HINT
+    // ONLY — it can be typed by hand, so it never grants anything. All it does is
+    // trigger a reconcile, and entitlement still comes from Stripe via the server.
+    const justPaid =
+      typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('checkout') === 'success';
+
+    load({ reconcile: justPaid });
+
+    if (justPaid) {
+      // Clear the parameter so a refresh does not reconcile again.
+      const url = new URL(window.location.href);
+      url.searchParams.delete('checkout');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [load]);
 
   /** Start checkout for a plan the company has never subscribed to. */
   const subscribe = async (planId: string) => {
@@ -323,16 +363,33 @@ export function BillingPanel() {
               )}
             </div>
 
-            {me.canManage && me.subscription.hasStripeSubscription && (
+            <div className="flex flex-wrap gap-2">
+              {/*
+                Escape hatch: if someone pays and navigates away before the
+                automatic reconcile runs, or a webhook is simply late, this lets
+                them refresh their own state instead of contacting support.
+              */}
               <button
-                onClick={openPortal}
-                disabled={busy}
+                onClick={() => load({ reconcile: true })}
+                disabled={busy || loading}
+                title="Check Stripe for the latest status of your subscription"
                 className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-2 text-sm font-medium hover:bg-[hsl(var(--background-muted))] disabled:opacity-40"
               >
-                Manage payment &amp; invoices
-                <ExternalLink className="h-3.5 w-3.5" />
+                <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+                Refresh billing
               </button>
-            )}
+
+              {me.canManage && me.subscription.hasStripeSubscription && (
+                <button
+                  onClick={openPortal}
+                  disabled={busy}
+                  className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-2 text-sm font-medium hover:bg-[hsl(var(--background-muted))] disabled:opacity-40"
+                >
+                  Manage payment &amp; invoices
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

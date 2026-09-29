@@ -7,6 +7,16 @@ import {
   loadBillingConfig,
   type StripeMode,
 } from "@/lib/billing/stripe-client";
+import {
+  isHandledEvent,
+  mapStripeStatus,
+  subscriptionIdFromInvoice,
+  extractPeriod,
+  nextPastDueSince,
+  shouldClearPending,
+  shouldClearComp,
+  interpretClaim,
+} from "@/lib/billing/webhook-logic";
 
 export const runtime = "nodejs";
 // Stripe retries on any non-2xx, so slow handling is safe — but a hung handler
@@ -42,16 +52,7 @@ export const maxDuration = 60;
  * 500 would make Stripe retry forever on a bug it cannot fix.
  */
 
-const HANDLED_EVENTS = new Set([
-  "checkout.session.completed",
-  "customer.subscription.created",
-  "customer.subscription.updated",
-  "customer.subscription.deleted",
-  "customer.subscription.trial_will_end",
-  "invoice.paid",
-  "invoice.payment_failed",
-  "invoice.payment_action_required",
-]);
+
 
 function adminClient(): SupabaseClient {
   return createClient(
@@ -106,18 +107,19 @@ export async function POST(request: Request) {
     payload: event.data.object as unknown as Record<string, unknown>,
   });
 
-  if (claimError) {
-    // 23505 = unique_violation.
-    if (claimError.code === "23505") {
-      console.log("[stripe/webhook] Duplicate event ignored:", event.id, event.type);
-      return NextResponse.json({ received: true, duplicate: true });
-    }
-    console.error("[stripe/webhook] Could not record event:", claimError.message);
+  const claim = interpretClaim(claimError?.code);
+
+  if (claim === "duplicate") {
+    console.log("[stripe/webhook] Duplicate event ignored:", event.id, event.type);
+    return NextResponse.json({ received: true, duplicate: true });
+  }
+  if (claim === "storage_error") {
+    console.error("[stripe/webhook] Could not record event:", claimError?.message);
     // A genuine DB fault: let Stripe retry, since the event was never handled.
     return NextResponse.json({ error: "record_failed" }, { status: 500 });
   }
 
-  if (!HANDLED_EVENTS.has(event.type)) {
+  if (!isHandledEvent(event.type)) {
     await db
       .from("stripe_webhook_events")
       .update({ status: "ignored" })
@@ -179,7 +181,11 @@ async function handleEvent(
       await recordInvoice(db, mode, invoice);
 
       // A paid or failed invoice changes subscription status, so resync.
-      const subId = subscriptionIdFromInvoice(invoice);
+      // subscriptionIdFromInvoice reads both the modern and legacy payload
+      // shapes — see webhook-logic.ts — and is unit-tested.
+      const subId = subscriptionIdFromInvoice(
+        invoice as unknown as Parameters<typeof subscriptionIdFromInvoice>[0]
+      );
       if (subId) await syncSubscription(db, mode, subId);
       break;
     }
@@ -214,9 +220,11 @@ async function syncSubscription(
   const item = sub.items.data[0];
   const interval = item?.price?.recurring?.interval;
 
-  // Stripe reports periods on the subscription ITEM in current API versions.
-  const periodStart = item?.current_period_start ?? null;
-  const periodEnd = item?.current_period_end ?? null;
+  // Period location moved between API versions (subscription item vs the
+  // subscription); extractPeriod reads both and is unit-tested.
+  const { start: periodStart, end: periodEnd } = extractPeriod(
+    sub as unknown as Parameters<typeof extractPeriod>[0]
+  );
 
   const patch: Record<string, unknown> = {
     stripe_mode: mode,
@@ -224,7 +232,7 @@ async function syncSubscription(
     stripe_subscription_id: sub.id,
     stripe_price_id: priceId,
     stripe_status: sub.status,
-    status: mapStatus(sub.status),
+    status: mapStripeStatus(sub.status),
     billing_cycle: interval === "year" ? "annual" : "monthly",
     cancel_at_period_end: sub.cancel_at_period_end === true,
     current_period_start: periodStart ? new Date(periodStart * 1000).toISOString() : null,
@@ -238,68 +246,38 @@ async function syncSubscription(
 
   if (planId) patch.plan_id = planId;
 
-  // past_due_since anchors the dunning grace window. Set it when entering
-  // past_due and CLEAR it on recovery, or a later failure would measure grace
-  // from the first-ever failure and lock someone out immediately.
-  if (sub.status === "past_due" || sub.status === "unpaid") {
-    const { data: existing } = await db
-      .from("subscriptions")
-      .select("past_due_since")
-      .eq("company_id", companyId)
-      .maybeSingle();
-    if (!existing?.past_due_since) {
-      patch.past_due_since = new Date().toISOString();
-    }
-  } else {
-    patch.past_due_since = null;
-  }
+  // past_due_since anchors the dunning grace window. nextPastDueSince keeps the
+  // ORIGINAL timestamp across retries (re-stamping would push the deadline out
+  // forever) and clears it on recovery (otherwise a later failure would measure
+  // grace from the first-ever one and deny access instantly). Unit-tested.
+  const { data: existing } = await db
+    .from("subscriptions")
+    .select("past_due_since")
+    .eq("company_id", companyId)
+    .maybeSingle();
+
+  patch.past_due_since = nextPastDueSince({
+    stripeStatus: sub.status,
+    existing: (existing?.past_due_since as string) ?? null,
+    now: new Date().toISOString(),
+  });
 
   // A completed downgrade clears its pending target.
-  if (sub.status === "active" || sub.status === "trialing") {
+  if (shouldClearPending(sub.status)) {
     patch.pending_plan_id = null;
     patch.pending_billing_cycle = null;
   }
 
+  // A real paid subscription supersedes any comp, or a paying customer keeps
+  // showing as complimentary access and "who is not paying" becomes wrong.
+  if (shouldClearComp(sub.status)) {
+    patch.is_comped = false;
+    patch.comped_until = null;
+    patch.comped_reason = null;
+  }
+
   const { error } = await db.from("subscriptions").update(patch).eq("company_id", companyId);
   if (error) throw new Error(`Subscription update failed: ${error.message}`);
-}
-
-/**
- * Extract the subscription id from an invoice.
- *
- * `invoice.subscription` was REMOVED in recent API versions (this SDK targets
- * 2026-08-26.dahlia). The link now lives under
- * `invoice.parent.subscription_details.subscription`, which may be an id or an
- * expanded object. Reading the old field silently yields undefined, so every
- * invoice would look like a one-off and no subscription would ever resync.
- */
-function subscriptionIdFromInvoice(invoice: Stripe.Invoice): string | null {
-  const details = invoice.parent?.subscription_details;
-  if (!details) return null;
-  const sub = details.subscription;
-  if (!sub) return null;
-  return typeof sub === "string" ? sub : sub.id;
-}
-
-/** Map Stripe's richer status onto the legacy 5-value column from migration 001. */
-function mapStatus(stripeStatus: string): string {
-  switch (stripeStatus) {
-    case "active":
-      return "active";
-    case "trialing":
-      return "trial";
-    case "past_due":
-    case "unpaid":
-      return "past_due";
-    case "canceled":
-    case "incomplete_expired":
-      return "cancelled";
-    case "paused":
-      return "paused";
-    default:
-      // incomplete: checkout started, never finished.
-      return "past_due";
-  }
 }
 
 async function resolveCompanyId(
@@ -355,7 +333,9 @@ async function recordInvoice(
   const customerId =
     typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id ?? null;
 
-  const subId = subscriptionIdFromInvoice(invoice);
+  const subId = subscriptionIdFromInvoice(
+    invoice as unknown as Parameters<typeof subscriptionIdFromInvoice>[0]
+  );
 
   let companyId: string | null = null;
   if (customerId) {

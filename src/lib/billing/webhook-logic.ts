@@ -1,0 +1,190 @@
+/**
+ * Webhook decision logic, extracted so it can be tested without Stripe or a
+ * database.
+ *
+ * This is the most consequential code in billing: the webhook is the ONLY writer
+ * of subscription state, so a mistake here means a customer pays and receives
+ * nothing, or keeps access they have stopped paying for. It previously lived
+ * inline in the route handler, tangled with network calls, and therefore had no
+ * tests at all — which is how an API-version field change reached production and
+ * stopped every payment from being applied.
+ *
+ * The route still performs the I/O. What to DO is decided here.
+ */
+
+/** Events the handler acts on. Anything else is recorded and ignored. */
+export const HANDLED_EVENTS = [
+  "checkout.session.completed",
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "customer.subscription.trial_will_end",
+  "invoice.paid",
+  "invoice.payment_failed",
+  "invoice.payment_action_required",
+] as const;
+
+export function isHandledEvent(type: string): boolean {
+  return (HANDLED_EVENTS as readonly string[]).includes(type);
+}
+
+/**
+ * Map Stripe's status onto the 5-value `status` column from migration 001.
+ *
+ * Stripe has states that column cannot express, so the mapping is lossy on
+ * purpose — `stripe_status` keeps the original verbatim. What matters is that
+ * nothing maps to 'active' unless the customer really is active: an over-generous
+ * default here would hand out free access.
+ */
+export function mapStripeStatus(stripeStatus: string): string {
+  switch (stripeStatus) {
+    case "active":
+      return "active";
+    case "trialing":
+      return "trial";
+    case "past_due":
+    case "unpaid":
+      return "past_due";
+    case "canceled":
+    case "incomplete_expired":
+      return "cancelled";
+    case "paused":
+      return "paused";
+    default:
+      // incomplete, and anything Stripe adds in future. Deliberately NOT
+      // 'active': an unknown state must not grant access.
+      return "past_due";
+  }
+}
+
+/** Shapes an invoice can arrive in, across pinned API versions. */
+export interface InvoiceLike {
+  parent?: {
+    subscription_details?: { subscription?: string | { id: string } | null } | null;
+  } | null;
+  subscription?: string | { id: string } | null;
+}
+
+/**
+ * Pull the subscription id out of an invoice.
+ *
+ * A webhook endpoint is PINNED to the API version it was created with, and that
+ * pin is immutable — so an endpoint made years ago still delivers the old shape
+ * regardless of which version the SDK targets. Both layouts must be read:
+ *
+ *   modern: invoice.parent.subscription_details.subscription
+ *   legacy: invoice.subscription
+ *
+ * Reading only the modern path against a legacy payload silently yields
+ * undefined, so every invoice looks like a one-off purchase and no subscription
+ * is ever synced. That is the exact bug that let a payment succeed while the
+ * customer's plan never changed.
+ */
+export function subscriptionIdFromInvoice(invoice: InvoiceLike): string | null {
+  const modern = invoice.parent?.subscription_details?.subscription;
+  if (modern) return typeof modern === "string" ? modern : modern.id;
+
+  const legacy = invoice.subscription;
+  if (legacy) return typeof legacy === "string" ? legacy : legacy.id;
+
+  return null;
+}
+
+/** Billing period, which also moved between the subscription and its item. */
+export interface PeriodSource {
+  items?: { data?: { current_period_start?: number; current_period_end?: number }[] };
+  current_period_start?: number;
+  current_period_end?: number;
+}
+
+export function extractPeriod(sub: PeriodSource): { start: number | null; end: number | null } {
+  const item = sub.items?.data?.[0];
+  return {
+    start: item?.current_period_start ?? sub.current_period_start ?? null,
+    end: item?.current_period_end ?? sub.current_period_end ?? null,
+  };
+}
+
+/**
+ * Decide how `past_due_since` should change.
+ *
+ * It anchors the dunning grace window, so the rules are:
+ *   - entering past_due: stamp it, but only if not already stamped, or each
+ *     retry would push the deadline further out and grace would never expire;
+ *   - recovering: CLEAR it, or a later failure would measure grace from the
+ *     first-ever failure and lock the customer out immediately.
+ */
+export function nextPastDueSince(args: {
+  stripeStatus: string;
+  existing: string | null;
+  now: string;
+}): string | null {
+  const isFailing = args.stripeStatus === "past_due" || args.stripeStatus === "unpaid";
+  if (!isFailing) return null;
+  return args.existing ?? args.now;
+}
+
+/**
+ * Should a pending plan change be cleared?
+ *
+ * A scheduled downgrade has been applied once the subscription reports active or
+ * trialing again, so the pending target is stale and must not keep showing in the
+ * UI as "changing to X".
+ */
+export function shouldClearPending(stripeStatus: string): boolean {
+  return stripeStatus === "active" || stripeStatus === "trialing";
+}
+
+/**
+ * Should a comp be cleared because a real subscription now exists?
+ *
+ * Without this a paying customer keeps showing as complimentary access, so
+ * "who is not paying" — the whole point of the comped flag — becomes wrong.
+ */
+export function shouldClearComp(stripeStatus: string): boolean {
+  return stripeStatus === "active" || stripeStatus === "trialing";
+}
+
+/** Outcomes of the idempotency gate. */
+export type ClaimOutcome = "process" | "duplicate" | "storage_error";
+
+/**
+ * Interpret the result of claiming an event id.
+ *
+ * Stripe retries on any non-2xx AND can deliver the same event more than once
+ * even after a 200, so claiming is what stops a retried `invoice.paid` from
+ * double-extending a billing period.
+ *
+ * 23505 is Postgres unique_violation — someone else already claimed it. Any other
+ * error means the claim itself failed, so the event was never handled and Stripe
+ * SHOULD retry.
+ */
+export function interpretClaim(errorCode: string | null | undefined): ClaimOutcome {
+  if (!errorCode) return "process";
+  if (errorCode === "23505") return "duplicate";
+  return "storage_error";
+}
+
+/**
+ * HTTP status to answer a webhook with.
+ *
+ * The distinction matters more than it looks:
+ *   - bad signature -> 400, never retry. The payload is untrusted.
+ *   - claim failed   -> 500, DO retry. Nothing was processed.
+ *   - handler threw  -> 200, do NOT retry. Retrying cannot fix a logic bug, and
+ *     an endlessly retried event buries genuine ones; it is recorded as failed
+ *     for an operator instead.
+ */
+export function webhookResponseStatus(
+  outcome: "invalid_signature" | "no_signature" | "claim_failed" | "handler_failed" | "ok" | "duplicate" | "ignored"
+): number {
+  switch (outcome) {
+    case "invalid_signature":
+    case "no_signature":
+      return 400;
+    case "claim_failed":
+      return 500;
+    default:
+      return 200;
+  }
+}

@@ -9,6 +9,7 @@ import {
   type StripeMode,
 } from "@/lib/billing/stripe-client";
 import { getAppUrl } from "@/lib/app-url";
+import { isLiveSubscription } from "@/lib/billing/plan-change";
 
 export const runtime = "nodejs";
 
@@ -135,10 +136,52 @@ export async function POST(request: Request) {
 
     const stripe = getStripe(mode);
 
+    /**
+     * SECOND GUARD, ASKING STRIPE DIRECTLY.
+     *
+     * The database check above is not enough on its own. If a webhook is missed,
+     * our row still says "no subscription" while Stripe has an active one — and
+     * the customer can then pay again, ending up with TWO active subscriptions
+     * and two charges every month. That happened in testing: one subscription at
+     * $149 and another at $500 on the same customer.
+     *
+     * Stripe is the authority on what exists, so it is asked before any new
+     * checkout session is created. This costs one API call and prevents double
+     * billing, which is not a trade worth optimising.
+     */
+    const existingCustomerId =
+      subscription?.stripe_mode === mode ? subscription?.stripe_customer_id ?? null : null;
+
+    if (existingCustomerId) {
+      const live = await stripe.subscriptions.list({
+        customer: existingCustomerId,
+        status: "all",
+        limit: 20,
+      });
+
+      const active = live.data.find((sub) => isLiveSubscription(sub.status));
+
+      if (active) {
+        console.warn(
+          "[stripe/checkout] Refusing: Stripe already has", active.id,
+          "(", active.status, ") for customer", existingCustomerId,
+          "— our row said none, so a webhook was likely missed."
+        );
+        return NextResponse.json(
+          {
+            error: "already_subscribed",
+            message:
+              "You already have an active subscription. Use Change plan to switch, " +
+              "or contact support if your plan looks wrong.",
+          },
+          { status: 400 }
+        );
+      }
+    }
+
     // Reuse the Stripe customer only if it came from THIS mode — a test-mode
     // customer id does not exist in live mode and would fail.
-    let customerId =
-      subscription?.stripe_mode === mode ? subscription?.stripe_customer_id ?? null : null;
+    let customerId = existingCustomerId;
 
     if (!customerId) {
       const name = [profile?.first_name, profile?.last_name].filter(Boolean).join(" ");

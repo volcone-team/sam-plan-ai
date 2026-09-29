@@ -305,6 +305,42 @@ export function BillingManagement() {
     }
   };
 
+  /**
+   * Reconcile from Stripe. Stripe is the authority on what was paid, so this
+   * only ever overwrites our copy with theirs — safe to run repeatedly.
+   */
+  const resyncFromStripe = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/billing/resync", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(`Pull failed: ${body?.error ?? "unknown"}`);
+        return;
+      }
+      const synced = Array.isArray(body?.synced) ? body.synced.length : 0;
+      const skipped = Array.isArray(body?.skipped) ? body.skipped.length : 0;
+      const errs = Array.isArray(body?.errors) ? body.errors : [];
+      if (errs.length > 0) {
+        setError(`Pulled with problems: ${errs.join("; ")}`);
+      } else {
+        flash(
+          `Pulled from Stripe — ${synced} subscription(s), ${body?.invoicesRecorded ?? 0} invoice(s)` +
+            (skipped ? `, ${skipped} skipped` : "")
+        );
+      }
+      await load();
+    } catch {
+      setError("Could not reach the server.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const comp = async () => {
     if (!compTarget || !compPlanId) return;
     setBusy(true);
@@ -633,14 +669,31 @@ export function BillingManagement() {
       <section aria-label="Stripe prices" className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold">Plans in Stripe ({s?.stripeMode})</h2>
-          <button
-            disabled={busy}
-            onClick={() => runAction({ action: "sync_prices" }, "Prices synced to Stripe.")}
-            className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm hover:bg-[hsl(var(--background-muted))] disabled:opacity-40"
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
-            Sync prices
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              disabled={busy}
+              onClick={() => runAction({ action: "sync_prices" }, "Prices synced to Stripe.")}
+              className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm hover:bg-[hsl(var(--background-muted))] disabled:opacity-40"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
+              Sync prices
+            </button>
+            {/*
+              Repair path for a missed webhook. A webhook endpoint is PINNED to the
+              API version it was created with and cannot be re-pinned, so an older
+              endpoint can deliver a payload shape the handler fails to read —
+              payment succeeds in Stripe while the plan never changes here.
+            */}
+            <button
+              disabled={busy}
+              onClick={resyncFromStripe}
+              title="Pull subscriptions and invoices from Stripe. Use when a payment succeeded but the plan did not change."
+              className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm hover:bg-[hsl(var(--background-muted))] disabled:opacity-40"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
+              Pull from Stripe
+            </button>
+          </div>
         </div>
         <p className="text-xs text-[hsl(var(--foreground-muted))]">
           Creates Stripe products and prices from your plans. Changing a plan&apos;s price
