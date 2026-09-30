@@ -41,10 +41,53 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const invoiceLimit = Math.min(Number(url.searchParams.get("invoices")) || 50, 200);
 
+    /**
+     * Server-side paging and search.
+     *
+     * Returning every subscription grew the response without bound as accounts
+     * accumulated, so the page got slower for everyone regardless of how few rows
+     * were displayed. Paging in the QUERY keeps the cost proportional to what is
+     * shown.
+     */
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 100);
+    const offset = Math.max(Number(url.searchParams.get("offset")) || 0, 0);
+    const search = (url.searchParams.get("search") || "").trim();
+
     const db = adminClient();
     const config = await loadBillingConfig(db);
 
-    const { data: subs, error: subsErr } = await db
+    /**
+     * Searching by COMPANY NAME means resolving names first: the text lives on
+     * `companies` while the page lists `subscriptions`, and PostgREST cannot
+     * filter a parent by a joined column without an embedded resource. Two
+     * queries is the honest trade, and the id list is bounded by the match.
+     */
+    let companyIdFilter: string[] | null = null;
+    if (search) {
+      const { data: matches } = await db
+        .from("companies")
+        .select("id")
+        .ilike("name", `%${search}%`)
+        .limit(500);
+      companyIdFilter = ((matches ?? []) as { id: string }[]).map((c) => c.id);
+
+      // No company matched, so no subscription can. Return empty rather than
+      // running a query with an empty IN filter.
+      if (companyIdFilter.length === 0) {
+        return NextResponse.json({
+          mode: config.mode,
+          stripeEnabled: config.stripeEnabled,
+          subscribers: [],
+          invoices: [],
+          total: 0,
+          limit,
+          offset,
+          totals: { companies: 0, comped: 0, paying: 0, pastDue: 0, collected: 0 },
+        });
+      }
+    }
+
+    let subsQuery = db
       .from("subscriptions")
       .select(
         "id, company_id, plan_id, tier, status, stripe_status, billing_cycle, " +
@@ -52,9 +95,17 @@ export async function GET(request: Request) {
         "current_period_start, current_period_end, cancel_at_period_end, " +
         "pending_plan_id, pending_billing_cycle, " +
         "is_comped, comped_until, comped_reason, comped_by, " +
-        "trial_ends_at, is_trial_active, past_due_since, created_at"
-      )
-      .order("created_at", { ascending: false });
+        "trial_ends_at, is_trial_active, past_due_since, created_at",
+        { count: "exact" }
+      );
+
+    if (companyIdFilter) {
+      subsQuery = subsQuery.in("company_id", companyIdFilter);
+    }
+
+    const { data: subs, error: subsErr, count } = await subsQuery
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
 
     if (subsErr) {
       console.error("[admin/subscribers] Query failed:", subsErr.message);
@@ -111,6 +162,26 @@ export async function GET(request: Request) {
         (paidByCompany.get(inv.company_id) ?? 0) + (inv.amount_paid ?? 0)
       );
     }
+
+    /**
+     * Summary counts are computed with COUNT queries across the whole dataset,
+     * not from the rows on this page. Deriving them from the page would make the
+     * headline figures change as an admin paginates, which is worse than useless —
+     * it looks like the data is shifting underneath them.
+     */
+    const [totalCompanies, compedCount, payingCount, pastDueCount] = await Promise.all([
+      db.from("subscriptions").select("id", { count: "exact", head: true }),
+      db.from("subscriptions").select("id", { count: "exact", head: true }).eq("is_comped", true),
+      db
+        .from("subscriptions")
+        .select("id", { count: "exact", head: true })
+        .not("stripe_subscription_id", "is", null)
+        .eq("is_comped", false),
+      db
+        .from("subscriptions")
+        .select("id", { count: "exact", head: true })
+        .eq("stripe_status", "past_due"),
+    ]);
 
     const subscribers = rows.map((r) => {
       // Same function the app uses to gate features, so the admin view cannot
@@ -188,12 +259,16 @@ export async function GET(request: Request) {
         ...i,
         companyName: i.company_id ? companyName.get(i.company_id as string) ?? null : null,
       })),
+      // Paging metadata for the table.
+      total: count ?? 0,
+      limit,
+      offset,
       totals: {
-        companies: subscribers.length,
-        comped: subscribers.filter((s) => s.isComped).length,
-        paying: subscribers.filter((s) => s.hasStripeSubscription && !s.isComped).length,
-        pastDue: subscribers.filter((s) => s.stripeStatus === "past_due").length,
-        // Minor units summed across all paid invoices.
+        companies: totalCompanies.count ?? 0,
+        comped: compedCount.count ?? 0,
+        paying: payingCount.count ?? 0,
+        pastDue: pastDueCount.count ?? 0,
+        // Minor units summed across all paid invoices, platform-wide.
         collected: [...paidByCompany.values()].reduce((a, b) => a + b, 0),
       },
     });

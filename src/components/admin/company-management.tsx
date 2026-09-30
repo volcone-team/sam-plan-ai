@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Building2,
+  ChevronLeft,
+  ChevronRight,
   Eye,
   Search,
   Loader2,
@@ -51,6 +53,9 @@ function getPlanStatusClasses(status: string): string {
   }
 }
 
+/** Rows per page. Server-enforced too: the endpoint caps limit at 100. */
+const PAGE_SIZE = 20;
+
 export function CompanyManagement() {
   const router = useRouter();
   const [companies, setCompanies] = useState<AdminCompany[]>([]);
@@ -58,6 +63,7 @@ export function CompanyManagement() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [showAddForm, setShowAddForm] = useState(false);
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -115,13 +121,19 @@ export function CompanyManagement() {
     }
   }
 
-  async function loadCompanies(searchTerm: string = "") {
+  /**
+   * Loads ONE PAGE from the server. The endpoint already accepted search, limit
+   * and offset; the UI simply asked for a flat 50 and ignored paging, so beyond
+   * 50 companies the rest were unreachable.
+   */
+  async function loadCompanies(searchTerm: string = "", pageIndex: number = 0) {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
       if (searchTerm) params.set("search", searchTerm);
-      params.set("limit", "50");
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String(pageIndex * PAGE_SIZE));
 
       const res = await fetch(`/api/admin/companies?${params}`);
       const data = await res.json();
@@ -132,7 +144,6 @@ export function CompanyManagement() {
         return;
       }
 
-      console.log("[CompanyManagement] Loaded", data.companies?.length, "companies, total:", data.total);
       setCompanies(data.companies || []);
       setTotal(data.total || 0);
     } catch (err: any) {
@@ -143,16 +154,16 @@ export function CompanyManagement() {
     }
   }
 
-  useEffect(() => {
-    loadCompanies();
-  }, []);
-
+  // Search and page changes share one effect, so they cannot race each other into
+  // a mismatched request. Editing the search resets to page 0 below, because page
+  // 3 of the previous results says nothing about the new filter.
   useEffect(() => {
     const timeout = setTimeout(() => {
-      loadCompanies(search);
+      loadCompanies(search, page);
     }, 300);
     return () => clearTimeout(timeout);
-  }, [search]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, page]);
 
   if (loading && companies.length === 0) {
     return (
@@ -214,7 +225,7 @@ export function CompanyManagement() {
             type="text"
             placeholder="Search companies…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
             className="w-full rounded-[var(--radius-md)] border border-border bg-card pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
           />
         </div>
@@ -328,6 +339,43 @@ export function CompanyManagement() {
               </tbody>
             </table>
           </div>
+
+          {/*
+            Server-side pager. Shown only when there is more than one page, so a
+            small deployment is not cluttered by controls that do nothing.
+          */}
+          {total > PAGE_SIZE && (
+            <div className="flex items-center justify-between gap-2 border-t border-border px-4 py-3 text-xs text-[hsl(var(--foreground-muted))]">
+              <span>
+                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={page === 0 || loading}
+                  aria-label="Previous page"
+                  className="rounded-[var(--radius-md)] border border-border p-1.5 hover:bg-[hsl(var(--background-muted))] disabled:opacity-40"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="px-1">
+                  {page + 1} / {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPage((p) => Math.min(Math.ceil(total / PAGE_SIZE) - 1, p + 1))
+                  }
+                  disabled={(page + 1) * PAGE_SIZE >= total || loading}
+                  aria-label="Next page"
+                  className="rounded-[var(--radius-md)] border border-border p-1.5 hover:bg-[hsl(var(--background-muted))] disabled:opacity-40"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

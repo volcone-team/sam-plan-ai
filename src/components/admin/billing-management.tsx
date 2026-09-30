@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LoadingPanel } from "@/components/ui/spinner";
-import { DataTable, type Column } from "@/components/ui/data-table";
+import { ServerDataTable, type ServerColumn } from "@/components/ui/server-data-table";
 
 /**
  * Real Stripe billing administration. SUPER-ADMIN ONLY.
@@ -106,6 +106,10 @@ interface SubscribersResponse {
   stripeEnabled: boolean;
   subscribers: Subscriber[];
   invoices: Invoice[];
+  /** Total matching rows on the server, for pagination. */
+  total: number;
+  limit: number;
+  offset: number;
   totals: {
     companies: number; comped: number; paying: number;
     pastDue: number; collected: number;
@@ -184,12 +188,11 @@ function subscriberColumns(ctx: {
   plans: Plan[];
   onComp: (sub: Subscriber) => void;
   onUncomp: (sub: Subscriber) => void;
-}): Column<Subscriber>[] {
+}): ServerColumn<Subscriber>[] {
   return [
     {
       key: "company",
       header: "Company",
-      searchOf: (sub) => `${sub.companyName ?? "unnamed"} ${sub.compedReason ?? ""}`,
       render: (sub) => (
         <>
           {sub.companyName ?? (
@@ -204,7 +207,6 @@ function subscriberColumns(ctx: {
     {
       key: "plan",
       header: "Plan",
-      searchOf: (sub) => `${sub.planName} ${sub.billingCycle} ${sub.pendingPlanName ?? ""}`,
       render: (sub) => (
         <>
           {sub.planName}
@@ -220,8 +222,6 @@ function subscriberColumns(ctx: {
     {
       key: "state",
       header: "State",
-      searchOf: (sub) =>
-        `${sub.stripeStatus ?? sub.status} ${sub.isComped ? "comped" : ""} ${sub.access.reason}`,
       render: (sub) => (
         <>
           <StatusPill sub={sub} />
@@ -310,10 +310,41 @@ export function BillingManagement() {
   const [trialDaysDraft, setTrialDaysDraft] = useState("");
   const [trialCapDraft, setTrialCapDraft] = useState("");
   const [graceDraft, setGraceDraft] = useState("");
+  // Bumped after a mutation so the table reloads its CURRENT page, preserving the
+  // admin's search term and position rather than resetting them.
+  const [reloadToken, setReloadToken] = useState(0);
   const [compTarget, setCompTarget] = useState<Subscriber | null>(null);
   const [compPlanId, setCompPlanId] = useState("");
   const [compUntil, setCompUntil] = useState("");
   const [compReason, setCompReason] = useState("");
+
+  /**
+   * One page of accounts, straight from the server.
+   *
+   * Stable identity via useCallback with no changing deps: ServerDataTable calls
+   * this inside an effect keyed on the function, so a new reference each render
+   * would re-fetch in a loop.
+   */
+  const fetchSubscriberPage = useCallback(
+    async ({ search, limit, offset }: { search: string; limit: number; offset: number }) => {
+      const params = new URLSearchParams({
+        limit: String(limit),
+        offset: String(offset),
+      });
+      if (search) params.set("search", search);
+
+      const res = await fetch(`/api/admin/subscribers?${params}`, {
+        credentials: "same-origin",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || "Could not load accounts");
+      }
+      const body = (await res.json()) as SubscribersResponse;
+      return { rows: body.subscribers, total: body.total ?? body.subscribers.length };
+    },
+    []
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -321,7 +352,9 @@ export function BillingManagement() {
     try {
       const [bRes, sRes] = await Promise.all([
         fetch("/api/admin/billing", { credentials: "same-origin" }),
-        fetch("/api/admin/subscribers", { credentials: "same-origin" }),
+        // Only for the headline totals and invoice list; the accounts table
+        // fetches its own pages.
+        fetch("/api/admin/subscribers?limit=1", { credentials: "same-origin" }),
       ]);
       if (!bRes.ok || !sRes.ok) {
         const body = await (bRes.ok ? sRes : bRes).json().catch(() => ({}));
@@ -493,7 +526,9 @@ export function BillingManagement() {
       setCompTarget(null);
       setCompUntil("");
       setCompReason("");
+      // Refresh totals, and nudge the table to reload its current page.
       await load();
+      setReloadToken((n) => n + 1);
       flash("Access granted.");
     } finally {
       setBusy(false);
@@ -515,6 +550,7 @@ export function BillingManagement() {
         return;
       }
       await load();
+      setReloadToken((n) => n + 1);
       flash("Comp removed.");
     } finally {
       setBusy(false);
@@ -934,11 +970,18 @@ export function BillingManagement() {
       {data && (
         <section aria-label="Subscribers" className="space-y-3">
           <h2 className="text-lg font-semibold">Accounts</h2>
-          <DataTable
-            rows={data.subscribers}
+          {/*
+            Server-paged: search and paging happen in the query, so the response
+            stays the size of one page however many accounts exist.
+            `reloadToken` is bumped after comp/uncomp so the visible page
+            refreshes without resetting the admin's search or position.
+          */}
+          <ServerDataTable
+            fetchPage={fetchSubscriberPage}
             rowKey={(sub) => sub.subscriptionId}
-            searchPlaceholder="Search by company, plan or state..."
+            searchPlaceholder="Search accounts by company name..."
             emptyMessage="No accounts yet."
+            reloadToken={reloadToken}
             columns={subscriberColumns({
               busy,
               plans: billing?.plans ?? [],
