@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   CreditCard,
-  Loader2,
   RefreshCw,
   TriangleAlert,
   CheckCircle2,
@@ -11,6 +10,8 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LoadingPanel } from "@/components/ui/spinner";
+import { DataTable, type Column } from "@/components/ui/data-table";
 
 /**
  * Real Stripe billing administration. SUPER-ADMIN ONLY.
@@ -169,6 +170,133 @@ function StatusPill({ sub }: { sub: Subscriber }) {
       {label}
     </span>
   );
+}
+
+/**
+ * Column definitions for the Accounts table.
+ *
+ * Outside the component so the array identity is stable — DataTable memoises
+ * filtering on `columns`, and a fresh array each render would recompute the
+ * filter on every keystroke.
+ */
+function subscriberColumns(ctx: {
+  busy: boolean;
+  plans: Plan[];
+  onComp: (sub: Subscriber) => void;
+  onUncomp: (sub: Subscriber) => void;
+}): Column<Subscriber>[] {
+  return [
+    {
+      key: "company",
+      header: "Company",
+      searchOf: (sub) => `${sub.companyName ?? "unnamed"} ${sub.compedReason ?? ""}`,
+      render: (sub) => (
+        <>
+          {sub.companyName ?? (
+            <span className="text-[hsl(var(--foreground-muted))]">Unnamed</span>
+          )}
+          {sub.compedReason && (
+            <p className="text-xs text-[hsl(var(--foreground-muted))]">{sub.compedReason}</p>
+          )}
+        </>
+      ),
+    },
+    {
+      key: "plan",
+      header: "Plan",
+      searchOf: (sub) => `${sub.planName} ${sub.billingCycle} ${sub.pendingPlanName ?? ""}`,
+      render: (sub) => (
+        <>
+          {sub.planName}
+          <span className="text-xs text-[hsl(var(--foreground-muted))]"> / {sub.billingCycle}</span>
+          {sub.pendingPlanName && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              → {sub.pendingPlanName} at period end
+            </p>
+          )}
+        </>
+      ),
+    },
+    {
+      key: "state",
+      header: "State",
+      searchOf: (sub) =>
+        `${sub.stripeStatus ?? sub.status} ${sub.isComped ? "comped" : ""} ${sub.access.reason}`,
+      render: (sub) => (
+        <>
+          <StatusPill sub={sub} />
+          {sub.cancelAtPeriodEnd && (
+            <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">Cancelling</p>
+          )}
+        </>
+      ),
+    },
+    {
+      key: "renews",
+      // Header reflects that the date may be an ending rather than a renewal.
+      header: "Renews / ends",
+      className: "text-xs",
+      render: (sub) => {
+        if (sub.isComped) {
+          return sub.compedUntil ? `Comp ends ${shortDate(sub.compedUntil)}` : "No expiry";
+        }
+        // A cancelling subscription ENDS on this date; calling it a renewal was
+        // the most misleading thing this table said.
+        if (sub.cancelAtPeriodEnd) {
+          return (
+            <span className="text-amber-700 dark:text-amber-400">
+              Ends {shortDate(sub.currentPeriodEnd)}
+            </span>
+          );
+        }
+        return shortDate(sub.currentPeriodEnd);
+      },
+    },
+    {
+      key: "paid",
+      header: "Paid",
+      render: (sub) => money(sub.lifetimePaid),
+    },
+    {
+      key: "actions",
+      header: "",
+      className: "text-right",
+      render: (sub) => {
+        // Grant access is offered ONLY to accounts that are not paying. Comping a
+        // paying customer would hand them a free plan while their card is still
+        // charged, and would corrupt the flag that answers "who is not paying".
+        if (sub.isComped) {
+          return (
+            <button
+              disabled={ctx.busy}
+              onClick={() => ctx.onUncomp(sub)}
+              className="text-xs font-medium text-[hsl(var(--destructive))] hover:underline disabled:opacity-40"
+            >
+              Remove comp
+            </button>
+          );
+        }
+        if (
+          sub.hasStripeSubscription &&
+          ["active", "trialing", "past_due"].includes(sub.stripeStatus ?? "")
+        ) {
+          return (
+            <span className="text-xs text-[hsl(var(--foreground-muted))]">Paying customer</span>
+          );
+        }
+        return (
+          <button
+            disabled={ctx.busy}
+            onClick={() => ctx.onComp(sub)}
+            className="inline-flex items-center gap-1 text-xs font-medium text-[hsl(var(--primary))] hover:underline disabled:opacity-40"
+          >
+            <Gift className="h-3.5 w-3.5" />
+            Grant access
+          </button>
+        );
+      },
+    },
+  ];
 }
 
 export function BillingManagement() {
@@ -393,13 +521,10 @@ export function BillingManagement() {
     }
   };
 
+  // Shared LoadingPanel rather than bespoke "Loading billing..." text, so every
+  // admin tab presents the same loading state.
   if (loading && !billing) {
-    return (
-      <div className="flex items-center gap-2 p-6 text-sm text-[hsl(var(--foreground-muted))]">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Loading billing...
-      </div>
-    );
+    return <LoadingPanel />;
   }
 
   const s = billing?.settings;
@@ -809,78 +934,21 @@ export function BillingManagement() {
       {data && (
         <section aria-label="Subscribers" className="space-y-3">
           <h2 className="text-lg font-semibold">Accounts</h2>
-          <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-border bg-card">
-            <table className="w-full text-sm">
-              <thead className="border-b border-border text-left text-xs text-[hsl(var(--foreground-muted))]">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Company</th>
-                  <th className="px-4 py-2 font-medium">Plan</th>
-                  <th className="px-4 py-2 font-medium">State</th>
-                  <th className="px-4 py-2 font-medium">Renews</th>
-                  <th className="px-4 py-2 font-medium">Paid</th>
-                  <th className="px-4 py-2 font-medium"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.subscribers.map((sub) => (
-                  <tr key={sub.subscriptionId} className="border-b border-border last:border-0">
-                    <td className="px-4 py-2">
-                      {sub.companyName ?? (
-                        <span className="text-[hsl(var(--foreground-muted))]">Unnamed</span>
-                      )}
-                      {sub.compedReason && (
-                        <p className="text-xs text-[hsl(var(--foreground-muted))]">{sub.compedReason}</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-2">
-                      {sub.planName}
-                      <span className="text-xs text-[hsl(var(--foreground-muted))]"> / {sub.billingCycle}</span>
-                      {sub.pendingPlanName && (
-                        <p className="text-xs text-amber-700 dark:text-amber-400">
-                          → {sub.pendingPlanName} at period end
-                        </p>
-                      )}
-                    </td>
-                    <td className="px-4 py-2">
-                      <StatusPill sub={sub} />
-                      {sub.cancelAtPeriodEnd && (
-                        <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">Cancelling</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-xs">
-                      {sub.isComped
-                        ? sub.compedUntil ? `Comp ends ${shortDate(sub.compedUntil)}` : "No expiry"
-                        : shortDate(sub.currentPeriodEnd)}
-                    </td>
-                    <td className="px-4 py-2">{money(sub.lifetimePaid)}</td>
-                    <td className="px-4 py-2 text-right">
-                      {sub.isComped ? (
-                        <button
-                          disabled={busy}
-                          onClick={() => uncomp(sub)}
-                          className="text-xs font-medium text-[hsl(var(--destructive))] hover:underline disabled:opacity-40"
-                        >
-                          Remove comp
-                        </button>
-                      ) : (
-                        <button
-                          disabled={busy}
-                          onClick={() => {
-                            setCompTarget(sub);
-                            setCompPlanId(sub.planId ?? billing?.plans[0]?.id ?? "");
-                          }}
-                          className="inline-flex items-center gap-1 text-xs font-medium text-[hsl(var(--primary))] hover:underline disabled:opacity-40"
-                        >
-                          <Gift className="h-3.5 w-3.5" />
-                          Grant access
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            rows={data.subscribers}
+            rowKey={(sub) => sub.subscriptionId}
+            searchPlaceholder="Search by company, plan or state..."
+            emptyMessage="No accounts yet."
+            columns={subscriberColumns({
+              busy,
+              plans: billing?.plans ?? [],
+              onComp: (sub) => {
+                setCompTarget(sub);
+                setCompPlanId(sub.planId ?? billing?.plans[0]?.id ?? "");
+              },
+              onUncomp: uncomp,
+            })}
+          />
         </section>
       )}
 

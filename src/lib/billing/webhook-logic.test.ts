@@ -9,6 +9,8 @@ import {
   shouldClearComp,
   interpretClaim,
   webhookResponseStatus,
+  isEnding,
+  accessEndsAt,
   HANDLED_EVENTS,
 } from "./webhook-logic";
 
@@ -250,5 +252,46 @@ describe("webhookResponseStatus", () => {
     expect(webhookResponseStatus("ok")).toBe(200);
     expect(webhookResponseStatus("duplicate")).toBe(200);
     expect(webhookResponseStatus("ignored")).toBe(200);
+  });
+});
+
+describe("isEnding — the 'still shows Renews after cancelling' bug", () => {
+  it("detects the flag set by our own update call", () => {
+    expect(isEnding({ cancel_at_period_end: true })).toBe(true);
+  });
+
+  /**
+   * THE ACTUAL BUG. Stripe's billing portal cancels by setting a dated
+   * `cancel_at` rather than the boolean flag. Reading only the flag meant a
+   * cancelled subscription still displayed "Renews <date>" to the customer AND in
+   * the admin table.
+   */
+  it("detects a dated cancellation from the billing portal", () => {
+    expect(isEnding({ cancel_at: 1822311562 })).toBe(true);
+  });
+
+  it("treats a renewing subscription as not ending", () => {
+    expect(isEnding({ cancel_at_period_end: false, cancel_at: null })).toBe(false);
+    expect(isEnding({})).toBe(false);
+  });
+
+  it("ignores a zero or negative cancel_at", () => {
+    expect(isEnding({ cancel_at: 0 })).toBe(false);
+    expect(isEnding({ cancel_at: -1 })).toBe(false);
+  });
+});
+
+describe("accessEndsAt", () => {
+  it("prefers an explicit cancel_at over the period end", () => {
+    expect(accessEndsAt({ cancel_at: 1000, current_period_end: 2000 })).toBe(1000);
+  });
+
+  it("falls back to the period end", () => {
+    expect(accessEndsAt({ current_period_end: 2000 })).toBe(2000);
+  });
+
+  it("returns null when neither is known", () => {
+    expect(accessEndsAt({})).toBeNull();
+    expect(accessEndsAt({ cancel_at: 0, current_period_end: 0 })).toBeNull();
   });
 });

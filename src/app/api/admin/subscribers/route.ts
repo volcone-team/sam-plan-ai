@@ -248,6 +248,38 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "planId" }, { status: 400 });
       }
 
+      /**
+       * Refuse to comp a PAYING customer.
+       *
+       * Enforced here and not only by hiding the button, because a hidden button
+       * is not a control. Comping an active subscriber would grant free access
+       * while Stripe keeps charging their card, and would also corrupt the comped
+       * flag — which is how "who is not paying" is answered.
+       *
+       * Cancel their subscription first if the intent really is to move them to
+       * complimentary access.
+       */
+      const { data: existing } = await db
+        .from("subscriptions")
+        .select("stripe_subscription_id, stripe_status")
+        .eq("company_id", body.companyId)
+        .maybeSingle();
+
+      if (
+        existing?.stripe_subscription_id &&
+        ["active", "trialing", "past_due"].includes(existing.stripe_status ?? "")
+      ) {
+        return NextResponse.json(
+          {
+            error: "has_paid_subscription",
+            message:
+              "This account has an active paid subscription. Cancel it in Stripe " +
+              "before granting complimentary access.",
+          },
+          { status: 400 }
+        );
+      }
+
       let until: string | null = null;
       if (typeof body.until === "string" && body.until.trim()) {
         const t = new Date(body.until).getTime();

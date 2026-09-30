@@ -16,6 +16,7 @@ import {
   shouldClearPending,
   shouldClearComp,
   interpretClaim,
+  isEnding,
 } from "@/lib/billing/webhook-logic";
 
 export const runtime = "nodejs";
@@ -234,12 +235,19 @@ async function syncSubscription(
     stripe_status: sub.status,
     status: mapStripeStatus(sub.status),
     billing_cycle: interval === "year" ? "annual" : "monthly",
-    cancel_at_period_end: sub.cancel_at_period_end === true,
+    // isEnding covers BOTH cancel_at_period_end and a dated cancel_at — the
+    // billing portal uses the latter, so reading only the flag reported a
+    // cancelled subscription as renewing.
+    cancel_at_period_end: isEnding(sub),
     current_period_start: periodStart ? new Date(periodStart * 1000).toISOString() : null,
     current_period_end: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
     trial_ends_at: sub.trial_end ? new Date(sub.trial_end * 1000).toISOString() : null,
     is_trial_active: sub.status === "trialing",
-    renewal_date: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+    // Null when ending: a subscription that stops is not renewing, and a date
+    // here is displayed as "Renews".
+    renewal_date: isEnding(sub) || !periodEnd
+      ? null
+      : new Date(periodEnd * 1000).toISOString(),
     cancelled_at: sub.canceled_at ? new Date(sub.canceled_at * 1000).toISOString() : null,
     updated_at: new Date().toISOString(),
   };

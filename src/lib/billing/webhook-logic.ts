@@ -188,3 +188,45 @@ export function webhookResponseStatus(
       return 200;
   }
 }
+
+/**
+ * Is this subscription ending rather than renewing?
+ *
+ * Stripe expresses "will not renew" in TWO ways, and reading only one of them
+ * misreports a cancelled subscription as active:
+ *
+ *   cancel_at_period_end: true  — the flag set by subscriptions.update()
+ *   cancel_at: <timestamp>      — a dated stop, which is what the BILLING PORTAL
+ *                                 sets when a customer cancels themselves
+ *
+ * Because only the flag was checked, a customer who cancelled through the portal
+ * still saw "Renews <date>", and so did the admin table — the single most
+ * misleading thing billing UI can say.
+ */
+export function isEnding(sub: {
+  cancel_at_period_end?: boolean | null;
+  cancel_at?: number | null;
+  status?: string | null;
+}): boolean {
+  if (sub.cancel_at_period_end === true) return true;
+  if (typeof sub.cancel_at === "number" && sub.cancel_at > 0) return true;
+  return false;
+}
+
+/**
+ * When access actually ends, as a unix timestamp.
+ *
+ * Prefers an explicit `cancel_at` over the period end: a customer can schedule a
+ * stop at a date that is not the current period boundary, and showing the period
+ * end would then be wrong.
+ */
+export function accessEndsAt(sub: {
+  cancel_at?: number | null;
+  current_period_end?: number | null;
+}): number | null {
+  if (typeof sub.cancel_at === "number" && sub.cancel_at > 0) return sub.cancel_at;
+  if (typeof sub.current_period_end === "number" && sub.current_period_end > 0) {
+    return sub.current_period_end;
+  }
+  return null;
+}

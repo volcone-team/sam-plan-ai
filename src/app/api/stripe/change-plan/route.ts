@@ -105,6 +105,12 @@ export async function POST(request: Request) {
           ? "monthly"
           : (sub.billing_cycle as string);
 
+    // Fetched BEFORE classification: the price Stripe is actually charging is the
+    // fallback when our own price table cannot identify the current amount.
+    const stripeSubEarly = await getStripe(config.mode).subscriptions.retrieve(
+      sub.stripe_subscription_id
+    );
+
     // Prices for both ends of the change, to classify it and to set the new item.
     const { data: prices } = await db
       .from("stripe_prices")
@@ -129,11 +135,44 @@ export async function POST(request: Request) {
     // and that older amount is what the change must be compared against.
     const currentRow = rows.find((r) => r.stripe_price_id === sub.stripe_price_id);
 
+    /**
+     * Ask STRIPE for the amount actually being charged when our own row cannot
+     * supply it.
+     *
+     * Falling back to 0 (as this did) made every change look like an UPGRADE,
+     * because any target price beats zero. On the top plan that meant a downgrade
+     * was classified as an upgrade and applied immediately at a lower price —
+     * or refused as "no change" — so there was no way back down.
+     *
+     * Stripe holds the price the customer is genuinely on, which is the only
+     * trustworthy basis for the comparison.
+     */
+    let currentAmount = currentRow?.unit_amount ?? null;
+    if (currentAmount === null) {
+      const stripeAmount = stripeSubEarly?.items.data[0]?.price?.unit_amount ?? null;
+      if (stripeAmount !== null) {
+        currentAmount = stripeAmount;
+        console.log(
+          "[stripe/change-plan] Current price not in our table; using Stripe amount",
+          stripeAmount
+        );
+      }
+    }
+
+    if (currentAmount === null) {
+      // Without a current amount, upgrade vs downgrade cannot be decided, and
+      // guessing would either overcharge or hand out a cheaper plan immediately.
+      console.error(
+        "[stripe/change-plan] Cannot determine current price for", sub.stripe_subscription_id
+      );
+      return NextResponse.json({ error: "current_price_unknown" }, { status: 409 });
+    }
+
     const kind = classifyPlanChange(
       {
         planId: sub.plan_id ?? "",
         cycle: sub.billing_cycle as string,
-        price: currentRow?.unit_amount ?? 0,
+        price: currentAmount,
       },
       { planId: targetPlanId, cycle: targetCycle, price: target.unit_amount }
     );
@@ -144,7 +183,8 @@ export async function POST(request: Request) {
 
     const timing = changeTiming(kind);
     const stripe = getStripe(config.mode);
-    const stripeSub = await stripe.subscriptions.retrieve(sub.stripe_subscription_id);
+    // Reused from the classification step above rather than fetched twice.
+    const stripeSub = stripeSubEarly;
     const itemId = stripeSub.items.data[0]?.id;
     if (!itemId) {
       return NextResponse.json({ error: "no_subscription_item" }, { status: 500 });
@@ -236,6 +276,9 @@ export async function POST(request: Request) {
             from_subscription: sub.stripe_subscription_id,
           });
 
+    // A subscription created from a schedule defaults to end_behavior 'cancel',
+    // which would turn a downgrade into a cancellation. Set below on update.
+
     // The CURRENT phase is the one containing now — not necessarily phases[0],
     // which on a reused schedule may be a phase that has already elapsed.
     const currentPhase = findCurrentPhase(schedule.phases, Math.floor(Date.now() / 1000));
@@ -254,7 +297,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "no_current_price" }, { status: 500 });
     }
 
+    /**
+     * `end_behavior: 'release'` is REQUIRED here.
+     *
+     * Stripe rejects a schedule whose final phase has no `duration` or `end_date`
+     * unless the schedule releases at the end:
+     *   "The last phase must specify either duration or end_date if end_behavior
+     *    is not release."
+     *
+     * Release is also the behaviour we want: once the downgrade has taken effect
+     * the schedule detaches and the subscription simply continues on the new
+     * plan, renewing normally. The alternative ('cancel') would END the
+     * subscription at the end of the phase — a downgrade would silently become a
+     * cancellation, which is the worst possible outcome for a paying customer.
+     */
     await stripe.subscriptionSchedules.update(schedule.id, {
+      end_behavior: "release",
       phases: [
         {
           items: [{ price: currentPriceId, quantity: 1 }],
@@ -263,6 +321,8 @@ export async function POST(request: Request) {
         },
         {
           items: [{ price: target.stripe_price_id, quantity: 1 }],
+          // No end_date: with end_behavior 'release' the schedule hands control
+          // back to the subscription after this phase begins.
         },
       ],
     });

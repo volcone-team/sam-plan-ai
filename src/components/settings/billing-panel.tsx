@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  CreditCard, Loader2, ExternalLink, TriangleAlert, CheckCircle2, Gift, RefreshCw,
+  CreditCard, ExternalLink, TriangleAlert, CheckCircle2, Gift, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Spinner, LoadingPanel } from '@/components/ui/spinner';
 
 /**
  * Customer-facing billing panel: current plan, usage this period, plan changes,
@@ -267,13 +268,9 @@ export function BillingPanel() {
     }
   };
 
+  // Shared LoadingPanel, matching every other panel in the app.
   if (loading) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-[hsl(var(--foreground-muted))]">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Loading billing...
-      </div>
-    );
+    return <LoadingPanel />;
   }
 
   if (!me) {
@@ -539,7 +536,7 @@ export function BillingPanel() {
                           so every button here is an upgrade to a paid plan.
                         */}
                         {busy ? (
-                          <Loader2 className="mx-auto h-4 w-4 animate-spin" />
+                          <Spinner size="sm" className="mx-auto text-white" />
                         ) : me.subscription?.hasStripeSubscription ? (
                           'Switch to this plan'
                         ) : (
