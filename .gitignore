@@ -40,3 +40,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# database backups — contain real user data including auth records, never commit
+db-backup-*/
+*.backup.sql
+
+# supabase CLI scratch
+supabase/.temp/

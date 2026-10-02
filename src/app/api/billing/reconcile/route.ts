@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
-import { getStripe, loadBillingConfig, type StripeMode } from "@/lib/billing/stripe-client";
+import { getStripe, loadBillingConfig, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client";
 import {
   mapStripeStatus,
   extractPeriod,
@@ -78,8 +78,8 @@ export async function POST() {
       return NextResponse.json({ reconciled: false, reason: "no_company" });
     }
 
-    const mode: StripeMode = config.mode;
-    const stripe = getStripe(mode);
+    const mode = STRIPE_MODE_TAG;
+    const stripe = getStripe();
 
     const { data: row } = await db
       .from("subscriptions")

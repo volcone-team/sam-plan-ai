@@ -642,21 +642,28 @@ export function YearAtAGlance() {
           </button>
           <button
             onClick={() => { console.log("[YearAtAGlance] Enhance Plan clicked"); router.push("/enhance-plan"); }}
-            className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600 transition-colors"
+            /* Brand yellow #ffd748. Dark text, since white is unreadable on
+               yellow; hover dims slightly via opacity rather than a second hex. */
+            style={{ backgroundColor: "#ffd748", color: "#1a1a1a" }}
+            className="inline-flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-1.5 text-sm font-medium hover:opacity-90 transition-opacity"
           >
             <Sparkles className="h-3.5 w-3.5" />
             Enhance Plan
           </button>
           <button
             onClick={() => { console.log("[YearAtAGlance] Regenerate clicked"); setShowRegenConfirm(true); }}
-            className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 transition-colors"
+            /* Brand blue #3cb4ff. */
+            style={{ backgroundColor: "#3cb4ff", color: "#ffffff" }}
+            className="inline-flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-1.5 text-sm font-medium hover:opacity-90 transition-opacity"
           >
             <RefreshCw className="h-3.5 w-3.5" />
             Regenerate Plan
           </button>
           <Link
             href="/initiatives"
-            className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 transition-opacity"
+            /* Brand green #00b25f. */
+            style={{ backgroundColor: "#00b25f", color: "#ffffff" }}
+            className="inline-flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-1.5 text-sm font-medium hover:opacity-90 transition-opacity"
           >
             <Plus className="h-3.5 w-3.5" />
             New Initiative

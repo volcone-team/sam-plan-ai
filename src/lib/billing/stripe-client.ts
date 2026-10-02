@@ -2,21 +2,26 @@ import Stripe from "stripe";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
- * Stripe client construction and mode resolution.
+ * Stripe client construction.
  *
- * TEST AND LIVE ARE SEPARATE UNIVERSES. Ids created in one do not exist in the
- * other, so which key is used is not a cosmetic choice — using the wrong one
- * against a stored id fails, and (worse) writing test ids over live ones
- * corrupts real subscriptions. Everything here exists to make the active mode
- * explicit and to keep it paired with the ids it created.
+ * ONE KEY PAIR, no test/live switch. Whatever `STRIPE_SECRET_KEY` and
+ * `STRIPE_WEBHOOK_SECRET` hold is what the app uses — put test keys in local
+ * development, live keys in production. The environment decides which universe
+ * you are in, not a database flag.
  *
- * KEYS LIVE IN ENV VARS, NEVER IN THE DATABASE. The super-admin toggle selects
- * WHICH pair to use; it does not store secrets. A live secret key editable from
- * a web UI is a far larger blast radius than the convenience is worth — anyone
- * who reached that table could charge or refund real customers.
+ * This deliberately replaced a runtime test/live toggle. Flipping a production
+ * app between modes is something you do approximately never, and the toggle cost
+ * a mode column, per-row stamping and selection logic for a convenience nobody
+ * used. Separation now comes for free from .env.local vs Vercel's env.
+ *
+ * KEYS LIVE IN ENV VARS, NEVER THE DATABASE — a live secret editable from a web
+ * UI would let anyone who reached that table charge or refund real customers.
+ *
+ * The DATABASE still carries a `stripe_mode` column (always written as the
+ * constant below). It is kept only because it participates in unique constraints
+ * (billing_invoices, stripe_webhook_events); dropping it would be schema churn
+ * for no gain. Nothing reads it to decide behaviour anymore.
  */
-
-export type StripeMode = "test" | "live";
 
 /**
  * Pinned to the API version this SDK ships with (stripe@22.6.2). Pinning rather
@@ -25,103 +30,74 @@ export type StripeMode = "test" | "live";
  */
 const API_VERSION = "2026-08-26.dahlia" as const;
 
+/**
+ * Constant written to every `stripe_mode` column. A fixed value satisfies the
+ * unique constraints while carrying no meaning — the real test/live distinction
+ * is which key is in the environment.
+ */
+export const STRIPE_MODE_TAG = "live" as const;
+
 export class StripeNotConfiguredError extends Error {
-  readonly mode: StripeMode;
-  constructor(mode: StripeMode) {
-    super(
-      `Stripe is not configured for ${mode} mode. Set STRIPE_SECRET_KEY_${mode.toUpperCase()}.`
-    );
+  constructor() {
+    super("Stripe is not configured. Set STRIPE_SECRET_KEY in the environment.");
     this.name = "StripeNotConfiguredError";
-    this.mode = mode;
   }
 }
 
-function secretKeyFor(mode: StripeMode): string | null {
-  const key =
-    mode === "live"
-      ? process.env.STRIPE_SECRET_KEY_LIVE
-      : process.env.STRIPE_SECRET_KEY_TEST;
+function secretKey(): string | null {
+  const key = process.env.STRIPE_SECRET_KEY;
   return key && key.trim() ? key.trim() : null;
 }
 
-export function webhookSecretFor(mode: StripeMode): string | null {
-  const secret =
-    mode === "live"
-      ? process.env.STRIPE_WEBHOOK_SECRET_LIVE
-      : process.env.STRIPE_WEBHOOK_SECRET_TEST;
+export function webhookSecret(): string | null {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
   return secret && secret.trim() ? secret.trim() : null;
 }
 
-/** True when the given mode has a usable secret key. */
-export function isModeConfigured(mode: StripeMode): boolean {
-  return secretKeyFor(mode) !== null;
+/** True when a usable secret key is present. */
+export function isStripeConfigured(): boolean {
+  return secretKey() !== null;
 }
 
 /**
- * Guard against the classic and expensive mistake: a live secret key sitting in
- * the test slot, or vice versa. Stripe key prefixes make this checkable, so it
- * is checked rather than hoped for.
+ * Report the mode the configured key implies, for display only. The key prefix
+ * tells us whether real money is in play — useful to surface in the admin UI so
+ * nobody mistakes a test deployment for a live one, or vice versa.
  */
-export function detectKeyMismatch(mode: StripeMode): string | null {
-  const key = secretKeyFor(mode);
-  if (!key) return null;
-
-  const isLiveKey = key.startsWith("sk_live_") || key.startsWith("rk_live_");
-  const isTestKey = key.startsWith("sk_test_") || key.startsWith("rk_test_");
-
-  if (mode === "live" && isTestKey) {
-    return "STRIPE_SECRET_KEY_LIVE holds a TEST key — live payments would not be real.";
-  }
-  if (mode === "test" && isLiveKey) {
-    return "STRIPE_SECRET_KEY_TEST holds a LIVE key — test actions would charge real cards.";
-  }
-  if (!isLiveKey && !isTestKey) {
-    return `The ${mode} secret key does not look like a Stripe secret key.`;
-  }
-  return null;
+export function detectKeyKind(): "live" | "test" | "unknown" | "missing" {
+  const key = secretKey();
+  if (!key) return "missing";
+  if (key.startsWith("sk_live_") || key.startsWith("rk_live_")) return "live";
+  if (key.startsWith("sk_test_") || key.startsWith("rk_test_")) return "test";
+  return "unknown";
 }
 
-// Clients are cached per mode: constructing one opens a keep-alive HTTP agent,
-// and rebuilding it per request wastes connections under load.
-const clients = new Map<StripeMode, Stripe>();
+let client: Stripe | null = null;
 
-export function getStripe(mode: StripeMode): Stripe {
-  const cached = clients.get(mode);
-  if (cached) return cached;
+export function getStripe(): Stripe {
+  if (client) return client;
 
-  const key = secretKeyFor(mode);
-  if (!key) throw new StripeNotConfiguredError(mode);
+  const key = secretKey();
+  if (!key) throw new StripeNotConfiguredError();
 
-  const mismatch = detectKeyMismatch(mode);
-  if (mismatch) {
-    // Loud, because the consequence is either fake "real" payments or real
-    // charges during testing.
-    console.error("[stripe] KEY MISMATCH:", mismatch);
-  }
-
-  const client = new Stripe(key, {
+  client = new Stripe(key, {
     apiVersion: API_VERSION,
-    // Surfaces this app in Stripe's dashboard request logs, which makes
-    // debugging a specific call far easier.
+    // Surfaces this app in Stripe's dashboard request logs.
     appInfo: { name: "SAM Plan AI", version: "1.0.0" },
     // Transient network failures are common and safe to retry: the SDK sends an
     // idempotency key on writes, so a retry cannot double-charge.
     maxNetworkRetries: 2,
   });
 
-  clients.set(mode, client);
   return client;
 }
 
 export interface BillingConfig {
   stripeEnabled: boolean;
-  mode: StripeMode;
   trialEnabled: boolean;
   trialDays: number;
   trialPlanId: string | null;
   trialRequiresCard: boolean;
-  /** Initiatives allowed for the WHOLE trial, not per period. */
-  trialInitiativeCap: number;
   dunningGraceDays: number;
 }
 
@@ -131,12 +107,10 @@ const FALLBACK_CONFIG: BillingConfig = {
   // false as "everyone has access". A read failure degrades to the pre-Stripe
   // app rather than locking every customer out.
   stripeEnabled: false,
-  mode: "test",
   trialEnabled: true,
   trialDays: 14,
   trialPlanId: null,
   trialRequiresCard: false,
-  trialInitiativeCap: 3,
   dunningGraceDays: 7,
 };
 
@@ -150,8 +124,8 @@ export async function loadBillingConfig(db: SupabaseClient): Promise<BillingConf
   const { data, error } = await db
     .from("app_settings")
     .select(
-      "stripe_enabled, stripe_mode, trial_enabled, trial_days, trial_plan_id, " +
-      "trial_requires_card, trial_initiative_cap, dunning_grace_days"
+      "stripe_enabled, trial_enabled, trial_days, trial_plan_id, " +
+      "trial_requires_card, dunning_grace_days"
     )
     .eq("id", "global")
     .maybeSingle();
@@ -161,26 +135,19 @@ export async function loadBillingConfig(db: SupabaseClient): Promise<BillingConf
     return FALLBACK_CONFIG;
   }
 
-  // Cast via `unknown`: supabase-js cannot infer a row shape from a concatenated
-  // select string and falls back to a union including an error type.
   const row = data as unknown as {
-    stripe_enabled: boolean | null; stripe_mode: string | null;
+    stripe_enabled: boolean | null;
     trial_enabled: boolean | null; trial_days: number | null;
     trial_plan_id: string | null; trial_requires_card: boolean | null;
-    trial_initiative_cap: number | null; dunning_grace_days: number | null;
+    dunning_grace_days: number | null;
   };
-
-  const mode: StripeMode = row.stripe_mode === "live" ? "live" : "test";
 
   return {
     stripeEnabled: row.stripe_enabled === true,
-    mode,
     trialEnabled: row.trial_enabled !== false,
     trialDays: typeof row.trial_days === "number" ? row.trial_days : 14,
     trialPlanId: row.trial_plan_id ?? null,
     trialRequiresCard: row.trial_requires_card === true,
-    trialInitiativeCap:
-      typeof row.trial_initiative_cap === "number" ? row.trial_initiative_cap : 3,
     dunningGraceDays:
       typeof row.dunning_grace_days === "number" ? row.dunning_grace_days : 7,
   };

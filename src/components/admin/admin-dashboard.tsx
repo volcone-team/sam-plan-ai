@@ -66,16 +66,42 @@ function formatRelative(iso: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-const systemStatus: StatusItem[] = [
-  { label: "API", status: "healthy", description: "Healthy" },
-  { label: "Database", status: "connected", description: "Connected" },
-  { label: "AI Service", status: "ready", description: "Ready" },
-  { label: "Stripe", status: "warning", description: "Not connected" },
-];
-
 function getStatusColor(status: SystemStatus): string {
   if (status === "warning") return "bg-yellow-400";
   return "bg-green-500";
+}
+
+/**
+ * Build the system status list. Stripe is now DERIVED from real state rather
+ * than hardcoded "Not connected": enabled and configured is green, configured
+ * but switched off is a neutral note, and missing a key is the warning.
+ */
+function buildSystemStatus(stripe: {
+  enabled: boolean; mode: string; configured: boolean;
+} | null): StatusItem[] {
+  let stripeStatus: SystemStatus = "warning";
+  let stripeDescription = "Not connected";
+
+  if (stripe) {
+    if (!stripe.configured) {
+      stripeStatus = "warning";
+      stripeDescription = `No ${stripe.mode} key`;
+    } else if (stripe.enabled) {
+      stripeStatus = "connected";
+      stripeDescription = `Connected (${stripe.mode})`;
+    } else {
+      // Keys present but billing off — not a fault, just not enforcing payment.
+      stripeStatus = "connected";
+      stripeDescription = `Ready (${stripe.mode}, billing off)`;
+    }
+  }
+
+  return [
+    { label: "API", status: "healthy", description: "Healthy" },
+    { label: "Database", status: "connected", description: "Connected" },
+    { label: "AI Service", status: "ready", description: "Ready" },
+    { label: "Stripe", status: stripeStatus, description: stripeDescription },
+  ];
 }
 
 /**
@@ -88,6 +114,9 @@ export function AdminDashboard() {
     totalCompanies: number;
     activePlans: number;
     aiGenerations: number;
+  } | null>(null);
+  const [stripe, setStripe] = useState<{
+    enabled: boolean; mode: string; configured: boolean;
   } | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -111,6 +140,7 @@ export function AdminDashboard() {
         const data = await res.json();
         if (res.ok && data.stats) {
           setStats(data.stats);
+          if (data.stripe) setStripe(data.stripe);
         } else {
           console.error("[AdminDashboard] Stats error:", data.error);
         }
@@ -266,7 +296,7 @@ export function AdminDashboard() {
               </h2>
             </div>
             <ul className="divide-y divide-border">
-              {systemStatus.map((item) => (
+              {buildSystemStatus(stripe).map((item) => (
                 <li
                   key={item.label}
                   className="flex items-center justify-between px-6 py-4"

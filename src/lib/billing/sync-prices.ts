@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getStripe, toMinorUnits, type StripeMode } from "./stripe-client";
+import { getStripe, toMinorUnits, STRIPE_MODE_TAG } from "./stripe-client";
 
 /**
  * Sync `subscription_plans` into Stripe products and prices.
@@ -20,7 +20,6 @@ import { getStripe, toMinorUnits, type StripeMode } from "./stripe-client";
  */
 
 export interface SyncResult {
-  mode: StripeMode;
   created: string[];
   updated: string[];
   unchanged: string[];
@@ -52,13 +51,11 @@ const CYCLES = [
   { cycle: "annual" as const, interval: "year" as const, field: "annual_price" as const },
 ];
 
-export async function syncPlansToStripe(
-  db: SupabaseClient,
-  mode: StripeMode
-): Promise<SyncResult> {
-  const stripe = getStripe(mode);
+export async function syncPlansToStripe(db: SupabaseClient): Promise<SyncResult> {
+  const stripe = getStripe();
+  const mode = STRIPE_MODE_TAG;
   const result: SyncResult = {
-    mode, created: [], updated: [], unchanged: [], skipped: [], errors: [],
+    created: [], updated: [], unchanged: [], skipped: [], errors: [],
   };
 
   const { data: plans, error: plansErr } = await db
@@ -221,10 +218,10 @@ export async function syncPlansToStripe(
  */
 export async function migrateSubscribersToCurrentPrice(
   db: SupabaseClient,
-  mode: StripeMode,
   planId: string
 ): Promise<{ migrated: number; skipped: number; errors: string[] }> {
-  const stripe = getStripe(mode);
+  const stripe = getStripe();
+  const mode = STRIPE_MODE_TAG;
   const out = { migrated: 0, skipped: 0, errors: [] as string[] };
 
   const { data: prices } = await db

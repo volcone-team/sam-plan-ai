@@ -3,9 +3,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 import {
   getStripe,
-  webhookSecretFor,
-  loadBillingConfig,
-  type StripeMode,
+  webhookSecret,
+  STRIPE_MODE_TAG,
 } from "@/lib/billing/stripe-client";
 import {
   isHandledEvent,
@@ -65,15 +64,12 @@ function adminClient(): SupabaseClient {
 export async function POST(request: Request) {
   const db = adminClient();
 
-  // The mode the app is CURRENTLY in decides which signing secret applies. A
-  // webhook from the other universe will fail verification, which is correct:
-  // test events must never mutate live records.
-  const config = await loadBillingConfig(db);
-  const mode: StripeMode = config.mode;
+  // Single webhook secret; the key in the environment is the only universe.
+  const mode = STRIPE_MODE_TAG;
 
-  const secret = webhookSecretFor(mode);
+  const secret = webhookSecret();
   if (!secret) {
-    console.error("[stripe/webhook] No signing secret configured for", mode);
+    console.error("[stripe/webhook] No signing secret configured (STRIPE_WEBHOOK_SECRET)");
     return NextResponse.json({ error: "not_configured" }, { status: 503 });
   }
 
@@ -89,7 +85,7 @@ export async function POST(request: Request) {
 
   let event: Stripe.Event;
   try {
-    event = getStripe(mode).webhooks.constructEvent(rawBody, signature, secret);
+    event = getStripe().webhooks.constructEvent(rawBody, signature, secret);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn("[stripe/webhook] Signature verification failed:", message);
@@ -151,7 +147,7 @@ export async function POST(request: Request) {
 
 async function handleEvent(
   db: SupabaseClient,
-  mode: StripeMode,
+  mode: string,
   event: Stripe.Event
 ): Promise<void> {
   switch (event.type) {
@@ -202,10 +198,10 @@ async function handleEvent(
  */
 async function syncSubscription(
   db: SupabaseClient,
-  mode: StripeMode,
+  mode: string,
   subscriptionId: string
 ): Promise<void> {
-  const stripe = getStripe(mode);
+  const stripe = getStripe();
   const sub = await stripe.subscriptions.retrieve(subscriptionId);
 
   const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
@@ -290,7 +286,7 @@ async function syncSubscription(
 
 async function resolveCompanyId(
   db: SupabaseClient,
-  mode: StripeMode,
+  mode: string,
   customerId: string,
   metadata: Stripe.Metadata | null
 ): Promise<string | null> {
@@ -318,7 +314,7 @@ async function resolveCompanyId(
 
 async function resolvePlanId(
   db: SupabaseClient,
-  mode: StripeMode,
+  mode: string,
   priceId: string
 ): Promise<string | null> {
   // Not filtered on is_current: a grandfathered subscriber legitimately sits on
@@ -335,7 +331,7 @@ async function resolvePlanId(
 /** Upsert an invoice for the billing history view. */
 async function recordInvoice(
   db: SupabaseClient,
-  mode: StripeMode,
+  mode: string,
   invoice: Stripe.Invoice
 ): Promise<void> {
   const customerId =
@@ -394,3 +390,4 @@ async function recordInvoice(
 
   if (error) throw new Error(`Invoice upsert failed: ${error.message}`);
 }
+

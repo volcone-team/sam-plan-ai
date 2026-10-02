@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
-import { getStripe, loadBillingConfig } from "@/lib/billing/stripe-client";
+import { getStripe, loadBillingConfig, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client";
 import { classifyPlanChange, changeTiming } from "@/lib/billing/limits";
 import { findCurrentPhase, scheduleActionFor } from "@/lib/billing/plan-change";
 
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
       // A comped account has no Stripe subscription to modify.
       return NextResponse.json({ error: "comped_account" }, { status: 400 });
     }
-    if (!sub?.stripe_subscription_id || sub.stripe_mode !== config.mode) {
+    if (!sub?.stripe_subscription_id || sub.stripe_mode !== STRIPE_MODE_TAG) {
       return NextResponse.json({ error: "no_subscription" }, { status: 404 });
     }
 
@@ -107,7 +107,7 @@ export async function POST(request: Request) {
 
     // Fetched BEFORE classification: the price Stripe is actually charging is the
     // fallback when our own price table cannot identify the current amount.
-    const stripeSubEarly = await getStripe(config.mode).subscriptions.retrieve(
+    const stripeSubEarly = await getStripe().subscriptions.retrieve(
       sub.stripe_subscription_id
     );
 
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
     const { data: prices } = await db
       .from("stripe_prices")
       .select("plan_id, billing_cycle, stripe_price_id, unit_amount, is_current")
-      .eq("stripe_mode", config.mode)
+      .eq("stripe_mode", STRIPE_MODE_TAG)
       .in("plan_id", [targetPlanId, sub.plan_id].filter(Boolean) as string[]);
 
     const rows = (prices ?? []) as {
@@ -182,7 +182,7 @@ export async function POST(request: Request) {
     }
 
     const timing = changeTiming(kind);
-    const stripe = getStripe(config.mode);
+    const stripe = getStripe();
     // Reused from the classification step above rather than fetched twice.
     const stripeSub = stripeSubEarly;
     const itemId = stripeSub.items.data[0]?.id;

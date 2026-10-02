@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
-import { getStripe, loadBillingConfig } from "@/lib/billing/stripe-client";
+import { getStripe, loadBillingConfig, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client";
 import { getAppUrl } from "@/lib/app-url";
 
 export const runtime = "nodejs";
@@ -74,12 +74,11 @@ export async function POST() {
       .eq("company_id", profile.company_id)
       .maybeSingle();
 
-    // Mode must match: a test-mode customer id does not exist in live Stripe.
-    if (!sub?.stripe_customer_id || sub.stripe_mode !== config.mode) {
+    if (!sub?.stripe_customer_id || sub.stripe_mode !== STRIPE_MODE_TAG) {
       return NextResponse.json({ error: "no_customer" }, { status: 404 });
     }
 
-    const session = await getStripe(config.mode).billingPortal.sessions.create({
+    const session = await getStripe().billingPortal.sessions.create({
       customer: sub.stripe_customer_id,
       return_url: `${getAppUrl()}/settings`,
     });

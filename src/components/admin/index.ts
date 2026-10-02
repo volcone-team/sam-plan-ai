@@ -16,4 +16,4 @@ export { AiTools } from "./ai-tools";
 export { BillingManagement } from "./billing-management";
 export { BenchmarkManagement } from "./benchmark-management";
 export { ContentManagement } from "./content-management";
-export { SubscriptionManagement } from "./subscription-management";
+export { SubscriptionOverview } from "./subscription-overview";

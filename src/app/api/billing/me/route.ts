@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
-import { loadBillingConfig } from "@/lib/billing/stripe-client";
+import { loadBillingConfig, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client";
 import { evaluateAccess } from "@/lib/billing/entitlement";
 import { resolveUsagePeriod, checkLimit } from "@/lib/billing/limits";
 
@@ -73,7 +73,7 @@ export async function GET() {
     const { data: prices } = await db
       .from("stripe_prices")
       .select("plan_id, billing_cycle")
-      .eq("stripe_mode", config.mode)
+      .eq("stripe_mode", STRIPE_MODE_TAG)
       .eq("is_current", true);
 
     const purchasable = new Set(
@@ -244,7 +244,7 @@ export async function GET() {
             // Drives whether the portal link is shown: no Stripe subscription in
             // the active mode means there is nothing for the portal to manage.
             hasStripeSubscription:
-              !!sub.stripe_subscription_id && sub.stripe_mode === config.mode,
+              !!sub.stripe_subscription_id && sub.stripe_mode === STRIPE_MODE_TAG,
           }
         : null,
       access: {

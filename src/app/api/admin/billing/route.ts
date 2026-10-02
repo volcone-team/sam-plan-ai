@@ -3,10 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import { requireSuperAdmin } from "@/lib/require-admin";
 import { logActivity } from "@/lib/activity-log";
 import {
-  isModeConfigured,
-  detectKeyMismatch,
+  isStripeConfigured,
+  detectKeyKind,
   loadBillingConfig,
-  type StripeMode,
 } from "@/lib/billing/stripe-client";
 import { syncPlansToStripe, migrateSubscribersToCurrentPrice } from "@/lib/billing/sync-prices";
 
@@ -20,12 +19,13 @@ export const maxDuration = 60;
  * customers are charged, how much, and in which Stripe universe, so plain admins
  * are excluded deliberately.
  *
- * GET  → current settings, key configuration status, prices, plans.
- * PUT  → update settings (enable, mode, trial, dunning).
+ * GET  → current settings, Stripe key status, prices, plans.
+ * PUT  → update settings (enable, trial, dunning). No mode toggle — the single
+ *        STRIPE_SECRET_KEY in the environment is the only universe.
  * POST → actions: sync_prices | migrate_price
  *
- * Reports which modes have keys WITHOUT ever returning a key value, so the UI
- * can explain "live mode has no key" rather than failing mysteriously later.
+ * Reports WHETHER a key is configured and what kind it looks like (test/live),
+ * without ever returning the key value.
  */
 
 function adminClient() {
@@ -59,7 +59,6 @@ export async function GET() {
       .select("plan_id, stripe_mode, billing_cycle, stripe_price_id, unit_amount, is_current, created_at")
       .order("created_at", { ascending: false });
 
-    // Subscriber counts by state, so the mode toggle can warn before switching.
     const { count: liveSubCount } = await db
       .from("subscriptions")
       .select("id", { count: "exact", head: true })
@@ -73,20 +72,16 @@ export async function GET() {
     return NextResponse.json({
       settings: {
         stripeEnabled: config.stripeEnabled,
-        stripeMode: config.mode,
         trialEnabled: config.trialEnabled,
         trialDays: config.trialDays,
         trialPlanId: config.trialPlanId,
         trialRequiresCard: config.trialRequiresCard,
-        trialInitiativeCap: config.trialInitiativeCap,
         dunningGraceDays: config.dunningGraceDays,
       },
-      // Never the keys themselves — only whether each mode is usable.
+      // Whether a key is configured and what kind it looks like — never the key.
       keys: {
-        testConfigured: isModeConfigured("test"),
-        liveConfigured: isModeConfigured("live"),
-        testWarning: detectKeyMismatch("test"),
-        liveWarning: detectKeyMismatch("live"),
+        configured: isStripeConfigured(),
+        kind: detectKeyKind(), // 'live' | 'test' | 'unknown' | 'missing'
       },
       plans: plans ?? [],
       prices: prices ?? [],
@@ -125,38 +120,13 @@ export async function PUT(req: Request) {
       if (typeof body.stripeEnabled !== "boolean") {
         return NextResponse.json({ error: "stripeEnabled" }, { status: 400 });
       }
-      // Refuse to enable billing with no usable key: customers would hit a
-      // paywall that cannot take payment, locking them out of the product.
-      if (body.stripeEnabled) {
-        const config = await loadBillingConfig(db);
-        const targetMode: StripeMode =
-          (body.stripeMode as StripeMode) === "live" ||
-          (body.stripeMode === undefined && config.mode === "live")
-            ? "live"
-            : "test";
-        if (!isModeConfigured(targetMode)) {
-          return NextResponse.json(
-            { error: "key_missing", mode: targetMode },
-            { status: 400 }
-          );
-        }
+      // Refuse to enable billing with no key: customers would hit a paywall that
+      // cannot take payment, locking them out of a product they could use.
+      if (body.stripeEnabled && !isStripeConfigured()) {
+        return NextResponse.json({ error: "key_missing" }, { status: 400 });
       }
       patch.stripe_enabled = body.stripeEnabled;
       changed.stripeEnabled = body.stripeEnabled;
-    }
-
-    if (body.stripeMode !== undefined) {
-      if (body.stripeMode !== "test" && body.stripeMode !== "live") {
-        return NextResponse.json({ error: "stripeMode" }, { status: 400 });
-      }
-      if (!isModeConfigured(body.stripeMode)) {
-        return NextResponse.json(
-          { error: "key_missing", mode: body.stripeMode },
-          { status: 400 }
-        );
-      }
-      patch.stripe_mode = body.stripeMode;
-      changed.stripeMode = body.stripeMode;
     }
 
     if (body.trialEnabled !== undefined) {
@@ -194,15 +164,6 @@ export async function PUT(req: Request) {
       }
       patch.trial_requires_card = body.trialRequiresCard;
       changed.trialRequiresCard = body.trialRequiresCard;
-    }
-
-    if (body.trialInitiativeCap !== undefined) {
-      const cap = Number(body.trialInitiativeCap);
-      if (!Number.isFinite(cap) || cap < 0 || cap > 1000) {
-        return NextResponse.json({ error: "trialInitiativeCap" }, { status: 400 });
-      }
-      patch.trial_initiative_cap = Math.floor(cap);
-      changed.trialInitiativeCap = Math.floor(cap);
     }
 
     if (body.dunningGraceDays !== undefined) {
@@ -261,7 +222,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: check.error }, { status: check.status });
     }
 
-    let body: { action?: unknown; planId?: unknown; mode?: unknown } = {};
+    let body: { action?: unknown; planId?: unknown } = {};
     try {
       const parsed = await req.json();
       if (parsed && typeof parsed === "object") body = parsed;
@@ -270,19 +231,16 @@ export async function POST(req: Request) {
     }
 
     const db = adminClient();
-    const config = await loadBillingConfig(db);
-    const mode: StripeMode =
-      body.mode === "live" || body.mode === "test" ? body.mode : config.mode;
 
-    if (!isModeConfigured(mode)) {
-      return NextResponse.json({ error: "key_missing", mode }, { status: 400 });
+    if (!isStripeConfigured()) {
+      return NextResponse.json({ error: "key_missing" }, { status: 400 });
     }
 
     const { data: actor } = await db
       .from("profiles").select("email").eq("id", check.userId).maybeSingle();
 
     if (body.action === "sync_prices") {
-      const result = await syncPlansToStripe(db, mode);
+      const result = await syncPlansToStripe(db);
 
       await logActivity(
         {
@@ -291,7 +249,7 @@ export async function POST(req: Request) {
           action: "billing.prices_synced",
           targetType: "stripe_prices",
           targetId: null,
-          targetLabel: mode,
+          targetLabel: null,
           metadata: {
             created: result.created.length,
             updated: result.updated.length,
@@ -311,7 +269,7 @@ export async function POST(req: Request) {
 
       // Changes what real customers are charged, so it is audited as its own
       // action rather than being a side effect of syncing.
-      const result = await migrateSubscribersToCurrentPrice(db, mode, body.planId);
+      const result = await migrateSubscribersToCurrentPrice(db, body.planId);
 
       await logActivity(
         {
@@ -320,7 +278,7 @@ export async function POST(req: Request) {
           action: "billing.subscribers_migrated",
           targetType: "subscription_plans",
           targetId: body.planId,
-          targetLabel: mode,
+          targetLabel: null,
           metadata: result,
         },
         db

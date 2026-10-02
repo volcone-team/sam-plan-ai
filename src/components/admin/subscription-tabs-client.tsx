@@ -2,24 +2,23 @@
 
 import { useState } from 'react';
 import { CreditCard, Settings, Zap } from 'lucide-react';
-import { SubscriptionManagement } from './subscription-management';
+import { SubscriptionOverview } from './subscription-overview';
 import { SubscriptionPlanEditor } from './subscription-plan-editor';
 import { BillingManagement } from './billing-management';
 
-type SubTab = 'billing' | 'overview' | 'manage-plans';
+type SubTab = 'overview' | 'billing' | 'manage-plans';
 
 /**
- * Billing is the DEFAULT tab: it is the only one backed by real Stripe data.
- * 'Overview' is the original mock panel, kept for its layout but clearly labelled
- * as sample data so nobody mistakes its numbers for real revenue.
+ * Overview now shows REAL revenue aggregates (it was a hardcoded mock), so it is
+ * the default again. Billing & Stripe holds the controls and per-account detail.
  */
 export function SubscriptionTabsClient() {
-  const [activeTab, setActiveTab] = useState<SubTab>('billing');
+  const [activeTab, setActiveTab] = useState<SubTab>('overview');
 
   const tabs = [
+    { key: 'overview' as const, label: 'Overview', icon: CreditCard },
     { key: 'billing' as const, label: 'Billing & Stripe', icon: Zap },
     { key: 'manage-plans' as const, label: 'Manage Plans', icon: Settings },
-    { key: 'overview' as const, label: 'Overview (sample)', icon: CreditCard },
   ];
 
   return (
@@ -41,17 +40,9 @@ export function SubscriptionTabsClient() {
         ))}
       </div>
 
+      {activeTab === 'overview' && <SubscriptionOverview />}
       {activeTab === 'billing' && <BillingManagement />}
       {activeTab === 'manage-plans' && <SubscriptionPlanEditor />}
-      {activeTab === 'overview' && (
-        <div className="space-y-4">
-          <div className="rounded-[var(--radius-md)] border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-            This tab shows placeholder figures from the original prototype, not real
-            data. Use the Billing &amp; Stripe tab for actual subscribers and payments.
-          </div>
-          <SubscriptionManagement />
-        </div>
-      )}
     </div>
   );
 }

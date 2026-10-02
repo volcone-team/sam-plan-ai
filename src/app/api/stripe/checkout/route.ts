@@ -5,8 +5,8 @@ import { cookies } from "next/headers";
 import {
   getStripe,
   loadBillingConfig,
-  isModeConfigured,
-  type StripeMode,
+  isStripeConfigured,
+  STRIPE_MODE_TAG,
 } from "@/lib/billing/stripe-client";
 import { getAppUrl } from "@/lib/app-url";
 import { isLiveSubscription } from "@/lib/billing/plan-change";
@@ -81,9 +81,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "billing_disabled" }, { status: 403 });
     }
 
-    const mode: StripeMode = config.mode;
-    if (!isModeConfigured(mode)) {
-      console.error("[stripe/checkout] Mode not configured:", mode);
+    const mode = STRIPE_MODE_TAG;
+    if (!isStripeConfigured()) {
+      console.error("[stripe/checkout] Stripe not configured (STRIPE_SECRET_KEY)");
       return NextResponse.json({ error: "not_configured" }, { status: 503 });
     }
 
@@ -134,7 +134,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "already_subscribed" }, { status: 400 });
     }
 
-    const stripe = getStripe(mode);
+    const stripe = getStripe();
 
     /**
      * SECOND GUARD, ASKING STRIPE DIRECTLY.

@@ -75,7 +75,6 @@ export async function GET(request: Request) {
       // running a query with an empty IN filter.
       if (companyIdFilter.length === 0) {
         return NextResponse.json({
-          mode: config.mode,
           stripeEnabled: config.stripeEnabled,
           subscribers: [],
           invoices: [],
@@ -252,7 +251,6 @@ export async function GET(request: Request) {
       .limit(invoiceLimit);
 
     return NextResponse.json({
-      mode: config.mode,
       stripeEnabled: config.stripeEnabled,
       subscribers,
       invoices: ((invoices ?? []) as unknown as Record<string, unknown>[]).map((i) => ({

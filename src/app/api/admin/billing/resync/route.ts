@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireSuperAdmin } from "@/lib/require-admin";
-import { getStripe, loadBillingConfig, type StripeMode } from "@/lib/billing/stripe-client";
+import { getStripe, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client";
 import { isEnding } from "@/lib/billing/webhook-logic";
 
 export const runtime = "nodejs";
@@ -55,9 +55,8 @@ export async function POST() {
     }
 
     const db = adminClient();
-    const config = await loadBillingConfig(db);
-    const mode: StripeMode = config.mode;
-    const stripe = getStripe(mode);
+    const mode = STRIPE_MODE_TAG;
+    const stripe = getStripe();
 
     const results: { synced: string[]; skipped: string[]; errors: string[] } = {
       synced: [], skipped: [], errors: [],

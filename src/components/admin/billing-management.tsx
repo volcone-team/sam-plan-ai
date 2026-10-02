@@ -22,12 +22,10 @@ import { ServerDataTable, type ServerColumn } from "@/components/ui/server-data-
 
 interface BillingSettings {
   stripeEnabled: boolean;
-  stripeMode: "test" | "live";
   trialEnabled: boolean;
   trialDays: number;
   trialPlanId: string | null;
   trialRequiresCard: boolean;
-  trialInitiativeCap: number;
   dunningGraceDays: number;
 }
 
@@ -52,10 +50,8 @@ interface PriceRow {
 interface BillingResponse {
   settings: BillingSettings;
   keys: {
-    testConfigured: boolean;
-    liveConfigured: boolean;
-    testWarning: string | null;
-    liveWarning: string | null;
+    configured: boolean;
+    kind: "live" | "test" | "unknown" | "missing";
   };
   plans: Plan[];
   prices: PriceRow[];
@@ -308,7 +304,6 @@ export function BillingManagement() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const [trialDaysDraft, setTrialDaysDraft] = useState("");
-  const [trialCapDraft, setTrialCapDraft] = useState("");
   const [graceDraft, setGraceDraft] = useState("");
   // Bumped after a mutation so the table reloads its CURRENT page, preserving the
   // admin's search term and position rather than resetting them.
@@ -365,7 +360,6 @@ export function BillingManagement() {
       setBilling(b);
       setData(s);
       setTrialDaysDraft(String(b.settings.trialDays));
-      setTrialCapDraft(String(b.settings.trialInitiativeCap));
       setGraceDraft(String(b.settings.dunningGraceDays));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -410,12 +404,6 @@ export function BillingManagement() {
       setBusy(false);
     }
   };
-
-  // Keep drafts in step after a reload so the Save buttons disable correctly.
-  useEffect(() => {
-    if (!billing) return;
-    setTrialCapDraft(String(billing.settings.trialInitiativeCap));
-  }, [billing]);
 
   const runAction = async (payload: Record<string, unknown>, ok: string) => {
     setBusy(true);
@@ -565,9 +553,8 @@ export function BillingManagement() {
 
   const s = billing?.settings;
   const keys = billing?.keys;
-  const currentModePrices = (billing?.prices ?? []).filter(
-    (p) => p.stripe_mode === s?.stripeMode && p.is_current
-  );
+  // One key universe now, so every current price is the active one.
+  const currentModePrices = (billing?.prices ?? []).filter((p) => p.is_current);
 
   return (
     <div className="space-y-8">
@@ -583,42 +570,34 @@ export function BillingManagement() {
         </div>
       )}
 
-      {/* Key status — surfaced first, because everything else depends on it. */}
+      {/* Key status — one key pair; test vs live is whatever is in the env. */}
       {keys && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {(["test", "live"] as const).map((m) => {
-            const configured = m === "test" ? keys.testConfigured : keys.liveConfigured;
-            const warning = m === "test" ? keys.testWarning : keys.liveWarning;
-            return (
-              <div key={m} className="rounded-[var(--radius-lg)] border border-border bg-card p-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium capitalize">{m} mode keys</p>
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.5 text-xs font-medium",
-                      configured
-                        ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300"
-                        : "bg-[hsl(var(--background-muted))] text-[hsl(var(--foreground-muted))]"
-                    )}
-                  >
-                    {configured ? "Configured" : "Not set"}
-                  </span>
-                </div>
-                {warning && (
-                  <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
-                    <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    {warning}
-                  </p>
-                )}
-                {!configured && (
-                  <p className="mt-2 text-xs text-[hsl(var(--foreground-muted))]">
-                    Set STRIPE_SECRET_KEY_{m.toUpperCase()} and
-                    STRIPE_WEBHOOK_SECRET_{m.toUpperCase()}.
-                  </p>
-                )}
-              </div>
-            );
-          })}
+        <div className="rounded-[var(--radius-lg)] border border-border bg-card p-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium">Stripe key</p>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-xs font-medium",
+                keys.configured
+                  ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300"
+                  : "bg-[hsl(var(--background-muted))] text-[hsl(var(--foreground-muted))]"
+              )}
+            >
+              {keys.configured ? `Configured (${keys.kind} key)` : "Not set"}
+            </span>
+          </div>
+          {!keys.configured && (
+            <p className="mt-2 text-xs text-[hsl(var(--foreground-muted))]">
+              Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET in the environment.
+              Test keys in development, live keys in production.
+            </p>
+          )}
+          {keys.kind === "unknown" && (
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              That key does not look like a Stripe secret key.
+            </p>
+          )}
         </div>
       )}
 
@@ -654,43 +633,8 @@ export function BillingManagement() {
               />
             </div>
 
-            {/* Mode */}
-            <div className="border-t border-border pt-5">
-              <p className="text-sm font-medium">Stripe mode</p>
-              <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">
-                Test and live are separate Stripe accounts with separate data. Customers
-                and subscriptions created in one do not exist in the other, so switching
-                does not carry anything across.
-              </p>
-              {(billing?.counts.stripeSubscriptions ?? 0) > 0 && (
-                <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
-                  <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  {billing?.counts.stripeSubscriptions} subscription(s) already exist. They
-                  belong to the mode that created them and will be ignored in the other mode.
-                </p>
-              )}
-              <div className="mt-3 flex gap-2">
-                {(["test", "live"] as const).map((m) => {
-                  const configured = m === "test" ? keys?.testConfigured : keys?.liveConfigured;
-                  return (
-                    <button
-                      key={m}
-                      disabled={busy || !configured}
-                      onClick={() => saveSettings({ stripeMode: m }, `Switched to ${m} mode.`)}
-                      className={cn(
-                        "rounded-[var(--radius-md)] px-4 py-2 text-sm font-medium capitalize transition-colors disabled:opacity-40",
-                        s.stripeMode === m
-                          ? "bg-[hsl(var(--primary))] text-white"
-                          : "border border-border hover:bg-[hsl(var(--background-muted))]"
-                      )}
-                    >
-                      {m}
-                      {!configured && " (no key)"}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            {/* No mode toggle: the single key in the environment decides test
+                vs live. The key-status card above shows which kind is active. */}
 
             {/* Trial */}
             <div className="border-t border-border pt-5">
@@ -699,8 +643,9 @@ export function BillingManagement() {
                   <p className="text-sm font-medium">Free trial</p>
                   <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">
                     The trial starts the moment someone registers — no card, no checkout.
-                    They get the initiative allowance set below for the number of days
-                    set, then keep read-only access to the dashboard until they upgrade.
+                    For the number of days set they get the Starter plan&apos;s limits;
+                    after that they keep read-only access to the dashboard until they
+                    upgrade.
                   </p>
                 </div>
                 <Toggle
@@ -735,61 +680,16 @@ export function BillingManagement() {
                     </button>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label htmlFor="trial-cap" className="text-xs text-[hsl(var(--foreground-muted))]">
-                      Initiatives allowed during the trial
-                    </label>
-                    <input
-                      id="trial-cap"
-                      type="number"
-                      min={0}
-                      max={1000}
-                      value={trialCapDraft}
-                      onChange={(e) => setTrialCapDraft(e.target.value)}
-                      className="w-24 rounded-[var(--radius-md)] border border-border bg-background px-3 py-1.5 text-sm"
-                    />
-                    <button
-                      disabled={busy || trialCapDraft === String(s.trialInitiativeCap)}
-                      onClick={() =>
-                        saveSettings(
-                          { trialInitiativeCap: Number(trialCapDraft) },
-                          "Trial initiative allowance saved."
-                        )
-                      }
-                      className="rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
-                    >
-                      Save
-                    </button>
-                    <span className="text-xs text-[hsl(var(--foreground-muted))]">
-                      Total for the whole trial — quickstart and full combined.
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label htmlFor="trial-plan" className="text-xs text-[hsl(var(--foreground-muted))]">
-                      Other limits mirror
-                    </label>
-                    <select
-                      id="trial-plan"
-                      value={s.trialPlanId ?? ""}
-                      disabled={busy}
-                      onChange={(e) =>
-                        saveSettings({ trialPlanId: e.target.value || null }, "Trial plan saved.")
-                      }
-                      className="rounded-[var(--radius-md)] border border-border bg-background px-3 py-1.5 text-sm"
-                    >
-                      <option value="">Default plan</option>
-                      {(billing?.plans ?? []).map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                  <p className="text-xs text-[hsl(var(--foreground-muted))]">
+                    Trial accounts get the limits of the plan marked as default
+                    (Starter). There is no separate trial allowance — the only trial
+                    control is how many days it lasts.
+                  </p>
 
                   {/*
-                    The "require a card" toggle was removed: the trial no longer
-                    runs through Stripe Checkout, so there is no point at which a
-                    card could be collected for it. Upgrading is a separate,
-                    deliberate purchase.
+                    Removed: the per-trial initiative cap (a trial now simply uses
+                    Starter's limits) and the "require a card" toggle (the trial
+                    does not run through Checkout, so no card can be collected).
                   */}
                 </div>
               )}
@@ -829,7 +729,7 @@ export function BillingManagement() {
       {/* Prices */}
       <section aria-label="Stripe prices" className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">Plans in Stripe ({s?.stripeMode})</h2>
+          <h2 className="text-lg font-semibold">Plans in Stripe</h2>
           <div className="flex flex-wrap gap-2">
             <button
               disabled={busy}

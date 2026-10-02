@@ -29,9 +29,9 @@ function env(key) {
   return match ? match[1].trim() : null;
 }
 
-const key = env("STRIPE_SECRET_KEY_TEST");
+const key = env("STRIPE_SECRET_KEY");
 if (!key) {
-  console.error("STRIPE_SECRET_KEY_TEST is not set in .env.local");
+  console.error("STRIPE_SECRET_KEY is not set in .env.local");
   process.exit(1);
 }
 // Hard stop: this script creates and cancels subscriptions. Against a live key it

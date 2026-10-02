@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireAdmin } from "@/lib/require-admin";
+import { loadBillingConfig, isStripeConfigured, detectKeyKind } from "@/lib/billing/stripe-client";
 
 /**
  * GET /api/admin/stats
@@ -53,9 +54,19 @@ export async function GET() {
       aiGenerations,
     };
 
-    console.log("[admin/stats]", JSON.stringify(stats));
+    // Real Stripe status for the dashboard, replacing the hardcoded
+    // "Not connected". Reports against the ACTIVE mode: a configured key for the
+    // mode currently selected is what actually matters.
+    const config = await loadBillingConfig(adminClient);
+    const stripe = {
+      enabled: config.stripeEnabled,
+      mode: detectKeyKind(), // 'live' | 'test' | 'unknown' | 'missing'
+      configured: isStripeConfigured(),
+    };
 
-    return NextResponse.json({ stats });
+    console.log("[admin/stats]", JSON.stringify(stats), "| stripe:", JSON.stringify(stripe));
+
+    return NextResponse.json({ stats, stripe });
   } catch (err: any) {
     console.error("[admin/stats] Error:", err?.message || err);
     return NextResponse.json({ error: err?.message || "Internal error" }, { status: 500 });
