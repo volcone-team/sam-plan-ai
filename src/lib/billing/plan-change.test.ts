@@ -3,6 +3,7 @@ import {
   canStartCheckout,
   scheduleActionFor,
   findCurrentPhase,
+  describePlanChange,
   isLiveSubscription,
 } from "./plan-change";
 
@@ -147,5 +148,109 @@ describe("findCurrentPhase", () => {
 
   it("returns null for no phases", () => {
     expect(findCurrentPhase([], NOW)).toBeNull();
+  });
+});
+
+/**
+ * This copy is the only warning a customer gets before an immediate charge, so
+ * the cases are asserted rather than eyeballed. Showing downgrade wording for an
+ * upgrade would be worse than showing nothing.
+ */
+describe("describePlanChange", () => {
+  const base = {
+    currentPlanName: "Starter",
+    targetPlanName: "Pro",
+    targetCycle: "monthly" as const,
+    targetAmountMinor: 14900,
+    periodEnd: "2026-11-01T00:00:00.000Z",
+  };
+
+  it("warns that an upgrade charges the card today", () => {
+    const p = describePlanChange({ ...base, kind: "upgrade" });
+    expect(p.chargesNow).toBe(true);
+    expect(p.tone).toBe("warn");
+    expect(p.title).toContain("Pro");
+    expect(p.body).toMatch(/charged today/i);
+    expect(p.confirmLabel).toMatch(/pay now/i);
+  });
+
+  it("states the ongoing upgrade price and that the charge is prorated", () => {
+    const p = describePlanChange({ ...base, kind: "upgrade" });
+    expect(p.body).toContain("$149");
+    expect(p.body).toMatch(/per month/);
+    expect(p.body).toMatch(/difference/i);
+  });
+
+  it("makes clear a downgrade costs nothing today", () => {
+    const p = describePlanChange({
+      ...base,
+      kind: "downgrade",
+      currentPlanName: "Pro",
+      targetPlanName: "Starter",
+      targetAmountMinor: 4900,
+    });
+    expect(p.chargesNow).toBe(false);
+    expect(p.tone).toBe("info");
+    expect(p.body).toMatch(/No charge today/i);
+    expect(p.confirmLabel).toMatch(/schedule/i);
+  });
+
+  it("names the date a downgrade takes effect", () => {
+    const p = describePlanChange({
+      ...base,
+      kind: "downgrade",
+      currentPlanName: "Pro",
+      targetPlanName: "Starter",
+    });
+    // Rendered as a readable date, not an ISO string.
+    expect(p.body).toMatch(/Nov 1, 2026/);
+    expect(p.body).toContain("Pro");
+  });
+
+  it("falls back to generic wording when no period end is known", () => {
+    const p = describePlanChange({
+      ...base,
+      kind: "downgrade",
+      currentPlanName: "Pro",
+      targetPlanName: "Starter",
+      periodEnd: null,
+    });
+    expect(p.body).toMatch(/end of your current period/i);
+    expect(p.body).not.toMatch(/Invalid Date/);
+  });
+
+  it("treats a cycle change as charging now", () => {
+    const p = describePlanChange({
+      ...base,
+      kind: "cycle_change",
+      targetCycle: "annual",
+      targetAmountMinor: 149000,
+    });
+    expect(p.chargesNow).toBe(true);
+    expect(p.title).toMatch(/annual/i);
+    expect(p.body).toMatch(/credited/i);
+  });
+
+  it("uses per-year wording for an annual target", () => {
+    const p = describePlanChange({
+      ...base,
+      kind: "upgrade",
+      targetCycle: "annual",
+      targetAmountMinor: 149000,
+    });
+    expect(p.body).toMatch(/per year/);
+  });
+
+  // A missing price must not render "$NaN" or "$undefined" next to a charge.
+  it("omits the amount gracefully when it is unknown", () => {
+    const p = describePlanChange({ ...base, kind: "upgrade", targetAmountMinor: null });
+    expect(p.body).not.toMatch(/NaN|undefined|\$\s/);
+    expect(p.body).toMatch(/Pro rate/);
+  });
+
+  it("describes no-op changes without alarming wording", () => {
+    const p = describePlanChange({ ...base, kind: "same" });
+    expect(p.chargesNow).toBe(false);
+    expect(p.title).toMatch(/no change/i);
   });
 });

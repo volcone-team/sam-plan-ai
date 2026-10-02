@@ -127,12 +127,65 @@ export function nextPastDueSince(args: {
 /**
  * Should a pending plan change be cleared?
  *
- * A scheduled downgrade has been applied once the subscription reports active or
- * trialing again, so the pending target is stale and must not keep showing in the
- * UI as "changing to X".
+ * @deprecated Status alone CANNOT answer this — see shouldClearPendingChange.
+ * Kept only so any older caller keeps compiling; it must not be used for new
+ * decisions.
  */
 export function shouldClearPending(stripeStatus: string): boolean {
   return stripeStatus === "active" || stripeStatus === "trialing";
+}
+
+export interface PendingChangeState {
+  stripeStatus: string;
+  /** Is a Stripe subscription schedule still attached? */
+  hasSchedule: boolean;
+  /** The plan the customer is scheduled to move to, if any. */
+  pendingPlanId: string | null;
+  /** The plan Stripe currently bills, resolved from the active price. */
+  currentPlanId: string | null;
+}
+
+/**
+ * Should a pending plan change be cleared?
+ *
+ * STATUS ALONE IS THE WRONG QUESTION, and getting this wrong erased the feature.
+ * A scheduled downgrade leaves the subscription `active` for the whole remainder
+ * of the paid period — that is the entire point of scheduling it. So treating
+ * "active" as "the change has landed" cleared `pending_plan_id` on the very next
+ * `customer.subscription.updated` event, seconds after the downgrade was booked.
+ *
+ * The visible symptom: the customer saw "Changing to Starter on <date>", pressed
+ * refresh, and the message was gone — while Stripe still showed the lower amount
+ * due next month. The downgrade was real; only our record of it had been wiped.
+ *
+ * The change has ACTUALLY been applied when Stripe bills the pending plan
+ * (`currentPlanId === pendingPlanId`). Until then, an attached schedule means it
+ * is still coming.
+ */
+export function shouldClearPendingChange(state: PendingChangeState): boolean {
+  // Nothing recorded as pending — nothing to clear.
+  if (!state.pendingPlanId) return false;
+
+  // Not healthy: leave it alone. A past_due subscription may still have a
+  // scheduled change, and dropping it here would lose the customer's intent.
+  const healthy = state.stripeStatus === "active" || state.stripeStatus === "trialing";
+  if (!healthy) return false;
+
+  // Applied: Stripe is now billing the plan that was pending.
+  if (state.currentPlanId && state.currentPlanId === state.pendingPlanId) return true;
+
+  // Still scheduled — the whole period before it takes effect lands here.
+  if (state.hasSchedule) return false;
+
+  /**
+   * Healthy, pending a DIFFERENT plan, and no schedule attached.
+   *
+   * The schedule was released or removed without the change being applied —
+   * an upgrade supersedes a pending downgrade and releases the schedule
+   * (see change-plan), so this is the normal "customer changed their mind"
+   * path. The pending target is genuinely stale now.
+   */
+  return true;
 }
 
 /**

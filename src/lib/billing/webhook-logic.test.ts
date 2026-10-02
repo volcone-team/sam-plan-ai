@@ -6,6 +6,7 @@ import {
   extractPeriod,
   nextPastDueSince,
   shouldClearPending,
+  shouldClearPendingChange,
   shouldClearComp,
   interpretClaim,
   webhookResponseStatus,
@@ -184,6 +185,111 @@ describe("nextPastDueSince — dunning window", () => {
 
   it("clears on cancellation", () => {
     expect(nextPastDueSince({ stripeStatus: "canceled", existing: EARLIER, now: NOW })).toBeNull();
+  });
+});
+
+/**
+ * The bug these cover: a scheduled downgrade stays `active` for the rest of the
+ * paid period, so clearing pending state on "active" wiped the customer's
+ * "Changing to X on <date>" notice seconds after they booked it.
+ */
+describe("shouldClearPendingChange", () => {
+  const PRO = "plan_pro";
+  const STARTER = "plan_starter";
+
+  it("KEEPS a scheduled downgrade while it is still pending", () => {
+    expect(
+      shouldClearPendingChange({
+        stripeStatus: "active",
+        hasSchedule: true,
+        pendingPlanId: STARTER,
+        currentPlanId: PRO,
+      })
+    ).toBe(false);
+  });
+
+  it("clears once Stripe bills the pending plan", () => {
+    expect(
+      shouldClearPendingChange({
+        stripeStatus: "active",
+        hasSchedule: false,
+        pendingPlanId: STARTER,
+        currentPlanId: STARTER,
+      })
+    ).toBe(true);
+  });
+
+  // The schedule can linger for a moment after the phase transition.
+  it("clears when billing the pending plan even if a schedule remains", () => {
+    expect(
+      shouldClearPendingChange({
+        stripeStatus: "active",
+        hasSchedule: true,
+        pendingPlanId: STARTER,
+        currentPlanId: STARTER,
+      })
+    ).toBe(true);
+  });
+
+  // An upgrade releases the pending downgrade's schedule, so the old target
+  // is genuinely stale.
+  it("clears a stale pending target when no schedule remains", () => {
+    expect(
+      shouldClearPendingChange({
+        stripeStatus: "active",
+        hasSchedule: false,
+        pendingPlanId: STARTER,
+        currentPlanId: PRO,
+      })
+    ).toBe(true);
+  });
+
+  it("does nothing when nothing is pending", () => {
+    expect(
+      shouldClearPendingChange({
+        stripeStatus: "active",
+        hasSchedule: false,
+        pendingPlanId: null,
+        currentPlanId: PRO,
+      })
+    ).toBe(false);
+  });
+
+  // A failing payment must not discard the customer's recorded intent.
+  it("keeps pending state while the subscription is unhealthy", () => {
+    for (const s of ["past_due", "canceled", "incomplete", "paused", "unpaid"]) {
+      expect(
+        shouldClearPendingChange({
+          stripeStatus: s,
+          hasSchedule: true,
+          pendingPlanId: STARTER,
+          currentPlanId: PRO,
+        })
+      ).toBe(false);
+    }
+  });
+
+  it("keeps a scheduled change through a trial", () => {
+    expect(
+      shouldClearPendingChange({
+        stripeStatus: "trialing",
+        hasSchedule: true,
+        pendingPlanId: STARTER,
+        currentPlanId: PRO,
+      })
+    ).toBe(false);
+  });
+
+  // Our price table may not resolve a grandfathered price to a plan.
+  it("keeps a scheduled change when the current plan cannot be resolved", () => {
+    expect(
+      shouldClearPendingChange({
+        stripeStatus: "active",
+        hasSchedule: true,
+        pendingPlanId: STARTER,
+        currentPlanId: null,
+      })
+    ).toBe(false);
   });
 });
 

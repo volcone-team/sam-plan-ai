@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   CreditCard, ExternalLink, TriangleAlert, CheckCircle2, Gift, RefreshCw,
+  CalendarClock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Spinner, LoadingPanel } from '@/components/ui/spinner';
+import { PlanChangeModal } from './plan-change-modal';
 
 /**
  * Customer-facing billing panel: current plan, usage this period, plan changes,
@@ -123,6 +125,14 @@ export function BillingPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cycle, setCycle] = useState<'monthly' | 'annual'>('monthly');
+  /**
+   * The plan the customer has asked to move to, held while they confirm.
+   *
+   * A change is NEVER sent straight from the button: an upgrade charges the card
+   * immediately with no Stripe Checkout page in between, so it needs an explicit
+   * confirmation showing what will be billed.
+   */
+  const [confirming, setConfirming] = useState<Plan | null>(null);
 
   const load = useCallback(async (opts?: { reconcile?: boolean }) => {
     setLoading(true);
@@ -216,6 +226,26 @@ export function BillingPanel() {
     }
   };
 
+  /**
+   * Which direction is a move to `plan` on the selected cycle?
+   *
+   * Mirrors the server's classifyPlanChange, which compares on PRICE rather than
+   * on limits (a plan can raise one limit while lowering another, so limits give
+   * no total ordering). This copy only decides what to SAY — the server
+   * re-classifies and is the authority on what actually happens.
+   */
+  const changeKindFor = (plan: Plan): 'upgrade' | 'downgrade' | 'cycle_change' | 'same' => {
+    const current = me?.plans.find((p) => p.isCurrent);
+    if (!current) return 'upgrade';
+    if (current.id === plan.id) {
+      return me?.subscription?.billingCycle === cycle ? 'same' : 'cycle_change';
+    }
+    const currentPrice =
+      me?.subscription?.billingCycle === 'annual' ? current.annualPrice : current.monthlyPrice;
+    const targetPrice = cycle === 'annual' ? plan.annualPrice : plan.monthlyPrice;
+    return targetPrice > currentPrice ? 'upgrade' : 'downgrade';
+  };
+
   /** Move an existing subscription to another plan. */
   const changePlan = async (planId: string) => {
     setBusy(true);
@@ -236,6 +266,9 @@ export function BillingPanel() {
         );
         return;
       }
+      // Close the dialog only on success, so a failure leaves the customer
+      // looking at the change they tried to make alongside the reason.
+      setConfirming(null);
       await load();
     } catch {
       setError('Could not reach the server.');
@@ -352,10 +385,22 @@ export function BillingPanel() {
                       ? `${me.subscription.cancelAtPeriodEnd ? 'Ends' : 'Renews'} ${shortDate(me.subscription.currentPeriodEnd)} · billed ${me.subscription.billingCycle}`
                       : `Billed ${me.subscription.billingCycle}`}
               </p>
+              {/*
+                A scheduled downgrade is persisted in pending_plan_id, so this
+                survives a refresh. It previously did not: the webhook cleared
+                the column as soon as the subscription reported `active`, which
+                a scheduled downgrade does for the whole remaining period — so
+                the notice disappeared seconds after it was set, while Stripe
+                still showed the lower amount due next cycle.
+              */}
               {me.subscription.pendingPlanName && (
-                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                  Changing to {me.subscription.pendingPlanName} on{' '}
-                  {shortDate(me.subscription.currentPeriodEnd)}
+                <p className="mt-2 inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+                  <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+                  Changing to {me.subscription.pendingPlanName}
+                  {me.subscription.pendingBillingCycle
+                    ? ` (${me.subscription.pendingBillingCycle})`
+                    : ''}{' '}
+                  on {shortDate(me.subscription.currentPeriodEnd)}
                 </p>
               )}
             </div>
@@ -526,7 +571,10 @@ export function BillingPanel() {
                         disabled={busy}
                         onClick={() =>
                           me.subscription?.hasStripeSubscription
-                            ? changePlan(plan.id)
+                            // Confirm first: this path charges immediately for
+                            // an upgrade. New subscriptions go to Stripe
+                            // Checkout, which is its own confirmation step.
+                            ? setConfirming(plan)
                             : subscribe(plan.id)
                         }
                         className="w-full rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
@@ -605,6 +653,28 @@ export function BillingPanel() {
             </table>
           </div>
         </div>
+      )}
+
+      {/*
+        Prices are stored in whole currency units but Stripe and this dialog
+        work in minor units, so convert once here rather than inside the
+        dialog — keeping the dialog's contract identical to Stripe's.
+      */}
+      {confirming && (
+        <PlanChangeModal
+          open
+          kind={changeKindFor(confirming)}
+          currentPlanName={me.subscription?.planName ?? 'your current plan'}
+          targetPlanName={confirming.name}
+          targetAmountMinor={Math.round(
+            (cycle === 'annual' ? confirming.annualPrice : confirming.monthlyPrice) * 100
+          )}
+          targetCycle={cycle}
+          periodEnd={me.subscription?.currentPeriodEnd ?? null}
+          pending={busy}
+          onConfirm={() => changePlan(confirming.id)}
+          onClose={() => setConfirming(null)}
+        />
       )}
     </div>
   );

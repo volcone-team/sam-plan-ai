@@ -106,3 +106,112 @@ export function findCurrentPhase<T extends Phase>(
   );
   return match ?? phases[phases.length - 1];
 }
+
+/**
+ * What a plan change will do, phrased for the customer BEFORE they commit.
+ *
+ * WHY THIS IS NEEDED. An upgrade is applied immediately with
+ * `proration_behavior: 'always_invoice'`, so pressing the button charges a card
+ * right away — with no Stripe Checkout page in between, because there is no new
+ * subscription to create. A real charge with no confirmation step is the kind of
+ * thing customers reasonably call a billing error, even when the amount is
+ * correct.
+ *
+ * Kept pure and separate from the dialog so the WORDING for each case can be
+ * asserted in tests: this text is the only thing standing between a customer and
+ * an unexpected charge, and "downgrade" phrasing shown for an upgrade would be
+ * actively harmful.
+ */
+export interface PlanChangePreview {
+  /** Dialog heading. */
+  title: string;
+  /** What will happen, in plain terms. */
+  body: string;
+  /** Label for the confirm button. */
+  confirmLabel: string;
+  /** True when money moves as soon as they confirm. */
+  chargesNow: boolean;
+  /** 'warn' for an immediate charge, 'info' for a deferred change. */
+  tone: "warn" | "info";
+}
+
+function money(amountMinor: number | null | undefined): string {
+  if (typeof amountMinor !== "number" || !Number.isFinite(amountMinor)) return "";
+  return `$${(amountMinor / 100).toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+export function describePlanChange(args: {
+  kind: "upgrade" | "downgrade" | "cycle_change" | "same";
+  currentPlanName: string;
+  targetPlanName: string;
+  /** Target price in minor units, for the cycle being bought. */
+  targetAmountMinor?: number | null;
+  targetCycle: "monthly" | "annual";
+  /** ISO date the current period ends, for deferred changes. */
+  periodEnd?: string | null;
+}): PlanChangePreview {
+  const per = args.targetCycle === "annual" ? "year" : "month";
+  const price = money(args.targetAmountMinor);
+  const endDate = args.periodEnd
+    ? new Date(args.periodEnd).toLocaleDateString("en-US", { dateStyle: "medium" })
+    : null;
+
+  if (args.kind === "upgrade") {
+    return {
+      title: `Upgrade to ${args.targetPlanName}?`,
+      // States plainly that a card is charged now, and that the amount is
+      // prorated rather than the full price — otherwise the figure on the
+      // invoice looks wrong.
+      body:
+        `Your plan changes immediately and your card is charged today. ` +
+        `You'll pay the difference for the rest of your current period, then ` +
+        `${price ? `${price} per ${per}` : `the ${args.targetPlanName} rate`} from your next renewal. ` +
+        `Your new limits apply straight away.`,
+      confirmLabel: `Upgrade and pay now`,
+      chargesNow: true,
+      tone: "warn",
+    };
+  }
+
+  if (args.kind === "downgrade") {
+    return {
+      title: `Switch to ${args.targetPlanName}?`,
+      body:
+        `You keep ${args.currentPlanName} and its limits until ` +
+        `${endDate ?? "the end of your current period"}, which you have already paid for. ` +
+        `${args.targetPlanName} starts after that` +
+        `${price ? ` at ${price} per ${per}` : ""}. No charge today, and you can change back ` +
+        `before then.`,
+      confirmLabel: `Schedule downgrade`,
+      chargesNow: false,
+      tone: "info",
+    };
+  }
+
+  if (args.kind === "cycle_change") {
+    return {
+      title:
+        args.targetCycle === "annual"
+          ? `Switch to annual billing?`
+          : `Switch to monthly billing?`,
+      body:
+        `Your billing changes immediately and your card is charged today. ` +
+        `Any unused time on your current cycle is credited against ` +
+        `${price ? `the ${price} total` : "the new amount"}.`,
+      confirmLabel: `Switch and pay now`,
+      chargesNow: true,
+      tone: "warn",
+    };
+  }
+
+  return {
+    title: `No change`,
+    body: `You are already on ${args.currentPlanName} billed ${args.targetCycle}.`,
+    confirmLabel: `Close`,
+    chargesNow: false,
+    tone: "info",
+  };
+}

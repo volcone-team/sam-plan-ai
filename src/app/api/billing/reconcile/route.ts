@@ -7,7 +7,7 @@ import {
   mapStripeStatus,
   extractPeriod,
   shouldClearComp,
-  shouldClearPending,
+  shouldClearPendingChange,
   isEnding,
 } from "@/lib/billing/webhook-logic";
 import { isLiveSubscription } from "@/lib/billing/plan-change";
@@ -83,7 +83,9 @@ export async function POST() {
 
     const { data: row } = await db
       .from("subscriptions")
-      .select("stripe_customer_id, stripe_mode, past_due_since")
+      // pending_plan_id is needed to decide whether a scheduled downgrade has
+      // actually been applied yet — see shouldClearPendingChange.
+      .select("stripe_customer_id, stripe_mode, past_due_since, pending_plan_id")
       .eq("company_id", companyId)
       .maybeSingle();
 
@@ -187,7 +189,16 @@ export async function POST() {
       patch.comped_reason = null;
       patch.past_due_since = null;
     }
-    if (shouldClearPending(sub.status)) {
+    // Same rule as the webhook: a scheduled downgrade stays active until it is
+    // actually billed, so status alone must not clear it.
+    if (
+      shouldClearPendingChange({
+        stripeStatus: sub.status,
+        hasSchedule: !!sub.schedule,
+        pendingPlanId: (row?.pending_plan_id as string) ?? null,
+        currentPlanId: planId,
+      })
+    ) {
       patch.pending_plan_id = null;
       patch.pending_billing_cycle = null;
     }

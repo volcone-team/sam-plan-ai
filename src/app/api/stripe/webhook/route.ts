@@ -12,7 +12,7 @@ import {
   subscriptionIdFromInvoice,
   extractPeriod,
   nextPastDueSince,
-  shouldClearPending,
+  shouldClearPendingChange,
   shouldClearComp,
   interpretClaim,
   isEnding,
@@ -266,8 +266,29 @@ async function syncSubscription(
     now: new Date().toISOString(),
   });
 
-  // A completed downgrade clears its pending target.
-  if (shouldClearPending(sub.status)) {
+  /**
+   * Clear a pending downgrade only once it has ACTUALLY been applied.
+   *
+   * A scheduled downgrade keeps the subscription `active` for the remainder of
+   * the paid period, so keying this on status alone wiped the customer's
+   * "Changing to X on <date>" notice on the next event — seconds after they
+   * booked it. The schedule and the currently-billed plan are what distinguish
+   * "still coming" from "landed".
+   */
+  const { data: pendingRow } = await db
+    .from("subscriptions")
+    .select("pending_plan_id")
+    .eq("company_id", companyId)
+    .maybeSingle();
+
+  if (
+    shouldClearPendingChange({
+      stripeStatus: sub.status,
+      hasSchedule: !!sub.schedule,
+      pendingPlanId: (pendingRow?.pending_plan_id as string) ?? null,
+      currentPlanId: planId,
+    })
+  ) {
     patch.pending_plan_id = null;
     patch.pending_billing_cycle = null;
   }
