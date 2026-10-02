@@ -37,7 +37,9 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
     // machines more often than customers do, making inherited device trust
     // worse here than anywhere else.
     await revokeDeviceTrust();
-    await supabase.auth.signOut();
+    // 'local' so leaving the admin panel on one machine does not revoke the
+    // same account's sessions elsewhere. auth-js defaults to 'global'.
+    await supabase.auth.signOut({ scope: 'local' });
     router.push("/admin-login");
   };
 

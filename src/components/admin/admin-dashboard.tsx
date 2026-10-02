@@ -83,16 +83,20 @@ function buildSystemStatus(stripe: {
   let stripeDescription = "Not connected";
 
   if (stripe) {
+    // "Connected" depends ONLY on whether a key is present — NOT on whether
+    // billing is enabled. Those are independent: a configured key is connected
+    // regardless, and billing being on or off just says whether payment is
+    // required at signup. Tying the two together is what made toggling the
+    // setting appear to connect/disconnect Stripe.
     if (!stripe.configured) {
       stripeStatus = "warning";
-      stripeDescription = `No ${stripe.mode} key`;
-    } else if (stripe.enabled) {
-      stripeStatus = "connected";
-      stripeDescription = `Connected (${stripe.mode})`;
+      stripeDescription = "Not connected — set STRIPE_SECRET_KEY";
     } else {
-      // Keys present but billing off — not a fault, just not enforcing payment.
       stripeStatus = "connected";
-      stripeDescription = `Ready (${stripe.mode}, billing off)`;
+      // Billing on/off shown as a secondary note, not as the connection state.
+      stripeDescription = stripe.enabled
+        ? `Connected (${stripe.mode}) · billing on`
+        : `Connected (${stripe.mode}) · billing off`;
     }
   }
 
@@ -131,12 +135,14 @@ export function AdminDashboard() {
     // the aborted request otherwise surfaces as a bogus "Failed to fetch".
     const controller = new AbortController();
 
-    // No setState in the effect body (react-hooks/set-state-in-effect); every
-    // setState below happens after an await, and AbortError returns early so
-    // nothing is written after unmount.
     const loadStats = async () => {
       try {
-        const res = await fetch("/api/admin/stats", { signal: controller.signal });
+        // no-store so a toggle changed on the settings page is reflected here,
+        // rather than a cached response showing the old Stripe status.
+        const res = await fetch("/api/admin/stats", {
+          signal: controller.signal,
+          cache: "no-store",
+        });
         const data = await res.json();
         if (res.ok && data.stats) {
           setStats(data.stats);
@@ -152,7 +158,17 @@ export function AdminDashboard() {
     };
 
     loadStats();
-    return () => controller.abort();
+
+    // Refetch when the tab regains focus. Changing a setting on another page and
+    // returning should show current state, not whatever was loaded on first
+    // mount — the staleness that made Stripe status look like it was toggling.
+    const onFocus = () => { loadStats(); };
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      controller.abort();
+      window.removeEventListener("focus", onFocus);
+    };
   }, []);
 
   useEffect(() => {

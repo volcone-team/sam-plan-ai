@@ -134,6 +134,27 @@ export async function GET() {
       stripe_subscription_id: string | null; stripe_mode: string | null;
     } | null;
 
+    /**
+     * Is there a plan the company has actually been GIVEN, as opposed to one it
+     * is merely trialing?
+     *
+     * A trial (migration 023) mirrors the default plan by writing that plan's id
+     * onto the subscription row, with no Stripe subscription behind it. Deriving
+     * "current plan" from `plan_id` alone therefore marked Starter as owned for
+     * every brand-new account, so the one plan a trial user is most likely to buy
+     * rendered as a disabled "Your plan" button and could not be purchased at all.
+     *
+     * Only two things count as genuinely holding a plan: a live Stripe
+     * subscription in this mode, or a comp granted by an admin. Everything else
+     * — including an in-progress trial — leaves every plan buyable.
+     */
+    const hasPurchasedPlan =
+      !!sub &&
+      (sub.is_comped ||
+        (!!sub.stripe_subscription_id &&
+          sub.stripe_mode === STRIPE_MODE_TAG &&
+          ["active", "trialing", "past_due"].includes(sub.stripe_status ?? "")));
+
     const access = evaluateAccess(
       {
         stripeEnabled: config.stripeEnabled,
@@ -219,7 +240,8 @@ export async function GET() {
         monthlyPrice: p.monthly_price,
         annualPrice: p.annual_price,
         isDefault: p.is_default,
-        isCurrent: sub?.plan_id === p.id,
+        // Never true during a trial — see hasPurchasedPlan above.
+        isCurrent: hasPurchasedPlan && sub?.plan_id === p.id,
         purchasableMonthly: purchasable.has(`${p.id}:monthly`),
         purchasableAnnual: purchasable.has(`${p.id}:annual`),
         limits: limitsByPlan.get(p.id) ?? [],

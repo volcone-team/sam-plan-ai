@@ -46,14 +46,18 @@ export default function AdminLoginPage() {
       if (profileError || !profile) {
         setError("Could not verify admin access.");
         cacheClearAll();
-        await supabase.auth.signOut();
+        // 'local': undo the sign-in just made in THIS browser. Global scope
+        // (the auth-js default) would also revoke this person's customer-side
+        // sessions on their other devices for merely mistyping the admin login.
+        await supabase.auth.signOut({ scope: 'local' });
         return;
       }
 
       if (!profile.is_admin) {
         setError("Access denied. This account does not have admin privileges.");
         cacheClearAll();
-        await supabase.auth.signOut();
+        // 'local' — see the note above; this only undoes the sign-in here.
+        await supabase.auth.signOut({ scope: 'local' });
         return;
       }
 

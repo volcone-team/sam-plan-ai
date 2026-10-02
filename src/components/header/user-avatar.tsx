@@ -75,7 +75,17 @@ export function UserAvatar({
     // without it the next account signing in on this browser would inherit
     // trust and skip the code challenge entirely.
     await revokeDeviceTrust();
-    await supabase.auth.signOut();
+    /**
+     * `scope: 'local'` — ends THIS browser's session only.
+     *
+     * auth-js defaults to `scope: 'global'`, which revokes every refresh token
+     * the account holds and signs the user out on every device they are signed
+     * in on. Signing out on a laptop was therefore kicking the same person out
+     * of their phone and their other browser, which reads as the app dropping
+     * sessions at random. Device trust is already per-browser (`sam_2fa` is
+     * revoked just above), so local scope is the matching behaviour.
+     */
+    await supabase.auth.signOut({ scope: 'local' });
     router.push("/auth/login");
   };
 

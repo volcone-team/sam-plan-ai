@@ -98,6 +98,10 @@ export function UserProfile() {
     // whoever signs in on this browser next. httpOnly, hence the server call.
     await revokeDeviceTrust();
     try {
+      // DELIBERATELY the default 'global' scope, unlike every other sign-out in
+      // the app. The account itself has just been deleted, so sessions on the
+      // user's other devices should die with it rather than linger until their
+      // tokens expire.
       await createClient().auth.signOut();
     } catch {
       // Even if sign-out fails, the account/company is already gone server-side.

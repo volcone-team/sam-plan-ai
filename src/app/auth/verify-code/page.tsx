@@ -317,7 +317,9 @@ function VerifyCodeForm() {
     // it is httpOnly, so only the server can remove it.
     await revokeDeviceTrust();
     try {
-      await createClient().auth.signOut();
+      // 'local': abandoning the challenge on this device must not revoke the
+      // account's sessions on others. auth-js defaults to 'global'.
+      await createClient().auth.signOut({ scope: 'local' });
     } catch {
       // Sign-out is an escape hatch — leave for the login page regardless.
     }
