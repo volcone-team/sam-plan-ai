@@ -28,6 +28,12 @@ DECLARE
   t TEXT;
   targets TEXT[] := ARRAY[
     'companies',
+    -- Listed EXPLICITLY even though invoices are company-scoped. The
+    -- billing_invoices.company_id FK is `ON DELETE SET NULL` (migration 022),
+    -- so the `companies` cascade does not remove these rows — it only blanks
+    -- their company_id, leaving orphans that still counted towards "Collected
+    -- to date" and showed up in payment history after a supposedly clean wipe.
+    'billing_invoices',
     'generation_events',
     'stripe_webhook_events',
     'two_factor_codes',

@@ -37,8 +37,18 @@ export async function GET() {
         .from("subscription_plans")
         .select("id, name, monthly_price, annual_price, display_order")
         .order("display_order"),
-      // Collected to date, from stored invoices (webhook-populated).
-      db.from("billing_invoices").select("amount_paid, status"),
+      /**
+       * Collected to date, from stored invoices (webhook-populated).
+       *
+       * company_id NOT NULL is load-bearing, not tidiness: an invoice that
+       * belongs to no company in this database is not this platform's revenue.
+       * Historic rows imported from unrelated Stripe customers are excluded
+       * here so the headline figure cannot be inflated by them.
+       */
+      db
+        .from("billing_invoices")
+        .select("amount_paid, status")
+        .not("company_id", "is", null),
     ]);
 
     if (subsRes.error) {

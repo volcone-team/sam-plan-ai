@@ -139,8 +139,13 @@ export async function GET(request: Request) {
       planIds.length
         ? db.from("subscription_plans").select("id, name, monthly_price, annual_price").in("id", planIds)
         : Promise.resolve({ data: [], error: null }),
-      // Lifetime paid total per company, from stored invoices.
-      db.from("billing_invoices").select("company_id, amount_paid, status"),
+      // Lifetime paid total per company, from stored invoices. Unattributed
+      // rows are excluded — they are not any company's spend, and the
+      // platform-wide `collected` total below is summed from this same map.
+      db
+        .from("billing_invoices")
+        .select("company_id, amount_paid, status")
+        .not("company_id", "is", null),
     ]);
 
     const companyName = new Map(
@@ -240,6 +245,14 @@ export async function GET(request: Request) {
       };
     });
 
+    /**
+     * Payment history — only invoices belonging to a company in this database.
+     *
+     * Without the company_id filter this listed every invoice on the Stripe
+     * account, including customers from earlier testing and deleted accounts,
+     * which rendered as rows with a blank Company column and made the app look
+     * like it had payments it never took.
+     */
     const { data: invoices } = await db
       .from("billing_invoices")
       .select(
@@ -247,6 +260,7 @@ export async function GET(request: Request) {
         "currency, description, hosted_invoice_url, invoice_pdf, period_start, period_end, " +
         "paid_at, failure_message, attempt_count, created_at"
       )
+      .not("company_id", "is", null)
       .order("created_at", { ascending: false })
       .limit(invoiceLimit);
 

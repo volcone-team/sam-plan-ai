@@ -164,6 +164,7 @@ export async function POST() {
     // Invoices too, so payment history is not left empty by the same gap.
     const invoices = await stripe.invoices.list({ limit: 100 });
     let invoicesRecorded = 0;
+    let invoicesSkipped = 0;
 
     for (const inv of invoices.data) {
       const customerId =
@@ -177,11 +178,33 @@ export async function POST() {
         .eq("stripe_mode", mode)
         .maybeSingle();
 
+      const invoiceCompanyId = (data?.company_id as string) ?? null;
+
+      /**
+       * SKIP invoices that belong to no company in THIS database.
+       *
+       * `stripe.invoices.list` is account-wide, not app-wide. A Stripe account
+       * accumulates invoices from every customer it has ever had — earlier
+       * testing, deleted accounts, other environments sharing the same keys —
+       * and storing them with a null company_id silently imported all of that
+       * history into our tables. It then surfaced as revenue: "Collected to
+       * date" summed invoices from customers who no longer exist, and payment
+       * history listed rows with a blank Company column.
+       *
+       * Stripe remains the ledger of record for the account as a whole; this
+       * table is only the app's view of ITS OWN customers, so an invoice we
+       * cannot attribute to a company does not belong here.
+       */
+      if (!invoiceCompanyId) {
+        invoicesSkipped += 1;
+        continue;
+      }
+
       const line = inv.lines?.data?.[0];
 
       const { error } = await db.from("billing_invoices").upsert(
         {
-          company_id: (data?.company_id as string) ?? null,
+          company_id: invoiceCompanyId,
           stripe_mode: mode,
           stripe_invoice_id: inv.id,
           stripe_customer_id: customerId,
@@ -207,10 +230,11 @@ export async function POST() {
 
     console.log(
       "[admin/billing/resync] synced", results.synced.length,
-      "subscriptions,", invoicesRecorded, "invoices"
+      "subscriptions,", invoicesRecorded, "invoices,",
+      invoicesSkipped, "invoices skipped (no matching company)"
     );
 
-    return NextResponse.json({ ...results, invoicesRecorded });
+    return NextResponse.json({ ...results, invoicesRecorded, invoicesSkipped });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[admin/billing/resync] Error:", message);

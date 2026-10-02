@@ -352,6 +352,27 @@ async function recordInvoice(
     companyId = (data?.company_id as string) ?? null;
   }
 
+  /**
+   * An invoice we cannot attribute to a company is not ours to record.
+   *
+   * This table is the app's view of its own customers' payments, and every
+   * reader treats it that way: "Collected to date" sums it, and the admin
+   * payment history lists it. A row with a null company_id is therefore counted
+   * as platform revenue while belonging to nobody — which is how invoices from
+   * unrelated Stripe customers ended up inflating both.
+   *
+   * Returning quietly rather than throwing: the event was handled correctly,
+   * there is simply nothing here to store, and a throw would make Stripe retry
+   * an event that can never succeed.
+   */
+  if (!companyId) {
+    console.log(
+      "[stripe/webhook] Ignoring invoice", invoice.id,
+      "— customer", customerId ?? "unknown", "maps to no company here"
+    );
+    return;
+  }
+
   const line = invoice.lines?.data?.[0];
 
   const { error } = await db.from("billing_invoices").upsert(
