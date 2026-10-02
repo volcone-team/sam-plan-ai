@@ -6,6 +6,7 @@ import { Calendar, Package, Tag, Clock, Zap, Pencil, Loader2 } from 'lucide-reac
 import type { Initiative, InitiativeStatus, UpdateInitiativeDTO } from '@/types';
 import type { InitiativeType } from '@/types/initiative-type.types';
 import { initiativeService } from '@/services/initiative.service';
+import { NumberInputRaw } from '@/components/ui/number-input';
 import { usePermission } from '@/hooks/use-permission';
 
 export interface InitiativeOverviewProps {
@@ -324,12 +325,10 @@ export function InitiativeOverview({
             <label htmlFor="overview-edit-traffic" className={labelClass}>
               Expected registrants
             </label>
-            <input
+            <NumberInputRaw
               id="overview-edit-traffic"
-              type="number"
-              min="0"
               value={trafficInput}
-              onChange={e => setTrafficInput(e.target.value)}
+              onValueChange={setTrafficInput}
               className={inputClass}
               placeholder="0"
             />
@@ -341,12 +340,10 @@ export function InitiativeOverview({
               <label htmlFor="overview-edit-planned-budget" className={labelClass}>
                 Planned budget ($)
               </label>
-              <input
-                id="overview-edit-planned-budget"
-                type="number"
-                min="0"
-                value={plannedBudget}
-                onChange={e => setPlannedBudget(e.target.value)}
+              <NumberInputRaw
+              id="overview-edit-planned-budget"
+              value={plannedBudget}
+              onValueChange={setPlannedBudget}
                 className={inputClass}
                 placeholder="0"
               />
@@ -356,12 +353,10 @@ export function InitiativeOverview({
               <label htmlFor="overview-edit-actual-spend" className={labelClass}>
                 Actual spend ($)
               </label>
-              <input
-                id="overview-edit-actual-spend"
-                type="number"
-                min="0"
-                value={actualSpend}
-                onChange={e => setActualSpend(e.target.value)}
+              <NumberInputRaw
+              id="overview-edit-actual-spend"
+              value={actualSpend}
+              onValueChange={setActualSpend}
                 className={inputClass}
                 placeholder="0"
               />
@@ -376,12 +371,10 @@ export function InitiativeOverview({
                 <label htmlFor="overview-edit-revenue-good" className={helperClass}>
                   Good
                 </label>
-                <input
-                  id="overview-edit-revenue-good"
-                  type="number"
-                  min="0"
-                  value={revenueGood}
-                  onChange={e => setRevenueGood(e.target.value)}
+                <NumberInputRaw
+              id="overview-edit-revenue-good"
+              value={revenueGood}
+              onValueChange={setRevenueGood}
                   className={inputClass}
                   placeholder="0"
                 />
@@ -390,12 +383,10 @@ export function InitiativeOverview({
                 <label htmlFor="overview-edit-revenue-better" className={helperClass}>
                   Better
                 </label>
-                <input
-                  id="overview-edit-revenue-better"
-                  type="number"
-                  min="0"
-                  value={revenueBetter}
-                  onChange={e => setRevenueBetter(e.target.value)}
+                <NumberInputRaw
+              id="overview-edit-revenue-better"
+              value={revenueBetter}
+              onValueChange={setRevenueBetter}
                   className={inputClass}
                   placeholder="0"
                 />
@@ -404,12 +395,10 @@ export function InitiativeOverview({
                 <label htmlFor="overview-edit-revenue-best" className={helperClass}>
                   Best
                 </label>
-                <input
-                  id="overview-edit-revenue-best"
-                  type="number"
-                  min="0"
-                  value={revenueBest}
-                  onChange={e => setRevenueBest(e.target.value)}
+                <NumberInputRaw
+              id="overview-edit-revenue-best"
+              value={revenueBest}
+              onValueChange={setRevenueBest}
                   className={inputClass}
                   placeholder="0"
                 />

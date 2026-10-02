@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Check, Loader2, Lock } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
+import { NumberInputRaw } from "@/components/ui/number-input";
 import { useAuth, useCompanyId } from "@/hooks/use-auth";
 import { initiativeService } from "@/services/initiative.service";
 import { resultService } from "@/services/result.service";
@@ -225,12 +226,10 @@ export default function OnboardingWelcomePage() {
                         <label htmlFor="first-revenue" className="text-sm font-semibold">
                           Last month&apos;s revenue ($)
                         </label>
-                        <input
+                        <NumberInputRaw
                           id="first-revenue"
-                          type="number"
-                          min="0"
                           value={revenue}
-                          onChange={(e) => setRevenue(e.target.value)}
+                          onValueChange={setRevenue}
                           placeholder="0"
                           className="mt-1.5 w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
                         />

@@ -1,4 +1,4 @@
-import { Textarea } from "@/components/ui/textarea";
+import { DictationTextarea } from "@/components/ui/dictation-textarea";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { QuestionnaireData } from "../questionnaire-data";
@@ -52,12 +52,12 @@ export function WhatsWorkedStep({ data, onChange, errors }: WhatsWorkedStepProps
         <Label htmlFor="whats-worked-notes">
           What has worked best and why? (optional)
         </Label>
-        <Textarea
+        <DictationTextarea
           id="whats-worked-notes"
           placeholder="Tell us about your most successful marketing or sales initiatives..."
           rows={3}
           value={data.whatsWorkedNotes}
-          onChange={(e) => onChange({ whatsWorkedNotes: e.target.value })}
+          onValueChange={(whatsWorkedNotes) => onChange({ whatsWorkedNotes })}
         />
       </div>
     </div>

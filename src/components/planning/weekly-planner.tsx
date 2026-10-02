@@ -27,6 +27,7 @@ import { initiativeService } from '@/services/initiative.service';
 import { taskService } from '@/services/task.service';
 import { resultService } from '@/services/result.service';
 import { updateInitiativeStatusFromTasks } from '@/lib/update-initiative-status';
+import { NumberInputRaw } from '@/components/ui/number-input';
 import type { WeeklyPlan, Initiative, Task, TaskStatus, Result } from '@/types';
 
 
@@ -606,13 +607,10 @@ export function WeeklyPlanner() {
                 <label htmlFor="result-revenue" className="text-sm font-medium">
                   Revenue ($)
                 </label>
-                <input
+                <NumberInputRaw
                   id="result-revenue"
-                  type="number"
-                  min="0"
-                  step="0.01"
                   value={resultRevenue}
-                  onChange={e => setResultRevenue(e.target.value)}
+                  onValueChange={setResultRevenue}
                   placeholder="0.00"
                   className="w-full px-3 py-2 rounded-[var(--radius-lg)] border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/50"
                 />
@@ -621,13 +619,10 @@ export function WeeklyPlanner() {
                 <label htmlFor="result-spend" className="text-sm font-medium">
                   Spend ($)
                 </label>
-                <input
+                <NumberInputRaw
                   id="result-spend"
-                  type="number"
-                  min="0"
-                  step="0.01"
                   value={resultSpend}
-                  onChange={e => setResultSpend(e.target.value)}
+                  onValueChange={setResultSpend}
                   placeholder="0.00"
                   className="w-full px-3 py-2 rounded-[var(--radius-lg)] border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/50"
                 />

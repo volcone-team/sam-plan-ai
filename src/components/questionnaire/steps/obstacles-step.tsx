@@ -1,4 +1,4 @@
-import { Textarea } from "@/components/ui/textarea";
+import { DictationTextarea } from "@/components/ui/dictation-textarea";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { QuestionnaireData } from "../questionnaire-data";
@@ -48,12 +48,12 @@ export function ObstaclesStep({ data, onChange }: ObstaclesStepProps) {
         <Label htmlFor="obstacle-notes">
           Tell us more about your biggest challenge (optional)
         </Label>
-        <Textarea
+        <DictationTextarea
           id="obstacle-notes"
           placeholder="What has held you back from reaching your revenue goals?"
           rows={3}
           value={data.obstacleNotes}
-          onChange={(e) => onChange({ obstacleNotes: e.target.value })}
+          onValueChange={(obstacleNotes) => onChange({ obstacleNotes })}
         />
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { QuestionnaireData } from "../questionnaire-data";
@@ -29,15 +29,12 @@ export function RevenueGoalStep({ data, onChange, errors }: RevenueGoalStepProps
           </Label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[hsl(var(--foreground-muted))]">$</span>
-            <Input
+            <NumberInput
               id="annual-revenue-goal"
-              type="number"
               placeholder="750,000"
               className="pl-7"
-              value={data.annualRevenueGoal ?? ""}
-              onChange={(e) =>
-                onChange({ annualRevenueGoal: e.target.value ? Number(e.target.value) : null })
-              }
+              value={data.annualRevenueGoal}
+              onValueChange={(annualRevenueGoal) => onChange({ annualRevenueGoal })}
               error={!!errors.annualRevenueGoal}
             />
           </div>
@@ -52,15 +49,12 @@ export function RevenueGoalStep({ data, onChange, errors }: RevenueGoalStepProps
           </Label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[hsl(var(--foreground-muted))]">$</span>
-            <Input
+            <NumberInput
               id="prior-year-revenue"
-              type="number"
               placeholder="450,000"
               className="pl-7"
-              value={data.priorYearRevenue ?? ""}
-              onChange={(e) =>
-                onChange({ priorYearRevenue: e.target.value ? Number(e.target.value) : null })
-              }
+              value={data.priorYearRevenue}
+              onValueChange={(priorYearRevenue) => onChange({ priorYearRevenue })}
               error={!!errors.priorYearRevenue}
             />
           </div>

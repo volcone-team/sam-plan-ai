@@ -1,5 +1,6 @@
 import { Plus, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -95,17 +96,12 @@ export function ProductsStep({ data, onChange, errors }: ProductsStepProps) {
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[hsl(var(--foreground-muted))]">
                     $
                   </span>
-                  <Input
+                  <NumberInput
                     id={`price-${product.id}`}
-                    type="number"
                     placeholder="0"
                     className="pl-7"
-                    value={product.price ?? ""}
-                    onChange={(e) =>
-                      updateProduct(product.id, {
-                        price: e.target.value ? Number(e.target.value) : null,
-                      })
-                    }
+                    value={product.price}
+                    onValueChange={(price) => updateProduct(product.id, { price })}
                   />
                 </div>
               </div>

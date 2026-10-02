@@ -1,4 +1,4 @@
-import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { QuestionnaireData } from "../questionnaire-data";
@@ -22,15 +22,12 @@ export function BudgetTeamStep({ data, onChange, errors }: BudgetTeamStepProps) 
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[hsl(var(--foreground-muted))]">
               $
             </span>
-            <Input
+            <NumberInput
               id="monthly-budget"
-              type="number"
               placeholder="3,000"
               className="pl-7"
-              value={data.monthlyMarketingBudget ?? ""}
-              onChange={(e) =>
-                onChange({ monthlyMarketingBudget: e.target.value ? Number(e.target.value) : null })
-              }
+              value={data.monthlyMarketingBudget}
+              onValueChange={(monthlyMarketingBudget) => onChange({ monthlyMarketingBudget })}
               error={!!errors.monthlyMarketingBudget}
             />
           </div>
@@ -41,27 +38,21 @@ export function BudgetTeamStep({ data, onChange, errors }: BudgetTeamStepProps) 
 
         <div className="space-y-2">
           <Label htmlFor="team-size">Team Size</Label>
-          <Input
+          <NumberInput
             id="team-size"
-            type="number"
             placeholder="1"
-            value={data.teamSize ?? ""}
-            onChange={(e) =>
-              onChange({ teamSize: e.target.value ? Number(e.target.value) : null })
-            }
+            value={data.teamSize}
+            onValueChange={(teamSize) => onChange({ teamSize })}
           />
         </div>
 
         <div className="space-y-2 sm:col-span-2">
           <Label htmlFor="hours-per-week">Hours Available Per Week</Label>
-          <Input
+          <NumberInput
             id="hours-per-week"
-            type="number"
             placeholder="20"
-            value={data.hoursAvailablePerWeek ?? ""}
-            onChange={(e) =>
-              onChange({ hoursAvailablePerWeek: e.target.value ? Number(e.target.value) : null })
-            }
+            value={data.hoursAvailablePerWeek}
+            onValueChange={(hoursAvailablePerWeek) => onChange({ hoursAvailablePerWeek })}
           />
         </div>
       </div>

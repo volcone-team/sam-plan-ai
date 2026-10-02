@@ -1,5 +1,5 @@
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { DictationTextarea } from "@/components/ui/dictation-textarea";
 import { Label } from "@/components/ui/label";
 import type { QuestionnaireData } from "../questionnaire-data";
 
@@ -16,12 +16,12 @@ export function IdealCustomerStep({ data, onChange, errors }: IdealCustomerStepP
         <Label htmlFor="ideal-customer" required>
           Describe Your Ideal Customer
         </Label>
-        <Textarea
+        <DictationTextarea
           id="ideal-customer"
           placeholder="e.g., Service-based business owners doing $500K–$3M who want to grow through marketing..."
           rows={3}
           value={data.idealCustomer}
-          onChange={(e) => onChange({ idealCustomer: e.target.value })}
+          onValueChange={(idealCustomer) => onChange({ idealCustomer })}
           error={!!errors.idealCustomer}
         />
         {errors.idealCustomer && (
@@ -53,12 +53,12 @@ export function IdealCustomerStep({ data, onChange, errors }: IdealCustomerStepP
         <Label htmlFor="biggest-problem">
           Biggest Problem You Solve
         </Label>
-        <Textarea
+        <DictationTextarea
           id="biggest-problem"
           placeholder="What is the #1 problem you solve for your customers?"
           rows={2}
           value={data.biggestProblem}
-          onChange={(e) => onChange({ biggestProblem: e.target.value })}
+          onValueChange={(biggestProblem) => onChange({ biggestProblem })}
         />
       </div>
     </div>

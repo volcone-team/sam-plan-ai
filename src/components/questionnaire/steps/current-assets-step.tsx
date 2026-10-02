@@ -1,4 +1,4 @@
-import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import type { QuestionnaireData } from "../questionnaire-data";
 
@@ -18,66 +18,51 @@ export function CurrentAssetsStep({ data, onChange }: CurrentAssetsStepProps) {
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="email-list-size">Email List Size</Label>
-          <Input
+          <NumberInput
             id="email-list-size"
-            type="number"
             placeholder="0"
-            value={data.emailListSize ?? ""}
-            onChange={(e) =>
-              onChange({ emailListSize: e.target.value ? Number(e.target.value) : null })
-            }
+            value={data.emailListSize}
+            onValueChange={(emailListSize) => onChange({ emailListSize })}
           />
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="monthly-visitors">Monthly Website Visitors</Label>
-          <Input
+          <NumberInput
             id="monthly-visitors"
-            type="number"
             placeholder="0"
-            value={data.monthlyWebsiteVisitors ?? ""}
-            onChange={(e) =>
-              onChange({ monthlyWebsiteVisitors: e.target.value ? Number(e.target.value) : null })
-            }
+            value={data.monthlyWebsiteVisitors}
+            onValueChange={(monthlyWebsiteVisitors) => onChange({ monthlyWebsiteVisitors })}
           />
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="social-following">Social Following</Label>
-          <Input
+          <NumberInput
             id="social-following"
-            type="number"
             placeholder="0"
-            value={data.socialFollowing ?? ""}
-            onChange={(e) =>
-              onChange({ socialFollowing: e.target.value ? Number(e.target.value) : null })
-            }
+            value={data.socialFollowing}
+            onValueChange={(socialFollowing) => onChange({ socialFollowing })}
           />
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="existing-customers">Existing Customers</Label>
-          <Input
+          <NumberInput
             id="existing-customers"
-            type="number"
             placeholder="0"
-            value={data.existingCustomers ?? ""}
-            onChange={(e) =>
-              onChange({ existingCustomers: e.target.value ? Number(e.target.value) : null })
-            }
+            value={data.existingCustomers}
+            onValueChange={(existingCustomers) => onChange({ existingCustomers })}
           />
         </div>
 
         <div className="space-y-2 sm:col-span-2">
           <Label htmlFor="monthly-leads">Monthly Leads</Label>
-          <Input
+          <NumberInput
             id="monthly-leads"
-            type="number"
             placeholder="0"
-            value={data.monthlyLeads ?? ""}
-            onChange={(e) =>
-              onChange({ monthlyLeads: e.target.value ? Number(e.target.value) : null })
-            }
+            value={data.monthlyLeads}
+            onValueChange={(monthlyLeads) => onChange({ monthlyLeads })}
           />
         </div>
       </div>

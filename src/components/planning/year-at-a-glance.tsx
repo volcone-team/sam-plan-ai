@@ -33,6 +33,7 @@ import { RegenerateModal } from './regenerate-modal';
 import type { AnnualPlan, QuarterlyPlan, Initiative, Result } from '@/types';
 import { cacheGet, cacheSet, cacheInvalidatePrefix, CacheKeys, TTL } from '@/lib/client-cache';
 import { useToast } from '@/components/ui/toast';
+import { NumberInputRaw } from '@/components/ui/number-input';
 import { usePlanYears } from '@/hooks/use-plan-years';
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -800,25 +801,21 @@ export function YearAtAGlance() {
           <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <label htmlFor="draft-baseline" className="text-sm font-medium">Baseline goal ($)</label>
-              <input
+              <NumberInputRaw
                 id="draft-baseline"
-                type="number"
-                min="0"
                 value={draftBaseline}
-                onChange={(e) => setDraftBaseline(e.target.value)}
-                placeholder="850000"
+                onValueChange={setDraftBaseline}
+                placeholder="850,000"
                 className="mt-1.5 w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors"
               />
             </div>
             <div>
               <label htmlFor="draft-stretch" className="text-sm font-medium">Stretch goal ($)</label>
-              <input
+              <NumberInputRaw
                 id="draft-stretch"
-                type="number"
-                min="0"
                 value={draftStretch}
-                onChange={(e) => setDraftStretch(e.target.value)}
-                placeholder="1200000"
+                onValueChange={setDraftStretch}
+                placeholder="1,200,000"
                 className="mt-1.5 w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors"
               />
             </div>
