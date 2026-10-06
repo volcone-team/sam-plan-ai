@@ -15,7 +15,6 @@ import {
   Sparkles,
   Info,
   Plus,
-  ChevronDown,
   CalendarDays,
   CalendarRange,
   CalendarCheck,
@@ -71,7 +70,6 @@ export function YearAtAGlance() {
   /** Year currently being viewed. Users can review past years or plan ahead. */
   // Shared across screens: selecting 2027 here keeps 2027 on Monthly/Quarterly.
   const { selectedYear, setSelectedYear } = usePlanYears(companyId);
-  const [availableYears, setAvailableYears] = useState<number[]>([]);
   /**
    * Every calendar year the plan's initiatives touch. A 12-month plan generated
    * in September spans two years but is ONE annual_plans row, so this is the only
@@ -80,7 +78,6 @@ export function YearAtAGlance() {
   const [spannedYears, setSpannedYears] = useState<number[]>([]);
   /** Bumped to force a data reload after saving a draft. */
   const [reloadKey, setReloadKey] = useState(0);
-  const [showPastYears, setShowPastYears] = useState(false);
   const [explainerDismissed, setExplainerDismissed] = useState(true);
   /** Inline draft editor state for a future-year plan. */
   const [draftBaseline, setDraftBaseline] = useState('');
@@ -306,12 +303,10 @@ export function YearAtAGlance() {
     let cancelled = false;
     (async () => {
       try {
-        const [years, allInitiatives] = await Promise.all([
-          planService.getPlanYears(companyId),
-          initiativeService.getInitiativesByCompany(companyId),
-        ]);
+        // Only initiatives are needed now: the list of years with a plan is
+        // built by the sidebar picker, not here.
+        const allInitiatives = await initiativeService.getInitiativesByCompany(companyId);
         if (cancelled) return;
-        setAvailableYears(years);
         // Years the plan actually reaches, from initiative dates.
         const spanned = new Set<number>();
         for (const i of allInitiatives) {
@@ -321,13 +316,14 @@ export function YearAtAGlance() {
           }
         }
         setSpannedYears([...spanned].sort((a, b) => a - b));
-        // Prefer the current year when a plan exists for it, otherwise the
-        // most recent year on record, so the page is never empty by default.
-        if (years.length > 0 && !years.includes(CURRENT_YEAR)) {
-          setSelectedYear(years[0]);
-        }
+        /*
+         * No default-year selection here any more. `usePlanYears` already
+         * falls back to the current year, then to the nearest year the plan
+         * reaches, and it is the single source the sidebar picker writes to —
+         * a second rule in this component could fight it.
+         */
       } catch {
-        /* non-fatal - switcher just shows the current year */
+        /* non-fatal — the picker still offers the current year */
       }
     })();
     return () => { cancelled = true; };
@@ -354,34 +350,11 @@ export function YearAtAGlance() {
     setExplainerDismissed(true);
   };
 
-  /**
-   * Plan a future year: create a DRAFT annual plan for that year and switch to
-   * it. The page then shows an inline editor so the user can sketch goals and
-   * strategy before committing to a full generated plan.
+  /*
+   * `planFutureYear` moved to the sidebar picker, which now owns the "Plan a
+   * future year" action. Keeping a second copy here would mean two places
+   * creating draft annual plans.
    */
-  const planFutureYear = async (year: number) => {
-    if (!companyId) return;
-    console.log('[YearAtAGlance] Planning future year:', year);
-    try {
-      const existing = await planService.getAnnualPlan(companyId, year);
-      if (!existing) {
-        await planService.createAnnualPlan({
-          companyId,
-          year,
-          baselineRevenue: 0,
-          stretchRevenue: 0,
-          operatingBudget: 0,
-          notes: '',
-        });
-      }
-      const years = await planService.getPlanYears(companyId);
-      setAvailableYears(years);
-      setSelectedYear(year);
-    } catch (err) {
-      console.error('[YearAtAGlance] Could not create future year plan:', err);
-      showToast('Could not start planning that year.', { variant: 'error', duration: 5000 });
-    }
-  };
 
   /** Export the year's initiatives (plan vs actual) as CSV. */
   const exportCsv = () => {
@@ -479,8 +452,8 @@ export function YearAtAGlance() {
         return;
       }
       cacheInvalidatePrefix(CacheKeys.planPrefix);
+      // Still needed here to pick where to land after the viewed year is gone.
       const years = await planService.getPlanYears(companyId);
-      setAvailableYears(years);
       setSelectedYear(years.includes(CURRENT_YEAR) ? CURRENT_YEAR : (years[0] ?? CURRENT_YEAR));
       showToast('Year removed.', { variant: 'success', duration: 4000 });
     } finally {
@@ -550,15 +523,8 @@ export function YearAtAGlance() {
     );
   }
 
-  // Year switcher buckets. Past years collapse into a dropdown so the row stays
-  // short as years accumulate; current and future years stay visible.
-  // Years the plan actually spans. `availableYears` only knows about
-  // annual_plans rows, so a plan running into next year never offered that year.
-  const knownYears = Array.from(
-    new Set([...availableYears, ...spannedYears, selectedYear, CURRENT_YEAR])
-  );
-  const pastYears = knownYears.filter((y) => y < CURRENT_YEAR).sort((a, b) => b - a);
-  const switcherYears = knownYears.filter((y) => y >= CURRENT_YEAR).sort((a, b) => a - b);
+  // The past/current/future year buckets that fed the old pills are gone with
+  // them; the sidebar picker builds its own list from `usePlanYears`.
   // A future year is in "draft planning" mode until it has actual INITIATIVES.
   // Saving goals/strategy is PART of the draft, not an exit from it - basing
   // this on hasGeneratedPlan meant saving goals hid the editor (and its
@@ -570,15 +536,6 @@ export function YearAtAGlance() {
   // initiatives and inherits the plan's goals. Only a year with nothing in it
   // gets the draft editor.
   const isDraftPlanning = isFutureYear && !hasInitiatives && !spannedYears.includes(selectedYear);
-
-  // Next year that has no plan yet, so "Plan future year" always advances.
-  // The next year the plan does NOT already reach. Generating a plan for a year
-  // the current 12-month plan already covers would duplicate it.
-  const nextPlannableYear = (() => {
-    let y = Math.max(CURRENT_YEAR, ...(spannedYears.length ? spannedYears : [CURRENT_YEAR]));
-    while (knownYears.includes(y)) y += 1;
-    return y;
-  })();
 
   // "Start from Scratch" — clears upcoming initiatives and rebuilds via questionnaire.
   const handleStartFromScratch = () => {
@@ -621,8 +578,18 @@ export function YearAtAGlance() {
       {/* Page header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
+          {/*
+            The eyebrow carries the YEAR and its state, matching the mockup
+            ("2027 · PLANNING"). It used to repeat the old page name, which is
+            now in the sidebar and the page heading above.
+          */}
           <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
-            Year-at-a-Glance
+            {selectedYear}
+            {selectedYear > CURRENT_YEAR
+              ? ' · Planning'
+              : selectedYear < CURRENT_YEAR
+                ? ' · Past year'
+                : ''}
           </p>
           <h1 className="mt-1 text-3xl font-bold tracking-tight">{selectedYear} Plan</h1>
           <p className="mt-1 text-xs font-medium uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
@@ -677,83 +644,30 @@ export function YearAtAGlance() {
             how you&apos;re tracking against them, whether your initiatives add up to your goals,
             the strategy behind the plan, and the initiatives that will get you there.
           </p>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          {/*
+            "Got it" is the ONLY action. The second button ("Enter your first
+            numbers") sent people to the weekly planner straight from an intro
+            card explaining this page, which is a detour at the wrong moment —
+            the Planning Rhythm section at the bottom covers that route.
+          */}
+          <div className="mt-4">
             <button
               onClick={dismissExplainer}
               className="rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 transition-opacity"
             >
               Got it
             </button>
-            <Link
-              href="/planner/weekly"
-              className="rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--background-muted))] transition-colors"
-            >
-              Enter your first numbers
-            </Link>
           </div>
         </div>
       )}
 
-      {/* Year switcher — review a past year, or plan the next one */}
-      <div className="flex flex-wrap items-center gap-2">
-        {(
-          <div className="relative">
-            <button
-              onClick={() => pastYears.length > 0 && setShowPastYears((v) => !v)}
-              disabled={pastYears.length === 0}
-              title={pastYears.length === 0 ? 'No past years yet' : 'Switch to a past year'}
-              className="inline-flex items-center gap-1.5 rounded-[var(--radius-full)] border border-border px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-muted))] transition-colors enabled:hover:bg-[hsl(var(--background-muted))] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Past Years
-              <ChevronDown className="h-3.5 w-3.5" />
-            </button>
-            {showPastYears && (
-              <div className="absolute left-0 top-full z-20 mt-1 min-w-[8rem] overflow-hidden rounded-[var(--radius-md)] border border-border bg-card shadow-lg">
-                {pastYears.map((y) => (
-                  <button
-                    key={y}
-                    onClick={() => { setSelectedYear(y); setShowPastYears(false); }}
-                    className="block w-full px-4 py-2 text-left text-sm hover:bg-[hsl(var(--background-muted))]"
-                  >
-                    {y}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Years with a plan, current/future first */}
-        {switcherYears.map((y) => (
-          <button
-            key={y}
-            onClick={() => setSelectedYear(y)}
-            className={
-              'rounded-[var(--radius-full)] px-4 py-1.5 text-sm font-semibold transition-colors ' +
-              (y === selectedYear
-                ? 'bg-[hsl(var(--foreground))] text-[hsl(var(--background))]'
-                : 'border border-border text-[hsl(var(--foreground-muted))] hover:bg-[hsl(var(--background-muted))]')
-            }
-          >
-            {y}
-            {y > CURRENT_YEAR && (
-              <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider opacity-70">
-                {/* A year the current plan spans is part of that plan, not a draft. */}
-                {spannedYears.includes(y) ? 'Planned' : 'Draft'}
-              </span>
-            )}
-          </button>
-        ))}
-
-        <button
-          onClick={() => planFutureYear(nextPlannableYear)}
-          className="inline-flex items-center gap-1.5 rounded-[var(--radius-full)] border border-border px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--background-muted))] transition-colors"
-          title={`Plan ${nextPlannableYear}`}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Plan future year
-        </button>
-      </div>
+      {/*
+        The year pills that used to sit here have moved to the SIDEBAR
+        ("Plan year", under the logo). They read as a filter for this one screen,
+        but the selected year drives eight screens — both planners, both summary
+        tables and three reports. Both controls wrote through the same
+        `usePlanYears` hook, so nothing else had to change.
+      */}
 
       {/* Future-year draft editor. Replaces the dashboard body, since there is
           nothing to report on until a plan is generated for that year. */}
@@ -1008,8 +922,10 @@ export function YearAtAGlance() {
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <RhythmCard href="/planner/daily" icon={<Sun className="h-4 w-4" />} label="Daily" description="The top priority for today" />
           <RhythmCard href="/planner/weekly" icon={<CalendarCheck className="h-4 w-4" />} label="Weekly" description="Review progress and decide" />
-          <RhythmCard href="/planner/monthly" icon={<CalendarDays className="h-4 w-4" />} label="Monthly" description="Align monthly milestones" />
-          <RhythmCard href="/planner/quarterly" icon={<CalendarRange className="h-4 w-4" />} label="Quarterly" description="Set the quarter&apos;s priorities" />
+          {/* "View" rather than "Align"/"Set": these cards navigate to an
+              existing view, they do not start a planning exercise. */}
+          <RhythmCard href="/planner/monthly" icon={<CalendarDays className="h-4 w-4" />} label="Monthly" description="View your monthly priorities" />
+          <RhythmCard href="/planner/quarterly" icon={<CalendarRange className="h-4 w-4" />} label="Quarterly" description="View the quarter&apos;s priorities" />
         </div>
       </section>
 

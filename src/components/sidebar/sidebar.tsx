@@ -7,6 +7,7 @@ import { navigationGroups } from "./sidebar-config";
 import { SidebarLogo } from "./sidebar-logo";
 import { SidebarNavItem } from "./sidebar-nav-item";
 import { SidebarToggle } from "./sidebar-toggle";
+import { SidebarYearPicker } from "./sidebar-year-picker";
 
 const STORAGE_KEY = "sam-sidebar-collapsed";
 
@@ -58,9 +59,15 @@ export function Sidebar() {
           : "w-[var(--sidebar-width)]"
       )}
     >
-      {/* Logo */}
+      {/* Logo + plan year picker */}
       <div className="shrink-0 border-b border-[hsl(var(--sidebar-border))] px-3">
         <SidebarLogo collapsed={collapsed} />
+        {/*
+          Directly under the logo, because the selected year applies to EVERY
+          page — it used to live on the dashboard as year pills, where it read
+          as a filter for that one screen.
+        */}
+        <SidebarYearPicker collapsed={collapsed} />
       </div>
 
       {/* Navigation */}

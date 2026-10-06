@@ -13,7 +13,7 @@ import {
   GraduationCap,
   HelpCircle,
   Settings,
-  Eye,
+  LayoutDashboard,
   RotateCcw,
 } from "lucide-react";
 
@@ -32,7 +32,11 @@ export const navigationGroups: NavGroup[] = [
   {
     label: "Overview",
     items: [
-      { label: "Year at a Glance", href: "/year-at-a-glance", icon: Eye },
+      // Renamed from "Year at a Glance". The ROUTE is unchanged on purpose:
+      // /year-at-a-glance is the post-login redirect in middleware, in the 2FA
+      // flow and in several saved links, so renaming the path would break all
+      // of them for a label change.
+      { label: "Your Dashboard", href: "/year-at-a-glance", icon: LayoutDashboard },
     ],
   },
   {
