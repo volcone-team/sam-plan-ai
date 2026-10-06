@@ -6,6 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { buildChatSystemPrompt, trimHistory, deriveTitle, MAX_MESSAGE_CHARS } from "@/lib/chat-context";
 import { evaluateBudget, sumTokens, effectiveCap, startOfUtcDayISO } from "@/lib/chat-budget";
 import { estimateCostUsd, resolveChatModel } from "@/lib/ai-pricing";
+import { classifyAiFailure, aiFailureLogDetail, operatorHint } from "@/lib/ai-errors";
 import { checkEntitlement, statusForCode } from "@/lib/billing/enforce";
 
 export const runtime = "nodejs";
@@ -217,11 +218,21 @@ export async function POST(request: Request) {
       tokensInput = response.usage?.input_tokens ?? null;
       tokensOutput = response.usage?.output_tokens ?? null;
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[chat] Anthropic call failed:", msg);
+      /**
+       * Same classification as plan generation, so chat and generation report
+       * an exhausted credit balance identically rather than one showing a
+       * useful message and the other a generic failure.
+       */
+      const failure = classifyAiFailure(err);
+      const detail = aiFailureLogDetail(err);
+
+      console.error("[chat] Anthropic call failed (", failure.kind, "):", detail);
+      const hint = operatorHint(failure.kind);
+      if (hint) console.error("[chat]", hint);
 
       // Record the failure so it shows up in the tools page rather than looking
-      // like a conversation that just stopped.
+      // like a conversation that just stopped. The LOG detail is stored, not the
+      // customer-facing message, since this row exists for diagnosis.
       await db.from("chat_messages").insert({
         conversation_id: conversationId,
         company_id: companyId,
@@ -230,12 +241,12 @@ export async function POST(request: Request) {
         content: "",
         model,
         duration_ms: Date.now() - started,
-        error_message: msg.slice(0, 500),
+        error_message: `${failure.kind}: ${detail}`.slice(0, 500),
       });
 
       return NextResponse.json(
-        { error: "Assistant is unavailable right now. Please try again." },
-        { status: 502 }
+        { error: failure.message, kind: failure.kind, retryable: failure.retryable },
+        { status: failure.status }
       );
     }
 

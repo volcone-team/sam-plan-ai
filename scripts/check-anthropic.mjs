@@ -38,7 +38,25 @@ async function check(label, apiKey) {
     const text = res.content.find((b) => b.type === "text")?.text?.trim();
     console.log(`  ok    ${label}: reachable, replied "${text}"`);
   } catch (err) {
-    console.log(`  FAIL  ${label}: ${err.status ?? ""} ${err.message}`);
+    const message = String(err?.message ?? err);
+
+    /**
+     * Credit exhaustion arrives as a 400 invalid_request_error — the same
+     * status and type as a malformed request — so without matching the message
+     * it reads as "the request was wrong" and sends you to debug the prompt
+     * instead of topping up the account.
+     */
+    if (/credit balance is too low|insufficient credit/i.test(message)) {
+      console.log(`  FAIL  ${label}: OUT OF CREDIT`);
+      console.log("        Add credit at console.anthropic.com → Plans & Billing.");
+      console.log("        Plan generation, enhance and chat all fail until then.");
+      return;
+    }
+    if (err?.status === 401 || /api key is invalid|invalid x-api-key/i.test(message)) {
+      console.log(`  FAIL  ${label}: key rejected — check the value in .env.local`);
+      return;
+    }
+    console.log(`  FAIL  ${label}: ${err?.status ?? ""} ${message}`);
   }
 }
 

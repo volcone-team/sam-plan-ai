@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { randomUUID } from "crypto";
 import { logGenerationEvent } from "@/lib/generation-events";
+import { classifyAiFailure, aiFailureLogDetail, operatorHint } from "@/lib/ai-errors";
 import { loadLibrary, loadAiContext, renderLibraryForPrompt } from "@/lib/workbook/read";
 import { checkEntitlement, recordUsage, statusForCode, serviceClient } from "@/lib/billing/enforce";
 import { LIMIT_KEYS } from "@/lib/billing/limits";
@@ -317,18 +318,18 @@ Suggest improvements to this plan as JSON.`;
       });
     }
 
-    const isAuthError =
-      err?.status === 401 ||
-      err?.error?.error?.type === "authentication_error" ||
-      String(err?.message || "").includes("API key is invalid");
-    if (isAuthError) {
-      console.error("[plan/enhance] Anthropic rejected the API key (401).");
-      return NextResponse.json(
-        { error: "The AI service rejected our API key. Please set a valid ANTHROPIC_API_KEY on the server." },
-        { status: 500 }
-      );
-    }
-    console.error("[plan/enhance] Error:", err?.message || err);
-    return NextResponse.json({ error: err?.message || "Internal error" }, { status: 500 });
+    // Shared classification, so enhance reports an exhausted credit balance the
+    // same way generation and chat do rather than returning the raw SDK message.
+    const failure = classifyAiFailure(err);
+    console.error(
+      "[plan/enhance] Failed (", failure.kind, "):", aiFailureLogDetail(err)
+    );
+    const hint = operatorHint(failure.kind);
+    if (hint) console.error("[plan/enhance]", hint);
+
+    return NextResponse.json(
+      { error: failure.message, kind: failure.kind, retryable: failure.retryable },
+      { status: failure.status }
+    );
   }
 }

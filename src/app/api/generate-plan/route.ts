@@ -6,6 +6,7 @@ import { requirePlanEditor } from "@/lib/require-plan-editor";
 import { checkEntitlement, recordUsage, statusForCode, serviceClient } from "@/lib/billing/enforce";
 import { LIMIT_KEYS } from "@/lib/billing/limits";
 import { logGenerationEvent, type GenerationEventType } from "@/lib/generation-events";
+import { classifyAiFailure, aiFailureLogDetail, operatorHint } from "@/lib/ai-errors";
 import { toDateOnly, clampDayOfMonth, resolvePlanStart, planMonthToCalendar, todayDateOnly, requiredRunwayDays } from "@/lib/plan-dates";
 import { sequenceEventDates } from "@/lib/plan-schedule";
 import { loadLibrary, loadTaskTemplates, loadAiContext, renderLibraryForPrompt, type LibraryEntry } from "@/lib/workbook/read";
@@ -846,34 +847,33 @@ Generate a complete revenue plan as JSON.`;
       });
     }
 
-    // Surface auth failures against the AI provider in plain language, since
-    // an invalid/expired key is by far the most common cause of failure here.
-    const isAuthError =
-      e?.status === 401 ||
-      e?.error?.error?.type === "authentication_error" ||
-      String(e?.message || "").includes("API key is invalid");
+    /**
+     * Translate provider failures into something a customer can act on.
+     *
+     * This previously handled only an invalid API key and let everything else
+     * fall through, returning the raw SDK message with a 500. An exhausted
+     * credit balance therefore reached the screen as provider JSON including a
+     * request id — an operator's billing problem presented as a crash.
+     *
+     * classifyAiFailure is unit-tested, and notably separates "out of credit"
+     * from "malformed request": both arrive as a 400 invalid_request_error and
+     * only the message distinguishes them.
+     */
+    const failure = classifyAiFailure(err);
 
-    if (isAuthError) {
-      console.error("[generate-plan] Anthropic rejected the API key (401). Set a valid ANTHROPIC_API_KEY.");
-      return NextResponse.json(
-        {
-          error:
-            "The AI service rejected our API key. Please set a valid ANTHROPIC_API_KEY on the server and try again.",
-          status: 401,
-          type: "authentication_error",
-          model: MODEL,
-        },
-        { status: 500 }
-      );
-    }
+    console.error(
+      "[generate-plan] Failed (", failure.kind, ") |",
+      aiFailureLogDetail(err), "| model:", MODEL
+    );
 
-    const detail = {
-      error: e?.message || "Internal error",
-      status: e?.status,
-      type: e?.error?.type ?? e?.name,
-      model: MODEL,
-    };
-    console.error("[generate-plan] Error:", detail);
-    return NextResponse.json(detail, { status: 500 });
+    // Loud, actionable line for whoever has to fix the account. Separate from
+    // the customer message by design.
+    const hint = operatorHint(failure.kind);
+    if (hint) console.error("[generate-plan]", hint);
+
+    return NextResponse.json(
+      { error: failure.message, kind: failure.kind, retryable: failure.retryable },
+      { status: failure.status }
+    );
   }
 }
