@@ -27,6 +27,7 @@ import { initiativeService } from '@/services/initiative.service';
 import { taskService } from '@/services/task.service';
 import { resultService } from '@/services/result.service';
 import { updateInitiativeStatusFromTasks } from '@/lib/update-initiative-status';
+import { formatMoney } from '@/lib/format-money';
 import { NumberInputRaw } from '@/components/ui/number-input';
 import type { WeeklyPlan, Initiative, Task, TaskStatus, Result } from '@/types';
 
@@ -72,15 +73,8 @@ function getWeekEnd(weekStart: Date): Date {
 
 // formatDateShort imported from @/lib/format-date
 
-function formatCurrency(value: number): string {
-  if (value >= 1000000) {
-    return `$${(value / 1000000).toFixed(2)}M`;
-  }
-  if (value >= 1000) {
-    return `$${(value / 1000).toFixed(1)}K`;
-  }
-  return `$${value.toLocaleString()}`;
-}
+// Full comma-separated figures — see lib/format-money.
+const formatCurrency = formatMoney;
 
 function getStatusIcon(status: TaskStatus) {
   switch (status) {

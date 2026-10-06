@@ -1,5 +1,6 @@
 'use client';
 import { formatDate, formatDateShort } from '@/lib/format-date';
+import { formatMoney } from '@/lib/format-money';
 
 import { useCompanyId } from '@/hooks/use-auth';
 
@@ -46,15 +47,8 @@ function getQuarterDateRange(quarter: number, year: number): { start: Date; end:
   return { start, end };
 }
 
-function formatCurrency(value: number): string {
-  if (Math.abs(value) >= 1000000) {
-    return `$${(value / 1000000).toFixed(2)}M`;
-  }
-  if (Math.abs(value) >= 1000) {
-    return `$${(value / 1000).toFixed(0)}K`;
-  }
-  return `$${value.toLocaleString()}`;
-}
+// Full comma-separated figures — see lib/format-money.
+const formatCurrency = formatMoney;
 
 function formatPercent(value: number): string {
   const sign = value >= 0 ? '+' : '';

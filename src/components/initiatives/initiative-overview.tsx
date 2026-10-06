@@ -7,6 +7,7 @@ import type { Initiative, InitiativeStatus, UpdateInitiativeDTO } from '@/types'
 import type { InitiativeType } from '@/types/initiative-type.types';
 import { initiativeService } from '@/services/initiative.service';
 import { NumberInputRaw } from '@/components/ui/number-input';
+import { DateInput } from '@/components/ui/date-input';
 import { usePermission } from '@/hooks/use-permission';
 
 export interface InitiativeOverviewProps {
@@ -292,13 +293,12 @@ export function InitiativeOverview({
               <label htmlFor="overview-edit-activation" className={labelClass}>
                 Activation date <span className="text-red-500">*</span>
               </label>
-              <input
+              <DateInput
                 id="overview-edit-activation"
-                type="date"
                 value={activationDate}
-                onChange={e => setActivationDate(e.target.value)}
+                onValueChange={setActivationDate}
                 aria-invalid={fieldErrors.activationDate ? true : undefined}
-                className={inputClass}
+                error={!!fieldErrors.activationDate}
               />
               {fieldErrors.activationDate && (
                 <p className={fieldErrorClass}>{fieldErrors.activationDate}</p>
@@ -309,12 +309,10 @@ export function InitiativeOverview({
               <label htmlFor="overview-edit-event-date" className={labelClass}>
                 Event date
               </label>
-              <input
+              <DateInput
                 id="overview-edit-event-date"
-                type="date"
                 value={eventDate}
-                onChange={e => setEventDate(e.target.value)}
-                className={inputClass}
+                onValueChange={setEventDate}
               />
               <p className={helperClass}>Leave empty to clear it.</p>
             </div>

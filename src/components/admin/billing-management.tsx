@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LoadingPanel } from "@/components/ui/spinner";
+import { DateInput } from "@/components/ui/date-input";
 import { ServerDataTable, type ServerColumn } from "@/components/ui/server-data-table";
 
 /**
@@ -991,12 +992,17 @@ export function BillingManagement() {
                 <label htmlFor="comp-until" className="block text-xs font-medium">
                   Until (blank = no expiry)
                 </label>
-                <input
+                {/*
+                  MM/DD/YYYY regardless of the admin's OS locale. A native date
+                  input renders in the browser's locale, so this read
+                  `dd-mm-yyyy` while every date the app prints is month-first —
+                  ambiguous on a value that controls when free access ends.
+                */}
+                <DateInput
                   id="comp-until"
-                  type="date"
                   value={compUntil}
-                  onChange={(e) => setCompUntil(e.target.value)}
-                  className="mt-1 w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm"
+                  onValueChange={setCompUntil}
+                  className="mt-1"
                 />
               </div>
               <div>

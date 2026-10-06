@@ -1,5 +1,6 @@
 'use client';
 import { formatDate, formatDateShort } from '@/lib/format-date';
+import { formatMoney } from '@/lib/format-money';
 
 import { useCompanyId } from '@/hooks/use-auth';
 
@@ -44,15 +45,8 @@ function getQuarterForMonth(month: number): number {
   return Math.ceil(month / 3);
 }
 
-function formatCurrency(value: number): string {
-  if (value >= 1000000) {
-    return `$${(value / 1000000).toFixed(2)}M`;
-  }
-  if (value >= 1000) {
-    return `$${(value / 1000).toFixed(1)}K`;
-  }
-  return `$${value.toLocaleString()}`;
-}
+// Full comma-separated figures — see lib/format-money.
+const formatCurrency = formatMoney;
 
 function getWeeksInMonth(year: number, month: number): { start: Date; end: Date }[] {
   const weeks: { start: Date; end: Date }[] = [];

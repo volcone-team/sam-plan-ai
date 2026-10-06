@@ -148,7 +148,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "not_configured" }, { status: 503 });
     }
 
-    const systemPrompt = await buildChatSystemPrompt(db);
+    /**
+     * `companyId` comes from the caller's PROFILE, resolved from their session
+     * above — never from the request body. It is the only thing scoping the
+     * account data in the prompt, so trusting a client-supplied id here would
+     * let anyone read another company's revenue by passing its id.
+     */
+    const systemPrompt = await buildChatSystemPrompt(db, companyId);
     if (!systemPrompt) {
       // No workbook means no grounding. Refusing beats answering from the
       // model's own guesses, which would contradict the authored product.

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { CheckCircle2, Clock, Info } from 'lucide-react';
 import { initiativeService } from '@/services/initiative.service';
 import { resultService } from '@/services/result.service';
+import { formatMoney } from '@/lib/format-money';
 
 /**
  * "Where you are" - actual revenue against where the plan says you should be.
@@ -14,11 +15,9 @@ import { resultService } from '@/services/result.service';
  * projection once its activation date has passed.
  */
 
-function formatCurrency(value: number): string {
-  if (Math.abs(value) >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
-  if (Math.abs(value) >= 1_000) return `$${(value / 1_000).toFixed(0)}K`;
-  return `$${value.toLocaleString()}`;
-}
+// Full comma-separated figures — see lib/format-money. These cards report how
+// far ahead or behind pace a company is, so the exact figure is the point.
+const formatCurrency = formatMoney;
 
 export interface PeriodStat {
   actual: number;

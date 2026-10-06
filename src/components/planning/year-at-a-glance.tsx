@@ -34,6 +34,7 @@ import type { AnnualPlan, QuarterlyPlan, Initiative, Result } from '@/types';
 import { cacheGet, cacheSet, cacheInvalidatePrefix, CacheKeys, TTL } from '@/lib/client-cache';
 import { useToast } from '@/components/ui/toast';
 import { NumberInputRaw } from '@/components/ui/number-input';
+import { formatMoney } from '@/lib/format-money';
 import { usePlanYears } from '@/hooks/use-plan-years';
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -56,15 +57,10 @@ interface TimelineInitiative {
   eventDate?: Date;
 }
 
-function formatCurrency(value: number): string {
-  if (value >= 1000000) {
-    return `$${(value / 1000000).toFixed(2)}M`;
-  }
-  if (value >= 1000) {
-    return `$${(value / 1000).toFixed(0)}K`;
-  }
-  return `$${value.toLocaleString()}`;
-}
+// Shared formatter: figures users read are shown in full ($6,060,000), never
+// abbreviated. Previously this file carried its own copy that rendered
+// "$6.06M", which hid the actual revenue target on the goal cards.
+const formatCurrency = formatMoney;
 
 export function YearAtAGlance() {
   const companyId = useCompanyId() || "";

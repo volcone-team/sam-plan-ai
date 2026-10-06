@@ -1,6 +1,7 @@
 'use client';
 
 import { useCompanyId } from '@/hooks/use-auth';
+import { DateInput } from '@/components/ui/date-input';
 import { useEffect, useState } from 'react';
 import {
   Plus,
@@ -442,11 +443,11 @@ function ResultForm({ metricKeys, onSubmit, onCancel }: { metricKeys: string[]; 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">Week Start</label>
-          <input type="date" value={formData.weekStartDate} onChange={e => setFormData(p => ({ ...p, weekStartDate: e.target.value }))} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+          <DateInput value={formData.weekStartDate} onValueChange={weekStartDate => setFormData(p => ({ ...p, weekStartDate }))} />
         </div>
         <div>
           <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">Week End</label>
-          <input type="date" value={formData.weekEndDate} onChange={e => setFormData(p => ({ ...p, weekEndDate: e.target.value }))} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+          <DateInput value={formData.weekEndDate} onValueChange={weekEndDate => setFormData(p => ({ ...p, weekEndDate }))} />
         </div>
       </div>
 
@@ -548,7 +549,7 @@ function ExpenseForm({ onSubmit, onCancel }: { onSubmit: (data: ExpenseFormData)
         </div>
         <div>
           <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">Date</label>
-          <input type="date" value={formData.date} onChange={e => setFormData(p => ({ ...p, date: e.target.value }))} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+          <DateInput value={formData.date} onValueChange={date => setFormData(p => ({ ...p, date }))} />
         </div>
       </div>
 

@@ -8,6 +8,7 @@ import {
   Calendar,
   Users,
 } from 'lucide-react';
+import { DateInput } from '@/components/ui/date-input';
 import type { InitiativeType, CreateInitiativeDTO, InitiativeKind } from '@/types';
 
 export interface AddInitiativePanelProps {
@@ -546,12 +547,10 @@ export function AddInitiativePanel({
                     Activation Date
                   </span>
                 </label>
-                <input
+                <DateInput
                   id="init-activation"
-                  type="date"
                   value={activationDate}
-                  onChange={e => setActivationDate(e.target.value)}
-                  className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-[hsl(var(--primary))]"
+                  onValueChange={setActivationDate}
                 />
                 <p className="text-xs text-[hsl(var(--foreground-muted))]">Optional — you can set this later</p>
               </div>
@@ -591,12 +590,10 @@ export function AddInitiativePanel({
                     </button>
                   </div>
                   {eventDateMode === 'exact' ? (
-                    <input
+                    <DateInput
                       id="init-event-date"
-                      type="date"
                       value={eventDate}
-                      onChange={e => setEventDate(e.target.value)}
-                      className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-[hsl(var(--primary))]"
+                      onValueChange={setEventDate}
                     />
                   ) : (
                     <div className="flex gap-2">

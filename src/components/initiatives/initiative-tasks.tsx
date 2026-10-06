@@ -2,6 +2,7 @@
 
 import { useCompanyId } from '@/hooks/use-auth';
 import { usePermissions } from '@/hooks/use-permission';
+import { DateInput } from '@/components/ui/date-input';
 import { useEffect, useState } from 'react';
 import {
   Plus,
@@ -544,12 +545,10 @@ function TaskForm({ initialData, onSubmit, onCancel, title, submitLabel = 'Add T
           <label htmlFor="task-due" className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">
             Due Date
           </label>
-          <input
+          <DateInput
             id="task-due"
-            type="date"
             value={formData.dueDate}
-            onChange={e => setFormData(prev => ({ ...prev, dueDate: e.target.value }))}
-            className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]"
+            onValueChange={dueDate => setFormData(prev => ({ ...prev, dueDate }))}
           />
         </div>
 

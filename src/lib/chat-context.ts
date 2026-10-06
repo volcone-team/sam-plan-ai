@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadLibrary, loadAiContext, renderLibraryForPrompt } from "@/lib/workbook/read";
+import {
+  loadAccountSnapshot,
+  renderAccountSnapshot,
+  hasUsableAccountData,
+} from "@/lib/chat-account-context";
 
 /**
  * Workbook grounding for the chatbot.
@@ -19,23 +24,41 @@ import { loadLibrary, loadAiContext, renderLibraryForPrompt } from "@/lib/workbo
 export const CHAT_SYSTEM_PREAMBLE = `You are the SAM Plan AI assistant. You help business owners and their teams understand revenue initiatives, how to execute them, and what results to expect.
 
 GROUNDING RULES — these matter more than being helpful:
-- Answer from the INITIATIVE LIBRARY below. It is the authored source of truth for this product.
+- Advice, tactics and benchmarks come ONLY from the INITIATIVE LIBRARY below. It is the authored source of truth for this product.
 - If the library does not cover something, say so plainly and suggest what the user could ask instead. Never invent an initiative, a benchmark number, or a task list.
 - When a benchmark is marked unverified, say it is an estimate rather than presenting it as measured data.
 - Keep answers short and practical: a few sentences, or a short list. These are busy operators, not readers.
 - You may explain, compare, sequence and prioritise initiatives from the library, and answer "how do I actually do this" questions using the authored guidance.
-- You cannot see or change the user's plan, tasks or numbers. If asked to modify their plan, explain that they need to use the planner or plan generation, and point them at it.
-- Decline anything unrelated to revenue planning and this product, briefly and without lecturing.`;
+- Decline anything unrelated to revenue planning and this product, briefly and without lecturing.
+
+USING THIS ACCOUNT'S DATA:
+- When a THIS ACCOUNT section is present, it is the real, current data for the business you are talking to. Use it to make your answer specific: their targets, products, planned initiatives and recorded results.
+- Recommend only initiatives that exist in the library, but choose and prioritise them for THIS business — its budget, team size, products, what has already worked, and the gap between its targets and recorded results.
+- Quote their figures only as given. Never estimate, extrapolate or invent a number that is not in the data, and do not guess at data that is absent. If something you would need is missing, say which piece is missing and what it would let you work out.
+- If the account section is absent or thin, answer generally from the library and say you would be able to be more specific once they have completed their plan.
+- You can READ their data but cannot CHANGE anything. For edits, point them at the planner or plan generation.
+- This data belongs to the person you are talking to. Never speculate about, compare against, or refer to any other company's data.`;
 
 /**
- * Build the full system prompt: rules plus the rendered library.
+ * Build the full system prompt: rules, the workbook library, and — when a
+ * company is known — that company's own data.
  *
  * Returns null when the workbook is empty — the caller must then refuse to chat
  * rather than fall back to an ungrounded model, which would happily invent a
  * catalogue and undermine the entire product.
+ *
+ * `companyId` MUST come from the authenticated session, never from the request
+ * body. It is the only thing scoping the account section, so accepting a
+ * client-supplied value would let anyone read another company's revenue by
+ * passing its id.
+ *
+ * A failure to load account data is non-fatal: the assistant falls back to
+ * workbook-only answers rather than refusing to talk, since general advice is
+ * still useful and the alternative is a dead chat window.
  */
 export async function buildChatSystemPrompt(
-  db: SupabaseClient
+  db: SupabaseClient,
+  companyId?: string | null
 ): Promise<string | null> {
   const [library, context] = await Promise.all([loadLibrary(db), loadAiContext(db)]);
 
@@ -46,10 +69,29 @@ export async function buildChatSystemPrompt(
 
   const rendered = renderLibraryForPrompt(library, context);
 
+  let accountSection = "";
+  if (companyId) {
+    try {
+      const snapshot = await loadAccountSnapshot(db, companyId);
+      if (hasUsableAccountData(snapshot) && snapshot) {
+        accountSection = `
+
+THIS ACCOUNT — the real current data for the business you are advising:
+${renderAccountSnapshot(snapshot)}`;
+      }
+    } catch (err) {
+      // Degrade to workbook-only rather than failing the turn.
+      console.error(
+        "[chat-context] Could not load account data, continuing workbook-only:",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+  }
+
   return `${CHAT_SYSTEM_PREAMBLE}
 
 INITIATIVE LIBRARY (${library.length} initiatives, authored by the SAM team):
-${rendered}`;
+${rendered}${accountSection}`;
 }
 
 /**

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { ArrowUpRight, CalendarDays, Trash2, Trophy } from 'lucide-react';
 import { formatDate, formatRelativeDays } from '@/lib/format-date';
+import { formatMoney } from '@/lib/format-money';
 import { progressPercent } from '@/lib/top-performers';
 import type { Initiative } from '@/types';
 import type { DifficultyDimensions } from '@/types/initiative-type.types';
@@ -71,14 +72,8 @@ const STATUS_STYLES: Record<string, { label: string; dot: string; pill: string }
 };
 
 /** Compact money, sign-safe so a negative NET never reads as `$-1,200`. */
-function formatCurrency(value: number): string {
-  if (!Number.isFinite(value)) return '$0';
-  const sign = value < 0 ? '-' : '';
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
-  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(0)}K`;
-  return `${sign}$${abs.toLocaleString()}`;
-}
+// Full comma-separated figures — see lib/format-money.
+const formatCurrency = formatMoney;
 
 /** Dots rendered per difficulty meter. */
 const DIFFICULTY_DOTS = 5;

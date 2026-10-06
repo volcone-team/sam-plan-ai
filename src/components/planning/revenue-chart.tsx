@@ -1,6 +1,7 @@
 'use client';
 
 import { TrendingUp } from 'lucide-react';
+import { formatMoney } from '@/lib/format-money';
 
 interface MonthlyData {
   month: number;
@@ -16,12 +17,9 @@ interface RevenueChartProps {
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-function formatCurrency(value: number): string {
-  if (value >= 1000) {
-    return `$${(value / 1000).toFixed(0)}K`;
-  }
-  return `$${value.toLocaleString()}`;
-}
+// Full figures: these are hover tooltips on the bars, not axis ticks, so there
+// is room and the exact number is what the user hovered to find out.
+const formatCurrency = formatMoney;
 
 export function RevenueChart({ data, maxRevenue }: RevenueChartProps) {
   const max = maxRevenue || Math.max(...data.flatMap(d => [d.good, d.better, d.best]));
