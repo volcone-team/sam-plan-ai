@@ -34,6 +34,7 @@ import { cacheGet, cacheSet, cacheInvalidatePrefix, CacheKeys, TTL } from '@/lib
 import { useToast } from '@/components/ui/toast';
 import { NumberInputRaw } from '@/components/ui/number-input';
 import { formatMoney } from '@/lib/format-money';
+import { sumInitiatives, goalProgress, goalCoverage, shouldTrackPace, trackingStartsLabel } from '@/lib/plan-totals';
 import { usePlanYears } from '@/hooks/use-plan-years';
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -211,11 +212,29 @@ export function YearAtAGlance() {
         }
         setMonthlyData(monthly);
 
-        // Calculate totals
-        const goodTotal = monthly.reduce((sum, m) => sum + m.good, 0);
-        const betterTotal = monthly.reduce((sum, m) => sum + m.better, 0);
-        const bestTotal = monthly.reduce((sum, m) => sum + m.best, 0);
-        setProjectionTotals({ good: goodTotal, better: betterTotal, best: bestTotal });
+        /**
+         * Totals come from the INITIATIVES, not from the monthly projections.
+         *
+         * Both exist because the plan generator writes them from two separate
+         * parts of the model's response and nothing reconciles them. Summing
+         * projections here is what made "Does your plan add up?" report
+         * 256,000 / 420,000 / 630,000 directly above six initiative cards
+         * totalling 135,000 / 210,000 / 293,000.
+         *
+         * Initiatives win: they are what the user can see and edit, editing one
+         * now moves the total, and the list view's totals row sums the same
+         * rows — so the two agree by construction rather than by luck.
+         * Projections still drive the monthly SHAPE below.
+         */
+        setProjectionTotals(sumInitiatives(
+          initiativesData.map((i: Initiative) => ({
+            revenueGood: i.revenueScenarios?.good ?? 0,
+            revenueBetter: i.revenueScenarios?.better ?? 0,
+            revenueBest: i.revenueScenarios?.best ?? 0,
+            plannedBudget: i.plannedBudget ?? 0,
+            actualSpend: i.actualSpend ?? 0,
+          }))
+        ));
 
         // Build initiative timeline data
         const timelineInitiatives: TimelineInitiative[] = initiativesData.map((i: Initiative) => ({
@@ -778,17 +797,23 @@ export function YearAtAGlance() {
           Stretch is what a great year looks like.
         </p>
         <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+          {/*
+            The captions used to read "Conservative annual target" and
+            "Ambitious annual target", which only repeated the section intro
+            directly above. Replaced with real progress: what has been earned
+            and what is left, from recorded results.
+          */}
           <GoalCard
             label="Baseline Goal"
             value={formatCurrency(annualPlan?.baselineRevenue || 0)}
-            caption="Conservative annual target"
             hint="The revenue you need to hit this year."
+            progress={goalProgress(periodStats.ytd.actual, annualPlan?.baselineRevenue || 0)}
           />
           <GoalCard
             label="Stretch Goal"
             value={formatCurrency(annualPlan?.stretchRevenue || 0)}
-            caption="Ambitious annual target"
             hint="What an excellent year looks like."
+            progress={goalProgress(periodStats.ytd.actual, annualPlan?.stretchRevenue || 0)}
             accent
           />
         </div>
@@ -801,15 +826,44 @@ export function YearAtAGlance() {
         <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
           Where you are
         </p>
-        <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">
-          Your actual revenue compared to where your plan says you should be by now.
-          &apos;Expected&apos; is based on when your initiatives are scheduled.
-        </p>
-        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <PaceCard label="Month-to-date" actual={periodStats.mtd.actual} expected={periodStats.mtd.expected} />
-          <PaceCard label="Quarter-to-date" actual={periodStats.qtd.actual} expected={periodStats.qtd.expected} />
-          <PaceCard label="Year-to-date" actual={periodStats.ytd.actual} expected={periodStats.ytd.expected} />
-        </div>
+
+        {shouldTrackPace(selectedYear) ? (
+          <>
+            <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">
+              Your actual revenue compared to where your plan says you should be by now.
+              &apos;Expected&apos; is based on when your initiatives are scheduled.
+            </p>
+            <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <PaceCard label="Month-to-date" actual={periodStats.mtd.actual} expected={periodStats.mtd.expected} />
+              <PaceCard label="Quarter-to-date" actual={periodStats.qtd.actual} expected={periodStats.qtd.expected} />
+              <PaceCard label="Year-to-date" actual={periodStats.ytd.actual} expected={periodStats.ytd.expected} />
+            </div>
+          </>
+        ) : (
+          /*
+            A FUTURE plan year has nothing to track. The three cards reported
+            "Expected: $210,000 · 0% of pace · behind by $210,000" before the
+            year had begun — measuring a company against a period that has not
+            started. Month- and quarter-to-date simultaneously showed
+            "Expected: $0", because the elapsed fraction of a future month is
+            zero while the year total is not, so the same section contradicted
+            itself. One honest line replaces all three.
+          */
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-base font-semibold">{trackingStartsLabel(selectedYear)}</p>
+              <p className="mt-0.5 text-sm text-[hsl(var(--foreground-muted))]">
+                Month, quarter and year-to-date figures appear once your plan year begins.
+              </p>
+            </div>
+            <button
+              onClick={() => setSelectedYear(CURRENT_YEAR)}
+              className="shrink-0 text-sm font-medium text-[hsl(var(--primary))] hover:underline"
+            >
+              View {CURRENT_YEAR} progress →
+            </button>
+          </div>
+        )}
       </section>
 
       {/* DOES YOUR PLAN ADD UP? — the same Good/Better/Best projections as before,
@@ -835,21 +889,39 @@ export function YearAtAGlance() {
             label="Better"
             value={formatCurrency(projectionTotals.better)}
             assumption="If initiatives land as planned"
-            comparisonLabel="vs Baseline"
-            comparisonValue={formatCurrency(annualPlan?.baselineRevenue || 0)}
-            covers={projectionTotals.better >= (annualPlan?.baselineRevenue || 0)}
-            coversText="Your initiatives cover your baseline goal."
-            missesText="Your initiatives fall short of your baseline goal."
+            {...(() => {
+              /*
+                One sentence computed from live numbers, replacing a "vs
+                Baseline: $X" line plus a separate check/warning line that
+                said the same thing twice without ever stating the GAP —
+                the only actionable part.
+              */
+              const c = goalCoverage(projectionTotals.better, annualPlan?.baselineRevenue || 0);
+              return {
+                covers: c.covers,
+                coverageText: c.noGoal
+                  ? 'Set a baseline goal to compare against.'
+                  : c.covers
+                    ? `Covers your ${formatMoney(annualPlan?.baselineRevenue || 0)} baseline goal.`
+                    : `${formatMoney(c.shortfall)} short of your ${formatMoney(annualPlan?.baselineRevenue || 0)} baseline goal.`,
+              };
+            })()}
           />
           <ScenarioCard
             label="Best"
             value={formatCurrency(projectionTotals.best)}
             assumption="If initiatives overperform"
-            comparisonLabel="vs Stretch"
-            comparisonValue={formatCurrency(annualPlan?.stretchRevenue || 0)}
-            covers={projectionTotals.best >= (annualPlan?.stretchRevenue || 0)}
-            coversText="Your initiatives cover your stretch goal."
-            missesText="Your initiatives fall short of your stretch goal."
+            {...(() => {
+              const c = goalCoverage(projectionTotals.best, annualPlan?.stretchRevenue || 0);
+              return {
+                covers: c.covers,
+                coverageText: c.noGoal
+                  ? 'Set a stretch goal to compare against.'
+                  : c.covers
+                    ? `Covers your ${formatMoney(annualPlan?.stretchRevenue || 0)} stretch goal.`
+                    : `${formatMoney(c.shortfall)} short of your ${formatMoney(annualPlan?.stretchRevenue || 0)} stretch goal.`,
+              };
+            })()}
             accent
           />
         </div>
@@ -857,24 +929,37 @@ export function YearAtAGlance() {
 
       {/* YOUR ANNUAL STRATEGY — the reasoning behind the plan. Stored on the
           annual plan (same field the future-year draft editor writes to). */}
-      <section className="rounded-[var(--radius-lg)] border border-border bg-[hsl(var(--background-muted)/0.4)] p-6">
-        <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
-          Your annual strategy
-        </p>
-        <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">
-          The reasoning behind your plan, based on what you told us about your business.
-        </p>
-        {annualPlan?.notes ? (
+      {annualPlan?.notes ? (
+        <section className="rounded-[var(--radius-lg)] border border-border bg-[hsl(var(--background-muted)/0.4)] p-6">
+          <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
+            Your annual strategy
+          </p>
+          <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">
+            The reasoning behind your plan, based on what you told us about your business.
+          </p>
           <p className="mt-4 whitespace-pre-line text-lg leading-relaxed text-[hsl(var(--foreground))]">
             {annualPlan.notes}
           </p>
-        ) : (
-          <p className="mt-4 text-sm italic text-[hsl(var(--foreground-subtle))]">
-            No strategy captured for {selectedYear} yet. Regenerate the plan, or add one when
-            planning a future year.
+        </section>
+      ) : (
+        /*
+          COLLAPSED empty state. With no strategy this was a full-width band
+          with a heading, a description and an italic apology — the largest
+          thing on the page was the absence of content. One row with the action
+          that fills it.
+        */
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-border bg-[hsl(var(--background-muted)/0.4)] px-5 py-3">
+          <p className="text-sm text-[hsl(var(--foreground-muted))]">
+            No strategy captured for {selectedYear} yet
           </p>
-        )}
-      </section>
+          <button
+            onClick={() => setShowRegenConfirm(true)}
+            className="shrink-0 rounded-[var(--radius-md)] border border-border bg-background px-3 py-1.5 text-sm font-medium transition-colors hover:bg-[hsl(var(--background-muted))]"
+          >
+            Add your strategy
+          </button>
+        </section>
+      )}
 
       {/* ACTIVE INITIATIVES — the projects that produce the revenue */}
       <section>
@@ -937,10 +1022,22 @@ export function YearAtAGlance() {
 
 /* --- Sub-components --- */
 
-/** Large goal card — Baseline / Stretch. Bigger than scenario cards on purpose. */
+/**
+ * Large goal card — Baseline / Stretch. Bigger than scenario cards on purpose.
+ *
+ * Shows PROGRESS rather than a restatement of the section intro. `progress` is
+ * computed from recorded results, so "earned" is money actually logged — never
+ * a projection, which would turn an expectation into an achievement.
+ */
 function GoalCard({
-  label, value, caption, hint, accent = false,
-}: { label: string; value: string; caption: string; hint: string; accent?: boolean }) {
+  label, value, hint, progress, accent = false,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  progress: { earned: number; remaining: number; percent: number; reached: boolean; noGoal: boolean };
+  accent?: boolean;
+}) {
   return (
     <div
       className={
@@ -957,19 +1054,46 @@ function GoalCard({
         </span>
       </div>
       <p className="mt-2 text-4xl font-bold tracking-tight">{value}</p>
-      <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">{caption}</p>
+
+      {progress.noGoal ? (
+        // No target set: a 0% bar would imply a goal exists and is unmet.
+        <p className="mt-3 text-sm text-[hsl(var(--foreground-subtle))]">
+          No target set for this year yet.
+        </p>
+      ) : (
+        <>
+          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[hsl(var(--background-muted))]">
+            <div
+              className="h-full rounded-full bg-[hsl(var(--primary))] transition-all"
+              style={{ width: `${progress.percent}%` }}
+            />
+          </div>
+          <p className="mt-2 text-sm text-[hsl(var(--foreground-muted))]">
+            {formatMoney(progress.earned)} earned
+            {progress.reached
+              ? ' · goal reached'
+              : ` · ${formatMoney(progress.remaining)} to go`}
+          </p>
+        </>
+      )}
     </div>
   );
 }
 
-/** Good / Better / Best scenario card with its assumption and goal comparison. */
+/**
+ * Good / Better / Best scenario card.
+ *
+ * `coverageText` is ONE pre-computed sentence naming the goal and the gap. It
+ * replaced a "vs Baseline: $X" line plus a separate check/warning line, which
+ * together restated the comparison twice and never said how far short the plan
+ * fell — the only part a user can act on.
+ */
 function ScenarioCard({
-  label, value, assumption, body, comparisonLabel, comparisonValue,
-  covers, coversText, missesText, accent = false,
+  label, value, assumption, body,
+  covers, coverageText, accent = false,
 }: {
   label: string; value: string; assumption: string; body?: string;
-  comparisonLabel?: string; comparisonValue?: string;
-  covers?: boolean; coversText?: string; missesText?: string; accent?: boolean;
+  covers?: boolean; coverageText?: string; accent?: boolean;
 }) {
   return (
     <div
@@ -990,13 +1114,8 @@ function ScenarioCard({
       <p className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
         {assumption}
       </p>
-      {comparisonLabel && (
-        <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">
-          {comparisonLabel}: {comparisonValue}
-        </p>
-      )}
       {body && <p className="mt-3 text-sm text-[hsl(var(--foreground-muted))]">{body}</p>}
-      {coversText && (
+      {coverageText && (
         <>
           <div className="mt-3 border-t border-border" />
           <p className="mt-3 flex items-start gap-1.5 text-sm">
@@ -1005,9 +1124,7 @@ function ScenarioCard({
             ) : (
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             )}
-            <span className="text-[hsl(var(--foreground-muted))]">
-              {covers ? coversText : missesText}
-            </span>
+            <span className="text-[hsl(var(--foreground-muted))]">{coverageText}</span>
           </p>
         </>
       )}
