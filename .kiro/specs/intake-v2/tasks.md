@@ -8,46 +8,46 @@ silent error is most costly.
 
 ## Stage 1 — Schema and foundations
 
-- [ ] 1. Migration 026: remaining fields
-  - [-] 1.1 `industry_other`, `resume_screen`, `onboarding_status` + 5 timestamps on `planning_inputs`
-  - [ ] 1.2 `recurring_interval` on `intake_products`
-  - [ ] 1.3 `custom_label`, `needs_review` on `intake_initiatives`
-  - [ ] 1.4 `intake_events` table with RLS
-  - [ ] 1.5 Extend `scripts/verify-intake-schema.mjs` to cover the new columns
+- [x] 1. Migration 026: remaining fields
+  - [x] 1.1 `industry_other`, `resume_screen`, `onboarding_status` + 5 timestamps on `planning_inputs`
+  - [x] 1.2 `recurring_interval` on `intake_products`
+  - [x] 1.3 `custom_label`, `needs_review` on `intake_initiatives`
+  - [x] 1.4 `intake_events` table with RLS
+  - [x] 1.5 Extend `scripts/verify-intake-schema.mjs` to cover the new columns
 
-- [ ] 2. `lib/intake/schema.ts` — field definitions
-  - [ ] 2.1 The 13 industries + Other, matching the Library's Ideal Industries column
-  - [ ] 2.2 All option lists (sales model, stage, who closes, product type, price tier, pricing model, delivery, obstacles, other audiences)
-  - [ ] 2.3 Per-screen required-field map, mirroring the asterisks in the mockups
-  - [ ] 2.4 Exact copy strings (titles, subtitles, helpers, placeholders) in one place
+- [x] 2. `lib/intake/schema.ts` — field definitions
+  - [x] 2.1 The 13 industries + Other, matching the Library's Ideal Industries column
+  - [x] 2.2 All option lists (sales model, stage, who closes, product type, price tier, pricing model, delivery, obstacles, other audiences)
+  - [x] 2.3 Per-screen required-field map, mirroring the asterisks in the mockups
+  - [x] 2.4 Exact copy strings (titles, subtitles, helpers, placeholders) in one place
 
-- [ ] 3. `lib/intake/flow.ts` — path and progress
-  - [ ] 3.1 `screensFor(path)` — Path C omits `initiatives` entirely
-  - [ ] 3.2 `progressFor(path, screen)` — step/total off the same array
-  - [ ] 3.3 `nextScreen` / `prevScreen`
-  - [ ] 3.4 Final button label per path
-  - [ ] 3.5 Tests: 9 vs 10 screens, progress never exceeds total, traversal from every screen on every path
+- [x] 3. `lib/intake/flow.ts` — path and progress
+  - [x] 3.1 `screensFor(path)` — Path C omits `initiatives` entirely
+  - [x] 3.2 `progressFor(path, screen)` — step/total off the same array
+  - [x] 3.3 `nextScreen` / `prevScreen`
+  - [x] 3.4 Final button label per path
+  - [x] 3.5 Tests: 9 vs 10 screens, progress never exceeds total, traversal from every screen on every path
 
-- [ ] 4. `lib/intake/funnel.ts` — the one generic funnel (D1)
-  - [ ] 4.1 Three percentage stages + audience and price brackets
-  - [ ] 4.2 Per-initiative label overrides, presentation only
-  - [ ] 4.3 Tests: overrides never alter arithmetic; a blank stage yields no forecast, never zero
+- [x] 4. `lib/intake/funnel.ts` — the one generic funnel (D1)
+  - [x] 4.1 Three percentage stages + audience and price brackets
+  - [x] 4.2 Per-initiative label overrides, presentation only
+  - [x] 4.3 Tests: overrides never alter arithmetic; a blank stage yields no forecast, never zero
 
-- [ ] 5. `lib/intake/validation.ts` — per-screen validation
-  - [ ] 5.1 Required fields block; optional never do
-  - [ ] 5.2 Obstacles capped at 3
-  - [ ] 5.3 "Not sure" produces null, never 0
-  - [ ] 5.4 Percent fields bounded 0–100
-  - [ ] 5.5 Tests for each rule
+- [x] 5. `lib/intake/validation.ts` — per-screen validation
+  - [x] 5.1 Required fields block; optional never do
+  - [x] 5.2 Obstacles capped at 3
+  - [x] 5.3 "Not sure" produces null, never 0
+  - [x] 5.4 Percent fields bounded 0–100
+  - [x] 5.5 Tests for each rule
 
 ## Stage 2 — Draft persistence
 
-- [ ] 6. `lib/intake/draft.ts` + `/api/intake/draft`
-  - [ ] 6.1 Serialise answers to `planning_inputs` + `intake_products` + `intake_initiatives`
-  - [ ] 6.2 Restore on return, resuming at `resume_screen` (slug, not index)
-  - [ ] 6.3 Partial saves from screen 1 so an abandoned intake still leaves data
-  - [ ] 6.4 `company_id` from the session only, never the body
-  - [ ] 6.5 Tests: round-trip, partial restore, nulls survive as nulls
+- [x] 6. `lib/intake/draft.ts` + `/api/intake/draft`
+  - [x] 6.1 Serialise answers to `planning_inputs` + `intake_products` + `intake_initiatives`
+  - [x] 6.2 Restore on return, resuming at `resume_screen` (slug, not index)
+  - [x] 6.3 Partial saves from screen 1 so an abandoned intake still leaves data
+  - [x] 6.4 `company_id` from the session only, never the body
+  - [x] 6.5 Tests: round-trip, partial restore, nulls survive as nulls
 
 ## Stage 3 — Screens 0 to 4
 
