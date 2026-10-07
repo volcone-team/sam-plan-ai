@@ -122,7 +122,6 @@ export function ScreenBusiness({
           onValueChange={(value) => setAnswer("prior_period_revenue", value)}
           placeholder="450,000"
           error={Boolean(errors.prior_period_revenue)}
-          className="sm:max-w-xs"
         />
       </Field>
 

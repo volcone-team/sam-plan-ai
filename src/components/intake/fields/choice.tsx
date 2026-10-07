@@ -126,14 +126,29 @@ export interface PillSelectProps<V extends string> {
   value: string | null;
   onChange: (value: V) => void;
   error?: boolean;
+  /**
+   * Size the pills to their text instead of filling the row.
+   *
+   * For controls that switch a VIEW rather than record an answer — the
+   * Month/Exact date toggle, for instance. Stretching "Month" across half the
+   * form would make a display preference look as important as the question
+   * above it.
+   */
+  compact?: boolean;
 }
 
 /**
- * Inline pills for a single choice.
+ * Pills for a single choice, laid out as a GRID that fills the row.
  *
- * Preferred over a dropdown wherever the options fit on screen: seeing all four
- * answers at once is faster than opening a select, and these lists are short by
- * design.
+ * Grid rather than `flex-wrap`, because wrapping sizes each pill to its own
+ * text: "I do" ends up a third the width of "A salesperson or sales team",
+ * which reads as a ragged edge and leaves a different amount of dead space on
+ * every question. An equal-column grid gives one clean right edge down the
+ * whole form, and every option the same click target regardless of how long its
+ * wording happens to be.
+ *
+ * `gridColumnsFor` picks the column count from the number of options, so two
+ * options take half the width each and a longer list fills end to end.
  */
 export function PillSelect<V extends string>({
   name,
@@ -141,14 +156,18 @@ export function PillSelect<V extends string>({
   value,
   onChange,
   error,
+  compact,
 }: PillSelectProps<V>) {
   return (
     <div
       role="radiogroup"
       aria-invalid={error || undefined}
-      className="flex flex-wrap gap-2"
+      className={cn(
+        compact ? "flex flex-wrap gap-2" : "grid gap-2",
+        !compact && gridColumnsFor(options.length)
+      )}
     >
-      {options.map((option) => {
+      {options.map((option, index) => {
         const id = `${name}-${option.value}`;
         const selected = value === option.value;
 
@@ -158,7 +177,10 @@ export function PillSelect<V extends string>({
             htmlFor={id}
             title={option.subLabel}
             className={cn(
-              "cursor-pointer rounded-full border px-3.5 py-2 text-sm",
+              // Centred because the pills are now wider than their text, and
+              // left-aligned labels in equal columns look accidental.
+              "flex cursor-pointer items-center justify-center gap-1.5 rounded-full border px-3.5 py-2 text-center text-sm",
+              !compact && fillTrailingItem(index, options.length),
               "transition-colors duration-[var(--duration-default)]",
               "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2",
               selected
@@ -176,11 +198,11 @@ export function PillSelect<V extends string>({
               onChange={() => onChange(option.value)}
               className="sr-only"
             />
-            {option.label}
+            <span>{option.label}</span>
             {option.subLabel && (
               <span
                 className={cn(
-                  "ml-1.5 text-xs",
+                  "text-xs",
                   selected
                     ? "text-[hsl(var(--primary-foreground)_/_0.8)]"
                     : "text-[hsl(var(--foreground-muted))]"
@@ -194,6 +216,46 @@ export function PillSelect<V extends string>({
       })}
     </div>
   );
+}
+
+/**
+ * Columns for a given number of options.
+ *
+ * ONE option is full width, TWO are half each, and anything longer settles at
+ * two or three columns rather than growing indefinitely — five equal columns
+ * would squeeze "A salesperson or sales team" into three wrapped lines.
+ *
+ * Always one column on mobile, so nothing is ever narrower than its own label.
+ */
+export function gridColumnsFor(count: number): string {
+  if (count <= 1) return "sm:grid-cols-1";
+  if (count === 2) return "sm:grid-cols-2";
+  if (count === 3) return "sm:grid-cols-3";
+  if (count === 4) return "sm:grid-cols-2 lg:grid-cols-4";
+  // Five or more: two columns on tablet, three on desktop.
+  return "sm:grid-cols-2 lg:grid-cols-3";
+}
+
+/**
+ * Stretch a trailing odd item across the empty columns beside it.
+ *
+ * Without this, an odd count leaves a half-width pill with dead space to its
+ * right, which looks like a rendering fault rather than a deliberate layout.
+ * Only applies to the LAST item, and only when the count is odd — three options
+ * in a three-column grid are already flush.
+ *
+ * Returns a class string rather than a style so it stays inside Tailwind's
+ * responsive variants: the span must not apply at the mobile single-column
+ * breakpoint, where every item is already full width.
+ */
+export function fillTrailingItem(index: number, count: number): string {
+  const isLast = index === count - 1;
+  if (!isLast) return "";
+
+  // Two-column layouts: an odd count leaves one gap beside the last item.
+  if (count === 2 || count === 4) return "";
+  if (count % 2 === 1 && count >= 5) return "sm:col-span-2 lg:col-span-1";
+  return "";
 }
 
 /* ------------------------------------------------------------------ *
@@ -239,8 +301,14 @@ export function ChipMultiSelect({
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap gap-2">
-        {options.map((option) => {
+      {/*
+        Same grid as PillSelect. These lists are longer — ten obstacles, fourteen
+        industries — so wrapping produced a particularly ragged block where
+        "Need more leads" sat beside "Unclear marketing strategy" at wildly
+        different widths.
+      */}
+      <div className={cn("grid gap-2", gridColumnsFor(options.length))}>
+        {options.map((option, index) => {
           const id = `${name}-${option.value}`;
           const isSelected = selected.has(option.value);
           const disabled = atCap && !isSelected;
@@ -250,9 +318,10 @@ export function ChipMultiSelect({
               key={option.value}
               htmlFor={id}
               className={cn(
-                "rounded-full border px-3.5 py-2 text-sm",
+                "flex items-center justify-center rounded-full border px-3.5 py-2 text-center text-sm",
                 "transition-colors duration-[var(--duration-default)]",
                 "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2",
+                fillTrailingItem(index, options.length),
                 disabled
                   ? "cursor-not-allowed border-input opacity-45"
                   : "cursor-pointer",

@@ -58,39 +58,43 @@ export function ScreenProducts({
 
   return (
     <>
-      <div className="grid gap-5 sm:grid-cols-2">
-        <Field
-          label={FIELD_COPY.horizon_months.label}
-          required
-          error={errors.horizon_months}
-        >
-          <PillSelect
-            name="horizon_months"
-            options={PLANNING_PERIODS.map((months) => ({
-              value: String(months),
-              label: `${months} months`,
-            }))}
-            value={String(periodMonths)}
-            onChange={(value) => setAnswer("horizon_months", Number(value))}
-            error={Boolean(errors.horizon_months)}
-          />
-        </Field>
+      {/*
+        The period gets its own full-width row rather than sharing one with the
+        start month. Four pills inside a half-width column would be about 60px
+        each, which crops "12 months" — and this answer changes the labels on
+        every product card below, so it is worth the space.
+      */}
+      <Field
+        label={FIELD_COPY.horizon_months.label}
+        required
+        error={errors.horizon_months}
+      >
+        <PillSelect
+          name="horizon_months"
+          options={PLANNING_PERIODS.map((months) => ({
+            value: String(months),
+            label: `${months} months`,
+          }))}
+          value={String(periodMonths)}
+          onChange={(value) => setAnswer("horizon_months", Number(value))}
+          error={Boolean(errors.horizon_months)}
+        />
+      </Field>
 
-        <Field
-          htmlFor="plan_start_month"
-          label={FIELD_COPY.plan_start_month.label}
-          required
-          error={errors.plan_start_month}
-        >
-          <MonthSelect
-            id="plan_start_month"
-            value={asString(answers.plan_start_month) ?? ""}
-            onValueChange={(value) => setAnswer("plan_start_month", value || null)}
-            placeholder="Choose a month…"
-            error={Boolean(errors.plan_start_month)}
-          />
-        </Field>
-      </div>
+      <Field
+        htmlFor="plan_start_month"
+        label={FIELD_COPY.plan_start_month.label}
+        required
+        error={errors.plan_start_month}
+      >
+        <MonthSelect
+          id="plan_start_month"
+          value={asString(answers.plan_start_month) ?? ""}
+          onValueChange={(value) => setAnswer("plan_start_month", value || null)}
+          placeholder="Choose a month…"
+          error={Boolean(errors.plan_start_month)}
+        />
+      </Field>
 
       <div className="space-y-4">
         {products.map((product, index) => (

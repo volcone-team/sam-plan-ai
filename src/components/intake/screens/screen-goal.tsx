@@ -76,7 +76,6 @@ export function ScreenGoal({
           onValueChange={(value) => setAnswer("revenue_goal", value)}
           placeholder={stretch !== null ? String(stretch) : "750,000"}
           error={Boolean(errors.revenue_goal)}
-          className="sm:max-w-xs"
         />
       </Field>
 

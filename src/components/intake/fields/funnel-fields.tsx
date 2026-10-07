@@ -67,25 +67,47 @@ export function FunnelFields({
         {FUNNEL_SKIP_HELPER}
       </p>
 
-      <Field
-        htmlFor={`${idPrefix}-audience`}
-        label={AUDIENCE_LABEL}
-        error={errors.audience_reached}
-      >
-        <NumberInput
-          id={`${idPrefix}-audience`}
-          value={answers.audienceReached}
-          onValueChange={(value) => onChange({ ...answers, audienceReached: value })}
-          placeholder="3,000"
-          error={Boolean(errors.audience_reached)}
-          className="sm:max-w-[12rem]"
-        />
-      </Field>
+      {/*
+        Audience and price are paired because they BRACKET the percentages —
+        the people going in and the value coming out. Stacking them full width
+        with the three percentages between would bury that relationship in a
+        five-row column.
+      */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field
+          htmlFor={`${idPrefix}-audience`}
+          label={AUDIENCE_LABEL}
+          error={errors.audience_reached}
+        >
+          <NumberInput
+            id={`${idPrefix}-audience`}
+            value={answers.audienceReached}
+            onValueChange={(value) => onChange({ ...answers, audienceReached: value })}
+            placeholder="3,000"
+            error={Boolean(errors.audience_reached)}
+          />
+        </Field>
+
+        <Field
+          htmlFor={`${idPrefix}-price`}
+          label={AVERAGE_PRICE_LABEL}
+          error={errors.average_price}
+        >
+          <NumberInput
+            id={`${idPrefix}-price`}
+            value={answers.averagePrice}
+            onValueChange={(value) => onChange({ ...answers, averagePrice: value })}
+            placeholder="5,000"
+            error={Boolean(errors.average_price)}
+          />
+        </Field>
+      </div>
 
       {/*
         Order matters and is not cosmetic: each percentage applies to the people
         remaining after the previous step, so the visual sequence has to match
-        the arithmetic in `forecastPerRun`.
+        the arithmetic in `forecastPerRun`. Three equal columns keep that
+        left-to-right reading.
       */}
       <div className="grid gap-4 sm:grid-cols-3">
         {fields.map((field) => (
@@ -106,21 +128,6 @@ export function FunnelFields({
           </Field>
         ))}
       </div>
-
-      <Field
-        htmlFor={`${idPrefix}-price`}
-        label={AVERAGE_PRICE_LABEL}
-        error={errors.average_price}
-      >
-        <NumberInput
-          id={`${idPrefix}-price`}
-          value={answers.averagePrice}
-          onValueChange={(value) => onChange({ ...answers, averagePrice: value })}
-          placeholder="5,000"
-          error={Boolean(errors.average_price)}
-          className="sm:max-w-[12rem]"
-        />
-      </Field>
 
       {perRun !== null && (
         <div

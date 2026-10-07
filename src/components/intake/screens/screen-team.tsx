@@ -41,7 +41,6 @@ export function ScreenTeam({
           onValueChange={(value) => setAnswer("team_size", value)}
           placeholder="1"
           error={Boolean(errors.team_size)}
-          className="sm:max-w-[10rem]"
         />
       </Field>
 
@@ -64,39 +63,40 @@ export function ScreenTeam({
         />
       </Field>
 
-      <Field
-        htmlFor="weekly_hours"
-        label={FIELD_COPY.weekly_hours.label}
-        helper={FIELD_COPY.weekly_hours.helper}
-        error={errors.weekly_hours}
-      >
-        <NumberInput
-          id="weekly_hours"
-          value={asNumber(answers.weekly_hours)}
-          onValueChange={(value) => setAnswer("weekly_hours", value)}
-          placeholder="20"
-          error={Boolean(errors.weekly_hours)}
-          className="sm:max-w-[10rem]"
-        />
-      </Field>
+      {/* Paired: both are capacity figures, and both answers are short. */}
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field
+          htmlFor="weekly_hours"
+          label={FIELD_COPY.weekly_hours.label}
+          helper={FIELD_COPY.weekly_hours.helper}
+          error={errors.weekly_hours}
+        >
+          <NumberInput
+            id="weekly_hours"
+            value={asNumber(answers.weekly_hours)}
+            onValueChange={(value) => setAnswer("weekly_hours", value)}
+            placeholder="20"
+            error={Boolean(errors.weekly_hours)}
+          />
+        </Field>
 
-      <Field
-        htmlFor="monthly_marketing_budget"
-        label={FIELD_COPY.monthly_marketing_budget.label}
-        helper={FIELD_COPY.monthly_marketing_budget.helper}
-        required
-        error={errors.monthly_marketing_budget}
-      >
-        {/* $0 is a valid answer (REQ-5.5), so the placeholder shows it. */}
-        <NumberInput
-          id="monthly_marketing_budget"
-          value={asNumber(answers.monthly_marketing_budget)}
-          onValueChange={(value) => setAnswer("monthly_marketing_budget", value)}
-          placeholder="0"
-          error={Boolean(errors.monthly_marketing_budget)}
-          className="sm:max-w-xs"
-        />
-      </Field>
+        <Field
+          htmlFor="monthly_marketing_budget"
+          label={FIELD_COPY.monthly_marketing_budget.label}
+          helper={FIELD_COPY.monthly_marketing_budget.helper}
+          required
+          error={errors.monthly_marketing_budget}
+        >
+          {/* $0 is a valid answer (REQ-5.5), so the placeholder shows it. */}
+          <NumberInput
+            id="monthly_marketing_budget"
+            value={asNumber(answers.monthly_marketing_budget)}
+            onValueChange={(value) => setAnswer("monthly_marketing_budget", value)}
+            placeholder="0"
+            error={Boolean(errors.monthly_marketing_budget)}
+          />
+        </Field>
+      </div>
     </>
   );
 }

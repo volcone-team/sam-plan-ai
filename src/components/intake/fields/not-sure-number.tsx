@@ -52,6 +52,11 @@ export function NotSureNumber({
       helperItalic={helperItalic}
       error={error}
     >
+      {/*
+        The input takes the remaining width and the checkbox is sized to its own
+        label — `shrink-0` so "Not sure" never wraps onto two lines as the input
+        grows.
+      */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <NumberInput
           id={id}
@@ -60,12 +65,12 @@ export function NotSureNumber({
           disabled={notSure}
           placeholder={notSure ? NOT_SURE_LABEL : placeholder}
           error={Boolean(error)}
-          className={cn("sm:max-w-xs", notSure && "opacity-50")}
+          className={cn("sm:flex-1", notSure && "opacity-50")}
         />
 
         <label
           htmlFor={checkboxId}
-          className="inline-flex cursor-pointer items-center gap-2 text-sm text-[hsl(var(--foreground-muted))]"
+          className="inline-flex shrink-0 cursor-pointer items-center gap-2 text-sm text-[hsl(var(--foreground-muted))]"
         >
           <input
             type="checkbox"

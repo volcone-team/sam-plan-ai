@@ -240,7 +240,9 @@ export function InitiativeCard({
         error={errors.start_month}
       >
         <div className="space-y-2">
+          {/* compact: this switches the input below, it is not an answer. */}
           <PillSelect
+            compact
             name={id("date-mode")}
             options={[
               { value: "month", label: "Month" },
@@ -263,13 +265,11 @@ export function InitiativeCard({
               value={asString(initiative.start_month) ?? ""}
               onValueChange={(value) => onChange({ start_month: value || null })}
               placeholder="Not sure yet"
-              className="sm:max-w-xs"
             />
           ) : (
             <DateInput
               value={asString(initiative.exact_date) ?? ""}
               onValueChange={(value) => onChange({ exact_date: value || null })}
-              className="sm:max-w-xs"
             />
           )}
         </div>
@@ -290,6 +290,8 @@ export function InitiativeCard({
                 : null
           }
           onChange={(value) => onChange({ has_run_before: value === "yes" })}
+          // compact: a half-width "Yes" overstates a two-letter answer.
+          compact
         />
       </Field>
 
