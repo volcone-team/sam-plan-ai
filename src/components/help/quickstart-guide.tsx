@@ -32,8 +32,8 @@ const steps: Step[] = [
   {
     title: 'Complete Your Questionnaire',
     description:
-      'Answer 7 questions about your business to generate a personalized revenue plan.',
-    link: '/onboarding/full',
+      'Tell us about your business and what you are already planning, and we will forecast it against your goal.',
+    link: '/intake/start',
     icon: ClipboardList,
   },
   {

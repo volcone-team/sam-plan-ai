@@ -148,21 +148,20 @@ export default function OnboardingWelcomePage() {
                       <p className="mt-0.5 text-sm text-[hsl(var(--foreground-muted))]">
                         A few questions so the plan reflects how you actually operate.
                       </p>
+                      {/*
+                        Points at the v2 intake. There is no longer a
+                        Quickstart/Full choice: every user takes one flow, and
+                        screen 0 asks how much they already know instead —
+                        which is a better question than asking them to guess
+                        how long a questionnaire they have not seen will take.
+                      */}
                       <button
-                        onClick={() => router.push("/onboarding/quickstart")}
+                        onClick={() => router.push("/intake/start")}
                         className="mt-4 inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
                       >
-                        Get your first plan in 2 minutes
+                        Start building your plan
                         <ArrowRight className="h-4 w-4" />
                       </button>
-                      <div className="mt-3">
-                        <Link
-                          href="/onboarding/full"
-                          className="text-sm font-medium text-[hsl(var(--foreground-muted))] underline underline-offset-2 hover:text-foreground"
-                        >
-                          Want a more tailored plan? Answer all 7 questions
-                        </Link>
-                      </div>
                     </div>
                   </div>
                 </div>

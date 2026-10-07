@@ -431,8 +431,8 @@ export function YearAtAGlance() {
 
   /**
    * Generate initiatives for a future-year draft via Claude. Saves the current
-   * goals first, then routes into the onboarding/full questionnaire flagged
-   * with the target year so generation attaches to THIS plan.
+   * goals first, then routes into the intake flagged with the target year so
+   * generation attaches to THIS plan.
    */
   const generateInitiativesForYear = async () => {
     if (!annualPlan) return;
@@ -448,11 +448,14 @@ export function YearAtAGlance() {
       try {
         localStorage.setItem('sam-plan-target-year', String(selectedYear));
         localStorage.removeItem('sam-regen-mode');
+        // The v1 questionnaire's localStorage records are cleared on the way
+        // past: intake v2 keeps answers in planning_inputs, and a stale v1
+        // blob would be read by nothing but could confuse a later debug.
         localStorage.removeItem('sam-questionnaire-full');
         localStorage.removeItem('sam-questionnaire-quickstart');
         localStorage.removeItem('sam-questionnaire-mode');
       } catch {}
-      router.push(`/onboarding/full?year=${selectedYear}`);
+      router.push('/intake/start');
     } catch (err) {
       console.error('[YearAtAGlance] Generate for year failed:', err);
       showToast('Could not start generation.', { variant: 'error', duration: 5000 });
@@ -571,7 +574,7 @@ export function YearAtAGlance() {
     localStorage.removeItem("sam-questionnaire-full");
     localStorage.removeItem("sam-questionnaire-quickstart");
     localStorage.removeItem("sam-questionnaire-mode");
-    router.push("/onboarding/full");
+    router.push("/intake/start");
   };
 
   // "Enhance Current Plan" — AI suggestions (built in Group B). Placeholder route for now.
