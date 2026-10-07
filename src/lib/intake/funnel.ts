@@ -52,26 +52,43 @@ export const FUNNEL_STAGES: readonly StageDefinition[] = [
  * Keys here must match `wb_initiative_library.initiative_key`. An unknown key
  * is harmless — it is only ever read as a lookup miss.
  */
-const LABEL_OVERRIDES: Record<string, Partial<Record<StageKey, string>>> = {
-  // Webinars and challenges register, then attend.
-  live_webinar_own: { signed_up: "% who registered", showed: "% who showed up" },
-  live_webinar_ops: { signed_up: "% who registered", showed: "% who showed up" },
-  challenge_own: { signed_up: "% who registered", showed: "% who showed up" },
-  challenge_ops: { signed_up: "% who registered", showed: "% who showed up" },
+export const LABEL_OVERRIDES: Record<string, Partial<Record<StageKey, string>>> = {
+  // Virtual events: people register, then attend.
+  webinar: { signed_up: "% who registered", showed: "% who showed up" },
+  "evergreen-webinars": { signed_up: "% who registered", showed: "% who watched" },
+  "challenge-bootcamp": { signed_up: "% who registered", showed: "% who showed up" },
+  "online-workshops": { signed_up: "% who registered", showed: "% who showed up" },
+  "social-media-lives": { signed_up: "% who tuned in", showed: "% who stayed to the end" },
 
   // Borrowed-audience media: people opt in, then book a call.
-  podcast_guest_ops: { signed_up: "% who opted in", showed: "% who booked a call" },
-  podcast_own: { signed_up: "% who opted in", showed: "% who booked a call" },
-  speaking_stage_ops: { signed_up: "% who opted in", showed: "% who booked a call" },
+  "podcast-vodcast-guest": { signed_up: "% who opted in", showed: "% who booked a call" },
+  "ops-in-person-other-peoples-stages": {
+    signed_up: "% who opted in",
+    showed: "% who booked a call",
+  },
 
-  // Email and ads: click, then book.
-  email_campaign: { signed_up: "% who clicked", showed: "% who booked a call" },
-  paid_ads_meta: { signed_up: "% who clicked", showed: "% who booked a call" },
-  paid_ads_google: { signed_up: "% who clicked", showed: "% who booked a call" },
+  // Owned digital: click, then book.
+  "email-campaign": { signed_up: "% who clicked", showed: "% who booked a call" },
+  "paid-ads": { signed_up: "% who clicked", showed: "% who booked a call" },
+  "digital-marketing": { signed_up: "% who clicked", showed: "% who booked a call" },
+  "content-organic-social": { signed_up: "% who clicked", showed: "% who booked a call" },
+  "vsl-sales-page": { signed_up: "% who watched", showed: "% who booked a call" },
+  "direct-message-reach-out": { signed_up: "% who replied", showed: "% who booked a call" },
+  "internal-launch": { signed_up: "% who clicked", showed: "% who booked a call" },
+  "affiliate-launches": { signed_up: "% who clicked", showed: "% who booked a call" },
 
-  // Live events: register, then actually turn up.
-  own_event: { signed_up: "% who registered", showed: "% who attended" },
-  local_presence: { signed_up: "% who enquired", showed: "% who visited" },
+  // In-person: register or get invited, then actually turn up.
+  "your-own-event": { signed_up: "% who registered", showed: "% who attended" },
+  "hybrid-events": { signed_up: "% who registered", showed: "% who attended" },
+  "networking-events": { signed_up: "% who connected", showed: "% who booked a call" },
+  dinners: { signed_up: "% who accepted", showed: "% who attended" },
+
+  // Already a conversation, so the middle step is the meeting happening.
+  "sales-calls": { signed_up: "% who booked", showed: "% who showed up" },
+  referral: { signed_up: "% who were referred", showed: "% who booked a call" },
+
+  // Recurring products: join, then stay.
+  "courses-memberships": { signed_up: "% who joined", showed: "% who stayed active" },
 };
 
 export interface FunnelFieldSpec {

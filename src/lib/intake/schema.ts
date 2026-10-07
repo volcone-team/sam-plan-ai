@@ -440,7 +440,9 @@ export const REQUIRED_FIELDS: Record<ScreenId, readonly string[]> = {
   goal: ["revenue_goal"],
   initiatives: [],
   wins: [],
-  customer: ["sells_to", "ideal_customer", "problem_solved"],
+  // `ideal_customer_description` is the column name from migration 001, which
+  // the v2 intake reuses rather than adding a near-duplicate field.
+  customer: ["sells_to", "ideal_customer_description", "problem_solved"],
   audience: [],
   obstacles: [],
 };

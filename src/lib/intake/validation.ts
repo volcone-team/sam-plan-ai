@@ -186,6 +186,8 @@ export interface ProductRow {
 }
 
 export interface InitiativeRow {
+  /** 'planned' (screen 5), 'worked' or 'failed' (screen 6). */
+  source?: unknown;
   initiative_key?: unknown;
   custom_label?: unknown;
   product_ids?: unknown;
@@ -212,7 +214,7 @@ const REQUIRED_MESSAGES: Record<string, string> = {
   plan_start_month: "Choose when the plan starts.",
   revenue_goal: "Enter your revenue goal.",
   sells_to: "Choose who you sell to.",
-  ideal_customer: "Tell us who you serve.",
+  ideal_customer_description: "Tell us who you serve.",
   problem_solved: "Tell us what problem you solve.",
 };
 
@@ -370,15 +372,28 @@ function validateGoal(answers: IntakeAnswers): ValidationResult {
 export function validateInitiatives(
   initiatives: readonly InitiativeRow[]
 ): ValidationResult {
+  /**
+   * Only `planned` rows belong to this screen.
+   *
+   * Screen 6 writes 'worked' and 'failed' rows into the same array, so counting
+   * all of them would let someone past screen 5 with no plan at all — their
+   * history would satisfy the minimum — and would validate those rows against
+   * screen 5's required fields, demanding a product for an initiative that
+   * merely flopped last year.
+   */
+  const planned = initiatives.filter(
+    (row) => (row.source ?? "planned") === "planned"
+  );
+
   const rowErrors: Record<number, FieldErrors> = {};
 
-  initiatives.forEach((initiative, index) => {
+  planned.forEach((initiative, index) => {
     const row = validateInitiativeRow(initiative);
     if (Object.keys(row).length > 0) rowErrors[index] = row;
   });
 
   const formError =
-    initiatives.length < MIN_PLANNED_INITIATIVES
+    planned.length < MIN_PLANNED_INITIATIVES
       ? "Add at least one initiative, or go back and ask us to recommend them."
       : null;
 
@@ -453,17 +468,34 @@ export function funnelErrors(initiative: InitiativeRow): FieldErrors {
  * Screen 6. Nothing is required — a business with no history is a legitimate
  * answer, and Path C users may have none at all.
  */
-function validateWins(answers: IntakeAnswers): ValidationResult {
-  const worked = asArray(answers.worked_initiatives);
-  const didntWork = asArray(answers.didnt_work);
+/**
+ * Screen 6. Nothing is required — a business with no history is a legitimate
+ * answer, and Path C users may have none at all.
+ *
+ * Reads the INITIATIVE ROWS rather than answer arrays, because the screen
+ * stores wins and failures as `intake_initiatives` rows with a `source`. That
+ * is also how the generator reads them, so validating the same shape avoids a
+ * second representation that could disagree.
+ */
+function validateWins(initiatives: readonly InitiativeRow[]): ValidationResult {
+  const keysFor = (source: string) =>
+    initiatives
+      .filter((row) => row.source === source)
+      .map((row) => (typeof row.initiative_key === "string" ? row.initiative_key : null))
+      .filter((key): key is string => key !== null);
+
+  const worked = keysFor("worked");
+  const didntWork = new Set(keysFor("failed"));
 
   const errors: FieldErrors = {};
 
-  // The same initiative cannot both have driven sales and have failed. Caught
-  // here because it reaches the generator as contradictory guidance: REQ-13.8
-  // would exclude it while the wins list recommends it.
-  const overlap = worked.filter((key) => didntWork.includes(key));
-  if (overlap.length > 0) {
+  /**
+   * The same initiative cannot both have driven sales and have failed. Caught
+   * here because it reaches the generator as contradictory guidance: REQ-13.8
+   * would exclude it outright while the wins list argues for it, and whichever
+   * rule happens to run last would decide.
+   */
+  if (worked.some((key) => didntWork.has(key))) {
     errors.didnt_work = "Something can't be both a win and a flop. Pick one.";
   }
 
@@ -549,7 +581,7 @@ export function validateScreen(args: ValidateArgs): ValidationResult {
     case "initiatives":
       return validateInitiatives(args.initiatives ?? []);
     case "wins":
-      return validateWins(answers);
+      return validateWins(args.initiatives ?? []);
     case "customer":
       return validateCustomer(answers);
     case "audience":

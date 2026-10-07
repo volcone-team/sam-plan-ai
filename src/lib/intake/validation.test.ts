@@ -421,6 +421,27 @@ describe("initiatives screen", () => {
     expect(validateInitiatives([]).formError).toBeDefined();
   });
 
+  /**
+   * Screen 6's rows share the array. Counting them would let someone past
+   * screen 5 with no plan — their history would satisfy the minimum — and would
+   * demand a product for an initiative that merely flopped last year.
+   */
+  it("ignores screen 6's rows when checking the minimum", () => {
+    const res = validateInitiatives([
+      { source: "worked", initiative_key: "webinar" },
+      { source: "failed", initiative_key: "paid-ads" },
+    ]);
+    expect(res.formError).toBeDefined();
+  });
+
+  it("does not demand products from screen 6's rows", () => {
+    const res = validateInitiatives([
+      initiative,
+      { source: "failed", initiative_key: "paid-ads" },
+    ]);
+    expect(res.valid).toBe(true);
+  });
+
   it("requires a type and at least one product", () => {
     const res = validateInitiatives([{}]);
     expect(res.rowErrors[0].initiative_key).toBeDefined();
@@ -549,10 +570,12 @@ describe("wins screen", () => {
   it("rejects an initiative listed as both a win and a flop", () => {
     const res = validateScreen({
       screen: "wins",
-      answers: {
-        worked_initiatives: ["live_webinar_own", "email_campaign"],
-        didnt_work: ["email_campaign"],
-      },
+      answers: {},
+      initiatives: [
+        { source: "worked", initiative_key: "webinar" },
+        { source: "worked", initiative_key: "email-campaign" },
+        { source: "failed", initiative_key: "email-campaign" },
+      ],
     });
     expect(res.errors.didnt_work).toBeDefined();
   });
@@ -560,34 +583,53 @@ describe("wins screen", () => {
   it("accepts disjoint win and flop lists", () => {
     const res = validateScreen({
       screen: "wins",
-      answers: {
-        worked_initiatives: ["live_webinar_own"],
-        didnt_work: ["paid_ads_meta"],
-      },
+      answers: {},
+      initiatives: [
+        { source: "worked", initiative_key: "webinar" },
+        { source: "failed", initiative_key: "paid-ads" },
+      ],
+    });
+    expect(res.valid).toBe(true);
+  });
+
+  /**
+   * Screen 5's planned rows share the array. A planned webinar alongside a
+   * failed webinar is not a contradiction — they are different claims — so only
+   * worked-versus-failed is checked.
+   */
+  it("ignores planned rows when checking for a contradiction", () => {
+    const res = validateScreen({
+      screen: "wins",
+      answers: {},
+      initiatives: [
+        { source: "planned", initiative_key: "webinar" },
+        { source: "failed", initiative_key: "webinar" },
+      ],
     });
     expect(res.valid).toBe(true);
   });
 });
 
 describe("customer screen", () => {
+  // The column is `ideal_customer_description`, reused from migration 001.
   const complete: IntakeAnswers = {
     sells_to: "businesses",
-    ideal_customer: "Coaches doing $300,000 to $3 million",
+    ideal_customer_description: "Coaches doing $300,000 to $3 million",
     problem_solved: "They need more clients without more ad spend",
   };
 
   it("requires both long-text answers", () => {
     const res = validateScreen({ screen: "customer", answers: { sells_to: "businesses" } });
-    expect(res.errors.ideal_customer).toBeDefined();
+    expect(res.errors.ideal_customer_description).toBeDefined();
     expect(res.errors.problem_solved).toBeDefined();
   });
 
   it("treats whitespace-only text as unanswered", () => {
     const res = validateScreen({
       screen: "customer",
-      answers: { ...complete, ideal_customer: "    " },
+      answers: { ...complete, ideal_customer_description: "    " },
     });
-    expect(res.errors.ideal_customer).toBeDefined();
+    expect(res.errors.ideal_customer_description).toBeDefined();
   });
 
   /**

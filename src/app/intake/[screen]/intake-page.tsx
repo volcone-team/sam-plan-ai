@@ -10,13 +10,19 @@ import { ScreenBusiness } from "@/components/intake/screens/screen-business";
 import { ScreenTeam } from "@/components/intake/screens/screen-team";
 import { ScreenProducts } from "@/components/intake/screens/screen-products";
 import { ScreenGoal } from "@/components/intake/screens/screen-goal";
+import { ScreenInitiatives } from "@/components/intake/screens/screen-initiatives";
+import { ScreenWins } from "@/components/intake/screens/screen-wins";
+import { ScreenCustomer } from "@/components/intake/screens/screen-customer";
+import { ScreenAudience } from "@/components/intake/screens/screen-audience";
+import { ScreenObstacles } from "@/components/intake/screens/screen-obstacles";
+import { useLibrary } from "@/components/intake/use-library";
 import { FormError } from "@/components/intake/fields/field";
 import type { ScreenId } from "@/lib/intake/flow";
 import {
   validateScreen,
   type ValidationResult,
 } from "@/lib/intake/validation";
-import { MIN_PRODUCTS } from "@/lib/intake/schema";
+import { MIN_PRODUCTS, MIN_PLANNED_INITIATIVES } from "@/lib/intake/schema";
 import { pathSelected, trackIntakeEvent } from "@/lib/intake/events";
 import type { PlanPath } from "@/lib/intake/flow";
 
@@ -40,6 +46,13 @@ export function IntakePage({ screen }: { screen: ScreenId }) {
   const { state, path } = draft;
 
   /**
+   * The library is only needed by screens 5 and 6, but the hook is called
+   * unconditionally — hooks cannot be conditional, and fetching 22 rows on the
+   * other screens is cheaper than the bug a conditional hook would introduce.
+   */
+  const library = useLibrary();
+
+  /**
    * Resume where the user left off.
    *
    * Only redirects when they land on screen 0 with a saved position — arriving
@@ -61,11 +74,25 @@ export function IntakePage({ screen }: { screen: ScreenId }) {
    */
   React.useEffect(() => {
     if (draft.loading) return;
+
     if (screen === "products" && state.products.length < MIN_PRODUCTS) {
       draft.setProducts([{}]);
+      return;
+    }
+
+    // Screen 5 needs one card to fill in. Filtered on source because screen 6
+    // writes 'worked' and 'failed' rows into the same array, and those must not
+    // count towards the planned minimum.
+    if (screen === "initiatives") {
+      const planned = state.initiatives.filter(
+        (i) => (i.source ?? "planned") === "planned"
+      );
+      if (planned.length < MIN_PLANNED_INITIATIVES) {
+        draft.setInitiatives([...state.initiatives, { source: "planned" }]);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.loading, screen, state.products.length]);
+  }, [draft.loading, screen, state.products.length, state.initiatives.length]);
 
   const validate = React.useCallback(() => {
     const next = validateScreen({
@@ -166,23 +193,60 @@ export function IntakePage({ screen }: { screen: ScreenId }) {
         />
       )}
 
-      {/*
-        Screens 5 to 9 are not built yet. Stated plainly rather than rendering
-        an empty shell, which would look like a screen with no questions.
-      */}
-      {NOT_YET_BUILT.includes(screen) && (
-        <p className="rounded-[var(--radius-lg)] border border-dashed border-border px-4 py-8 text-center text-sm text-[hsl(var(--foreground-muted))]">
-          This screen is still being built.
-        </p>
+      {/* Paths A and B only — flow.ts omits this screen for Path C. */}
+      {screen === "initiatives" && (
+        <ScreenInitiatives
+          initiatives={state.initiatives}
+          setInitiatives={draft.setInitiatives}
+          products={state.products}
+          library={library.initiatives}
+          libraryLoading={library.loading}
+          libraryError={library.error}
+          rowErrors={rowErrors}
+          formError={formError}
+        />
+      )}
+
+      {screen === "wins" && (
+        <ScreenWins
+          answers={state.answers}
+          setAnswer={draft.setAnswer}
+          initiatives={state.initiatives}
+          setInitiatives={draft.setInitiatives}
+          library={library.initiatives}
+          libraryLoading={library.loading}
+          libraryError={library.error}
+          errors={errors}
+          path={path}
+        />
+      )}
+
+      {screen === "customer" && (
+        <ScreenCustomer
+          answers={state.answers}
+          setAnswer={draft.setAnswer}
+          errors={errors}
+          path={path}
+        />
+      )}
+
+      {screen === "audience" && (
+        <ScreenAudience
+          answers={state.answers}
+          setAnswers={draft.setAnswers}
+          errors={errors}
+          path={path}
+        />
+      )}
+
+      {screen === "obstacles" && (
+        <ScreenObstacles
+          answers={state.answers}
+          setAnswer={draft.setAnswer}
+          errors={errors}
+          path={path}
+        />
       )}
     </IntakeShell>
   );
 }
-
-const NOT_YET_BUILT: ScreenId[] = [
-  "initiatives",
-  "wins",
-  "customer",
-  "audience",
-  "obstacles",
-];

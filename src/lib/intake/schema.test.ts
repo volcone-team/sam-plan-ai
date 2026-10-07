@@ -40,6 +40,7 @@ import {
   valuesOf,
 } from "./schema";
 import { screensFor } from "./flow";
+import { serialiseAnswers } from "./draft";
 
 /**
  * The expensive failure this file guards against: an option value the FORM
@@ -239,9 +240,29 @@ describe("required fields", () => {
     expect(isRequired("business", "purchase_mode")).toBe(false);
   });
 
-  it("requires both long-text answers on the customer screen", () => {
-    expect(isRequired("customer", "ideal_customer")).toBe(true);
+  /**
+   * The column is `ideal_customer_description` from migration 001, which the v2
+   * intake reuses. Requiring `ideal_customer` instead would mean the asterisk
+   * never matched the field the screen actually writes, so the screen would be
+   * advanceable while empty.
+   */
+  it("requires both long-text answers under their real column names", () => {
+    expect(isRequired("customer", "ideal_customer_description")).toBe(true);
     expect(isRequired("customer", "problem_solved")).toBe(true);
+    expect(isRequired("customer", "ideal_customer")).toBe(false);
+  });
+
+  /** Every required field must be a column the draft actually serialises. */
+  it("names only fields the draft writes", () => {
+    const serialised = new Set(
+      Object.keys(serialiseAnswers({ answers: {}, products: [], initiatives: [], resumeScreen: "start" }))
+    );
+    for (const screen of screensFor("know_most")) {
+      for (const field of REQUIRED_FIELDS[screen]) {
+        // intake_path is stored; the repeater screens have no scalar requirements.
+        expect(serialised.has(field), `${screen}.${field} is never serialised`).toBe(true);
+      }
+    }
   });
 
   it("requires budget but not hours", () => {

@@ -8,6 +8,7 @@ import {
   fromStoredStages,
   isFunnelComplete,
   funnelCompletedCount,
+  LABEL_OVERRIDES,
   type FunnelAnswers,
 } from "./funnel";
 import { forecastPerRun } from "@/lib/intake-forecast";
@@ -44,16 +45,28 @@ describe("funnelFieldsFor", () => {
 
   // Mockup screen 5: the webinar asks about registering and showing up.
   it("uses the webinar wording from the mockup", () => {
-    const labels = funnelFieldsFor("live_webinar_own").map((f) => f.label);
+    const labels = funnelFieldsFor("webinar").map((f) => f.label);
     expect(labels[0]).toBe("% who registered");
     expect(labels[1]).toBe("% who showed up");
   });
 
   // Mockup screen 6: the podcast asks about opting in and booking a call.
   it("uses the podcast wording from the mockup", () => {
-    const labels = funnelFieldsFor("podcast_guest_ops").map((f) => f.label);
+    const labels = funnelFieldsFor("podcast-vodcast-guest").map((f) => f.label);
     expect(labels[0]).toBe("% who opted in");
     expect(labels[1]).toBe("% who booked a call");
+  });
+
+  /**
+   * The overrides are keyed by `wb_initiative_library.initiative_key`, which is
+   * slugged from the workbook's own naming — `webinar`, not `live_webinar_own`.
+   * An invented key is a silent miss: the field renders with default wording and
+   * nothing reports a problem, so these are pinned to the real keys.
+   */
+  it("keys every override by a real library slug", () => {
+    for (const key of Object.keys(LABEL_OVERRIDES)) {
+      expect(key, `"${key}" is not a library slug`).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+    }
   });
 
   it("falls back to defaults for null or undefined", () => {
@@ -107,7 +120,7 @@ describe("toInitiativeFunnel", () => {
    * the question it was actually asked, even if the override is later reworded.
    */
   it("stores the label the user was shown", () => {
-    const funnel = toInitiativeFunnel("podcast_guest_ops", filled());
+    const funnel = toInitiativeFunnel("podcast-vodcast-guest", filled());
     expect(funnel.stages[1].label).toBe("% who booked a call");
   });
 
