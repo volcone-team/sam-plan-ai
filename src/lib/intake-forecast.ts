@@ -68,6 +68,45 @@ export function suggestedStretch(
   return Math.round(prior * (1 + rate));
 }
 
+/**
+ * Last-12-months revenue scaled to the planning period (REQ-7.2).
+ *
+ * THIS MATTERS MORE THAN IT LOOKS. The reference figures above the goal field
+ * are what people anchor on. On a 6-month plan, showing the unprorated
+ * $450,000 annual figure invites a goal roughly double what the user means —
+ * and nothing downstream would flag it, because an ambitious goal is
+ * legitimate. So $450,000 over 12 months shows as $225,000 on a 6-month plan.
+ *
+ * Returns null rather than 0 with no prior revenue: a brand-new business has no
+ * baseline, and "$0" reads as a measurement rather than an absence.
+ */
+export function proratedPriorRevenue(
+  lastTwelveMonths: number | null | undefined,
+  periodMonths: number | null | undefined
+): number | null {
+  const annual = finite(lastTwelveMonths);
+  const months = finite(periodMonths);
+
+  if (annual <= 0 || months <= 0) return null;
+  return Math.round((annual / 12) * months);
+}
+
+/**
+ * The suggested stretch for the chosen period: prorated last-12 x 1.3.
+ *
+ * Worked through from the requirement: $450,000 last-12 on a 6-month plan
+ * prorates to $225,000, and the stretch shows as $292,500.
+ */
+export function proratedStretch(
+  lastTwelveMonths: number | null | undefined,
+  periodMonths: number | null | undefined,
+  rate: number = SUGGESTED_GROWTH_RATE
+): number | null {
+  const prorated = proratedPriorRevenue(lastTwelveMonths, periodMonths);
+  if (prorated === null) return null;
+  return Math.round(prorated * (1 + rate));
+}
+
 /** Growth implied by a goal against last period, as a percentage. */
 export function impliedGrowthPercent(
   goal: number | null | undefined,
@@ -124,6 +163,22 @@ export function assessGoal(
       `${Math.round(SUGGESTED_GROWTH_RATE * 100)}% growth. You can keep your number; ` +
       `your plan will show what it takes to get there.`,
   };
+}
+
+/**
+ * Assess a goal for the CHOSEN PERIOD rather than against the annual figure.
+ *
+ * REQ-7.3's 1.5x threshold has to be measured against the prorated baseline, or
+ * every short plan trips the warning: a sensible 6-month goal of $225,000 is
+ * only half the annual $450,000, while a 6-month goal of $400,000 is a genuine
+ * stretch — and comparing both to $450,000 gets each one backwards.
+ */
+export function assessGoalForPeriod(
+  goal: number | null | undefined,
+  lastTwelveMonths: number | null | undefined,
+  periodMonths: number | null | undefined
+): GoalAssessment {
+  return assessGoal(goal, proratedPriorRevenue(lastTwelveMonths, periodMonths));
 }
 
 /* ------------------------------------------------------------------ *

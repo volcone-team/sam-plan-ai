@@ -5,6 +5,9 @@ import {
   suggestedStretch,
   impliedGrowthPercent,
   assessGoal,
+  proratedPriorRevenue,
+  proratedStretch,
+  assessGoalForPeriod,
   funnelSteps,
   forecastPerRun,
   runsInPeriod,
@@ -291,5 +294,104 @@ describe("goalGap", () => {
     const g = goalGap({ goal: 0, yours: [1000], recommended: [] });
     expect(g.percent).toBe(0);
     expect(g.gap).toBe(0);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Proration (REQ-7.2)
+ * ------------------------------------------------------------------ */
+
+describe("proratedPriorRevenue", () => {
+  /**
+   * The figure the requirement calls out explicitly. Showing the unprorated
+   * $450,000 on a 6-month plan invites a goal roughly double what the user
+   * means, and nothing downstream would flag it — an ambitious goal is
+   * legitimate.
+   */
+  it("scales $450,000 to $225,000 over 6 months", () => {
+    expect(proratedPriorRevenue(450_000, 6)).toBe(225_000);
+  });
+
+  it("leaves a 12-month period unchanged", () => {
+    expect(proratedPriorRevenue(450_000, 12)).toBe(450_000);
+  });
+
+  it("scales up for an 18-month period", () => {
+    expect(proratedPriorRevenue(450_000, 18)).toBe(675_000);
+  });
+
+  it("handles a quarter", () => {
+    expect(proratedPriorRevenue(450_000, 3)).toBe(112_500);
+  });
+
+  // A brand-new business has no baseline; "$0" would read as a measurement.
+  it("returns null with no prior revenue", () => {
+    expect(proratedPriorRevenue(0, 12)).toBeNull();
+    expect(proratedPriorRevenue(null, 12)).toBeNull();
+    expect(proratedPriorRevenue(undefined, 6)).toBeNull();
+  });
+
+  it("returns null without a period", () => {
+    expect(proratedPriorRevenue(450_000, null)).toBeNull();
+    expect(proratedPriorRevenue(450_000, 0)).toBeNull();
+  });
+
+  it("rounds to whole dollars", () => {
+    expect(Number.isInteger(proratedPriorRevenue(100_000, 7))).toBe(true);
+  });
+});
+
+describe("proratedStretch", () => {
+  // The requirement's worked example: $225,000 prorated, $292,500 stretch.
+  it("matches the requirement's 6-month stretch", () => {
+    expect(proratedStretch(450_000, 6)).toBe(292_500);
+  });
+
+  it("is 1.3x the prorated figure", () => {
+    const prorated = proratedPriorRevenue(450_000, 12)!;
+    expect(proratedStretch(450_000, 12)).toBe(Math.round(prorated * 1.3));
+  });
+
+  it("returns null when there is no baseline to stretch from", () => {
+    expect(proratedStretch(0, 12)).toBeNull();
+    expect(proratedStretch(null, 6)).toBeNull();
+  });
+});
+
+describe("assessGoalForPeriod", () => {
+  /**
+   * The threshold has to be measured against the PRORATED baseline. Comparing a
+   * 6-month goal to the annual figure gets both cases backwards: a sensible
+   * $225,000 looks like a 50% shortfall, and a genuine stretch looks modest.
+   */
+  it("does not warn on a goal matching the prorated baseline", () => {
+    const assessment = assessGoalForPeriod(225_000, 450_000, 6);
+    expect(assessment.warn).toBe(false);
+    expect(assessment.growthPercent).toBe(0);
+  });
+
+  it("warns on a 6-month goal well above the prorated baseline", () => {
+    const assessment = assessGoalForPeriod(450_000, 450_000, 6);
+    // $450,000 against a $225,000 prorated baseline is a 100% jump.
+    expect(assessment.growthPercent).toBe(100);
+    expect(assessment.warn).toBe(true);
+    expect(assessment.message).toContain("100%");
+  });
+
+  it("does not warn on the suggested stretch itself", () => {
+    const stretch = proratedStretch(450_000, 6)!;
+    expect(assessGoalForPeriod(stretch, 450_000, 6).warn).toBe(false);
+  });
+
+  it("says nothing without a baseline", () => {
+    const assessment = assessGoalForPeriod(100_000, null, 12);
+    expect(assessment.message).toBeNull();
+    expect(assessment.warn).toBe(false);
+  });
+
+  it("agrees with assessGoal on a 12-month plan", () => {
+    expect(assessGoalForPeriod(750_000, 450_000, 12)).toEqual(
+      assessGoal(750_000, 450_000)
+    );
   });
 });
