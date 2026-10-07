@@ -51,24 +51,24 @@ silent error is most costly.
 
 ## Stage 3 — Screens 0 to 4
 
-- [ ] 7. `components/intake/intake-shell.tsx`
-  - [ ] 7.1 Path-aware progress bar
-  - [ ] 7.2 Back/Next with autosave on advance
-  - [ ] 7.3 Helper line on every screen except 0, 5 and 9
-  - [ ] 7.4 Fires `intake_screen_viewed` / `intake_screen_completed`
+- [x] 7. `components/intake/intake-shell.tsx`
+  - [x] 7.1 Path-aware progress bar
+  - [x] 7.2 Back/Next with autosave on advance
+  - [x] 7.3 Helper line on every screen except 0, 5 and 9
+  - [x] 7.4 Fires `intake_screen_viewed` / `intake_screen_completed`
 
-- [ ] 8. Screen 0 — starting point (3 path cards, tooltip)
-- [ ] 9. Screen 1 — business (industry dropdown + Other, description with mic, sales model, last-12 revenue, 3 stage cards)
-- [ ] 10. Screen 2 — team and capacity (team size, who closes, plan owner, hours, budget)
-- [ ] 11. Screen 3 — products
-  - [ ] 11.1 Period selectors: 3/6/12/18, start month, no past months
-  - [ ] 11.2 Product card: 7 fields, live `product_goal`
-  - [ ] 11.3 `units_goal` label tracks the chosen period
-  - [ ] 11.4 Recurring reveals per month / per year
-  - [ ] 11.5 Running total as reference only; single-tier coaching line
-- [ ] 12. Screen 4 — revenue goal
-  - [ ] 12.1 Prorated last-12 and prorated × 1.3 stretch
-  - [ ] 12.2 Warning above 1.5×, never blocking
+- [x] 8. Screen 0 — starting point (3 path cards, tooltip)
+- [x] 9. Screen 1 — business (industry dropdown + Other, description with mic, sales model, last-12 revenue, 3 stage cards)
+- [x] 10. Screen 2 — team and capacity (team size, who closes, plan owner, hours, budget)
+- [x] 11. Screen 3 — products
+  - [x] 11.1 Period selectors: 3/6/12/18, start month, no past months
+  - [x] 11.2 Product card: 7 fields, live `product_goal`
+  - [x] 11.3 `units_goal` label tracks the chosen period
+  - [x] 11.4 Recurring reveals per month / per year
+  - [x] 11.5 Running total as reference only; single-tier coaching line
+- [x] 12. Screen 4 — revenue goal
+  - [x] 12.1 Prorated last-12 and prorated × 1.3 stretch
+  - [x] 12.2 Warning above 1.5×, never blocking
 
 ## Stage 4 — Screens 5 and 6
 
@@ -126,8 +126,10 @@ silent error is most costly.
 
 ## Stage 8 — Analytics
 
-- [ ] 31. `lib/intake/events.ts` + `/api/intake/events`, session-derived ids
-- [ ] 32. Wire all 11 events
+- [x] 31. `lib/intake/events.ts` + `/api/intake/events`, session-derived ids
+- [ ] 32. Wire all 11 events — 4 wired (path_selected, screen_viewed,
+      screen_completed, voice_used). field_skipped and the 5 recommendation
+      events need the screens and output they fire from.
 - [ ] 33. Derived `intake_abandoned` (30 minutes idle, not client-fired)
 - [ ] 34. `onboarding_status` transitions with timestamps
 - [ ] 35. Admin report: path share, per-screen completion by path, acceptance rate per initiative
