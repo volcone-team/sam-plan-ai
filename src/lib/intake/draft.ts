@@ -223,10 +223,69 @@ export function serialiseProduct(product: ProductDraft, order: number): Record<s
   };
 }
 
+/**
+ * Translate an initiative's product references into real `intake_products` ids.
+ *
+ * WHY THIS IS NEEDED. Screen 5's product chips are keyed by ARRAY INDEX,
+ * because a product card has no id until the draft is saved and the user can
+ * reach screen 5 before that has happened. But `intake_initiatives.product_ids`
+ * is `UUID[]`, so storing an index produces:
+ *
+ *   invalid input syntax for type uuid: "0"
+ *
+ * — which rejects the whole save. The fix has to live on the SAVE path rather
+ * than in the component, because the ids only exist once the products have been
+ * written, which is after the component has handed over its answers.
+ *
+ * Anything that is already a UUID passes through untouched, so a restored draft
+ * (where the chips hold real ids) round-trips without being re-resolved. An
+ * index with no product behind it is DROPPED rather than stored as null: a
+ * dangling reference would survive into the plan and attribute revenue to a
+ * product that does not exist.
+ */
+export function resolveProductIds(
+  references: readonly string[],
+  /** Real ids in the same order as the product cards. */
+  productIdsByOrder: readonly string[]
+): string[] {
+  const resolved: string[] = [];
+
+  for (const reference of references) {
+    if (UUID_PATTERN.test(reference)) {
+      resolved.push(reference);
+      continue;
+    }
+
+    // Matched strictly: `Number("1.5")` is 1.5, but `Number.isInteger` is
+    // checked against the PARSED value, so "1.5" would otherwise resolve to
+    // index 1 and silently attach the wrong product.
+    if (!/^\d+$/.test(reference)) continue;
+
+    const index = Number(reference);
+    if (!Number.isSafeInteger(index)) continue;
+
+    const id = productIdsByOrder[index];
+    if (id) resolved.push(id);
+  }
+
+  // Deduplicated: an index and its resolved UUID could both be present after a
+  // partial edit, and the same product twice would double-count its revenue.
+  return [...new Set(resolved)];
+}
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** An initiative card as an `intake_initiatives` row, minus the ids. */
 export function serialiseInitiative(
   initiative: InitiativeDraft,
-  order: number
+  order: number,
+  /**
+   * Real product ids by card order. Omitted when the caller has none yet, in
+   * which case index references are dropped rather than written as invalid
+   * UUIDs.
+   */
+  productIdsByOrder: readonly string[] = []
 ): Record<string, unknown> {
   const customLabel = toTextOrNull(initiative.custom_label);
 
@@ -238,7 +297,10 @@ export function serialiseInitiative(
     // REQ-8.1: naming something the library does not carry is a signal about
     // what the library is missing, so it is flagged rather than discarded.
     needs_review: customLabel !== null,
-    product_ids: toStringArray(initiative.product_ids),
+    product_ids: resolveProductIds(
+      toStringArray(initiative.product_ids),
+      productIdsByOrder
+    ),
     cadence: toTextOrNull(initiative.cadence),
     // Frequency only applies to a repeating initiative.
     repeat_frequency:

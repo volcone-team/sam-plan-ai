@@ -290,14 +290,36 @@ async function saveChildren(
     .eq("planning_input_id", planningInputId);
   if (deleteInitiatives) return deleteInitiatives.message;
 
+  /**
+   * Products FIRST, and their ids are kept.
+   *
+   * Screen 5's product chips are keyed by array index, because a product card
+   * has no id until it is saved and the user can reach screen 5 before that has
+   * happened. `intake_initiatives.product_ids` is UUID[], so those indices have
+   * to be translated — which is only possible once the products exist. Hence
+   * the ordering and the returned ids.
+   */
+  const productIdsByOrder: string[] = [];
+
   if (products.length > 0) {
     const rows = products.map((product, index) => ({
       ...serialiseProduct(product, index),
       company_id: companyId,
       planning_input_id: planningInputId,
     }));
-    const { error } = await db.from("intake_products").insert(rows);
+
+    const { data, error } = await db
+      .from("intake_products")
+      .insert(rows)
+      .select("id, display_order");
+
     if (error) return error.message;
+
+    // Ordered by display_order rather than by the returned order, which
+    // Postgres does not guarantee for a multi-row insert.
+    for (const row of (data ?? []) as { id: string; display_order: number }[]) {
+      productIdsByOrder[row.display_order] = row.id;
+    }
   }
 
   if (initiatives.length > 0) {
@@ -305,7 +327,7 @@ async function saveChildren(
     // initiative_key, and a half-picked card is not an answer worth storing.
     const rows = initiatives
       .map<Record<string, unknown>>((initiative, index) => ({
-        ...serialiseInitiative(initiative, index),
+        ...serialiseInitiative(initiative, index, productIdsByOrder),
         company_id: companyId,
         planning_input_id: planningInputId,
       }))

@@ -11,6 +11,7 @@ import {
   timestampColumnFor,
   INTAKE_VERSION,
   NOT_NULL_NUMBER_FALLBACKS,
+  resolveProductIds,
   type IntakeDraft,
 } from "./draft";
 import { AUDIENCE_FIELDS } from "./schema";
@@ -282,9 +283,98 @@ describe("serialiseProduct", () => {
   });
 });
 
+/**
+ * The bug: screen 5's product chips are keyed by array index, because a product
+ * card has no id until the draft is saved. `intake_initiatives.product_ids` is
+ * UUID[], so saving an initiative with a product selected failed the whole
+ * request with:
+ *
+ *   invalid input syntax for type uuid: "0"
+ *
+ * The translation has to happen on the SAVE path, since the ids only exist once
+ * the products have been written.
+ */
+describe("resolveProductIds", () => {
+  const ID_A = "11111111-2222-3333-4444-555555555555";
+  const ID_B = "66666666-7777-8888-9999-aaaaaaaaaaaa";
+
+  it("translates an index into the product's real id", () => {
+    expect(resolveProductIds(["0"], [ID_A, ID_B])).toEqual([ID_A]);
+    expect(resolveProductIds(["1"], [ID_A, ID_B])).toEqual([ID_B]);
+  });
+
+  it("translates several indices, preserving order", () => {
+    expect(resolveProductIds(["1", "0"], [ID_A, ID_B])).toEqual([ID_B, ID_A]);
+  });
+
+  // A restored draft already holds real ids and must not be re-resolved.
+  it("passes a real UUID through untouched", () => {
+    expect(resolveProductIds([ID_A], [ID_B])).toEqual([ID_A]);
+  });
+
+  it("accepts a mix of ids and indices", () => {
+    expect(resolveProductIds([ID_A, "1"], ["ignored", ID_B])).toEqual([ID_A, ID_B]);
+  });
+
+  /**
+   * A dangling reference is dropped, not stored. It would otherwise survive
+   * into the plan and attribute revenue to a product that does not exist.
+   */
+  it("drops an index with no product behind it", () => {
+    expect(resolveProductIds(["5"], [ID_A])).toEqual([]);
+    expect(resolveProductIds(["0", "9"], [ID_A])).toEqual([ID_A]);
+  });
+
+  it("drops junk rather than storing it", () => {
+    expect(resolveProductIds(["", "abc", "-1", "1.5"], [ID_A])).toEqual([]);
+  });
+
+  it("drops everything when no products have been saved yet", () => {
+    expect(resolveProductIds(["0", "1"], [])).toEqual([]);
+  });
+
+  // The same product twice would double-count its revenue.
+  it("deduplicates an index and its own resolved id", () => {
+    expect(resolveProductIds([ID_A, "0"], [ID_A])).toEqual([ID_A]);
+  });
+
+  it("returns nothing for no references", () => {
+    expect(resolveProductIds([], [ID_A])).toEqual([]);
+  });
+
+  /** The regression itself: no index may reach a UUID[] column. */
+  it("never emits a value that is not a UUID", () => {
+    const resolved = resolveProductIds(["0", "1", "7", "junk"], [ID_A, ID_B]);
+    for (const value of resolved) {
+      expect(value).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      );
+    }
+  });
+});
+
 describe("serialiseInitiative", () => {
   it("defaults the source to planned", () => {
     expect(serialiseInitiative({ initiative_key: "x" }, 0).source).toBe("planned");
+  });
+
+  it("resolves index-keyed product chips to real ids", () => {
+    const ID = "11111111-2222-3333-4444-555555555555";
+    const row = serialiseInitiative(
+      { initiative_key: "webinar", product_ids: ["0"] },
+      0,
+      [ID]
+    );
+    expect(row.product_ids).toEqual([ID]);
+  });
+
+  it("stores no product ids when none can be resolved", () => {
+    const row = serialiseInitiative(
+      { initiative_key: "webinar", product_ids: ["0"] },
+      0,
+      []
+    );
+    expect(row.product_ids).toEqual([]);
   });
 
   it("keeps the screen 6 sources", () => {
@@ -334,13 +424,24 @@ describe("serialiseInitiative", () => {
   });
 
   it("stores the product ids it was given", () => {
-    const row = serialiseInitiative({ initiative_key: "x", product_ids: ["a", "b"] }, 0);
-    expect(row.product_ids).toEqual(["a", "b"]);
+    const a = "11111111-2222-3333-4444-555555555555";
+    const b = "66666666-7777-8888-9999-aaaaaaaaaaaa";
+    const row = serialiseInitiative({ initiative_key: "x", product_ids: [a, b] }, 0);
+    expect(row.product_ids).toEqual([a, b]);
   });
 
-  it("drops non-string product ids", () => {
-    const row = serialiseInitiative({ initiative_key: "x", product_ids: ["a", 7, null] }, 0);
-    expect(row.product_ids).toEqual(["a"]);
+  /**
+   * Non-strings are dropped before resolution, and a string that is neither a
+   * UUID nor an index is dropped by the resolver — nothing invalid can reach
+   * the UUID[] column.
+   */
+  it("drops non-string and non-id product references", () => {
+    const a = "11111111-2222-3333-4444-555555555555";
+    const row = serialiseInitiative(
+      { initiative_key: "x", product_ids: [a, 7, null, "nonsense"] },
+      0
+    );
+    expect(row.product_ids).toEqual([a]);
   });
 });
 
@@ -542,7 +643,12 @@ describe("restoreDraft", () => {
   it("round-trips an initiative with its funnel intact", () => {
     const initiative = {
       initiative_key: "live_webinar_own",
-      product_ids: ["p1", "p2"],
+      // Real UUIDs: product_ids is a UUID[] column, so a placeholder like "p1"
+      // would be rejected by Postgres and is rejected by the resolver too.
+      product_ids: [
+        "11111111-2222-3333-4444-555555555555",
+        "66666666-7777-8888-9999-aaaaaaaaaaaa",
+      ],
       cadence: "repeat",
       repeat_frequency: "monthly",
       has_run_before: true,
@@ -558,7 +664,7 @@ describe("restoreDraft", () => {
     const [restored] = restoreDraft({}, [], [row]).initiatives;
 
     expect(restored.initiative_key).toBe("live_webinar_own");
-    expect(restored.product_ids).toEqual(["p1", "p2"]);
+    expect(restored.product_ids).toEqual(initiative.product_ids);
     expect(restored.audience_reached).toBe(3000);
     expect(restored.funnel_stages).toEqual(initiative.funnel_stages);
   });

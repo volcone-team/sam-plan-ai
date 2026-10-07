@@ -184,13 +184,26 @@ try {
     );
     if (productError) failures += 1;
 
+    /**
+     * The product id that screen 5's chips must resolve to.
+     *
+     * The chips are keyed by array index, and product_ids is UUID[], so an
+     * unresolved index fails with 'invalid input syntax for type uuid: "0"'.
+     * Reading the real id back here is what proves the resolution happened.
+     */
+    const { data: savedProduct } = await db
+      .from("intake_products")
+      .select("id")
+      .eq("planning_input_id", inputId)
+      .single();
+
     const { error: initiativeError } = await db.from("intake_initiatives").insert({
       company_id: companyId,
       planning_input_id: inputId,
       source: "planned",
       initiative_key: "webinar",
       initiative_label: "Live Webinar",
-      product_ids: [],
+      product_ids: savedProduct ? [savedProduct.id] : [],
       cadence: "repeat",
       repeat_frequency: "monthly",
       start_month: "2026-11-01",
@@ -232,6 +245,38 @@ try {
         : "  ok    partial funnel row"
     );
     if (partialError) failures += 1;
+
+    /**
+     * The regression itself. An array index in a UUID[] column must be rejected
+     * by Postgres — if this insert SUCCEEDS the column is not the type we think
+     * it is, and the resolver in draft.ts is guarding nothing.
+     */
+    const { error: indexError } = await db.from("intake_initiatives").insert({
+      company_id: companyId,
+      planning_input_id: inputId,
+      source: "planned",
+      initiative_key: "__index-probe__",
+      product_ids: ["0"],
+      display_order: 99,
+    });
+
+    if (indexError && /invalid input syntax for type uuid/i.test(indexError.message)) {
+      console.log(
+        "  ok    an array index IS rejected by product_ids (so it must be resolved)"
+      );
+    } else if (indexError) {
+      console.log(`  FAIL  unexpected error probing product_ids\n        ${indexError.message}`);
+      failures += 1;
+    } else {
+      console.log(
+        "  FAIL  product_ids accepted an array index — the UUID[] guard is not real"
+      );
+      failures += 1;
+      await db
+        .from("intake_initiatives")
+        .delete()
+        .eq("initiative_key", "__index-probe__");
+    }
 
     /* ---- Read it back ---- */
 

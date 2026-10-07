@@ -78,15 +78,21 @@ export function InitiativeCard({
   );
 
   /**
-   * Products are offered as chips of their NAME, keyed by index.
+   * Products are offered as chips of their NAME.
    *
-   * Index-keyed because an unsaved product has no id yet, and screen 5 can be
-   * reached before the draft has been written. The draft's save path maps these
-   * onto real `intake_products` ids.
+   * The chip value is the product's real id WHERE IT HAS ONE, and its array
+   * index otherwise — a product card has no id until the draft is saved, and
+   * screen 5 can be reached before that has happened.
+   *
+   * `resolveProductIds` on the save path translates any index into the real id
+   * once the products are written, because `intake_initiatives.product_ids` is
+   * UUID[] and an index stored there fails with "invalid input syntax for type
+   * uuid". Preferring the id here means an already-saved draft never needs
+   * translating at all.
    */
   const productOptions = products
     .map((product, productIndex) => ({
-      value: String(productIndex),
+      value: asString(product.id) ?? String(productIndex),
       label: asString(product.name) ?? `Product ${productIndex + 1}`,
     }))
     .filter((option) => option.label.trim() !== "");
