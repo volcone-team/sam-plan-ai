@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   Users,
   Building2,
-  ClipboardList,
   Rocket,
   Sparkles,
   BarChart3,
@@ -39,7 +38,16 @@ const navItems: NavItem[] = [
   { label: "Customer Users", href: "/admin/users", icon: Users },
   { label: "Internal Users", href: "/admin/internal-users", icon: Shield },
   { label: "Companies", href: "/admin/companies", icon: Building2 },
-  { label: "Questionnaire", href: "/admin/questionnaire", icon: ClipboardList },
+  /*
+   * "Questionnaire" is REMOVED from the nav, not just hidden.
+   *
+   * The page let an admin add, reorder, reword and delete questions, and the
+   * changes persisted across refreshes — but only to that admin's own
+   * localStorage. It had no API route and the customer questionnaire never read
+   * it, so configuring questions there changed nothing for any customer while
+   * looking exactly as though it had. The route still exists and explains this;
+   * it is simply no longer presented as a working tool.
+   */
   { label: "Initiative Library", href: "/admin/initiatives", icon: Rocket },
   { label: "AI Workbook", href: "/admin/ai-workbook", icon: Sparkles },
   { label: "Benchmarks", href: "/admin/benchmarks", icon: BarChart3 },
