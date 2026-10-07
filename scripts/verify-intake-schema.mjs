@@ -33,6 +33,7 @@ const pass = (m) => console.log("  ok    " + m);
 
 /** New scalar columns on planning_inputs, by screen. */
 const PLANNING_INPUT_COLUMNS = [
+  // --- migration 025 ---
   "intake_path", "intake_version",
   "industry", "business_description", "prior_period_revenue",
   "purchase_mode", "growth_stage",
@@ -47,12 +48,18 @@ const PLANNING_INPUT_COLUMNS = [
   "monthly_leads", "monthly_leads_unknown",
   "borrowed_audiences",
   "challenges", "challenge_notes",
+  // --- migration 026 ---
+  "industry_other", "resume_screen", "onboarding_status",
+  "signed_up_at", "intake_started_at", "intake_complete_at",
+  "plan_viewed_at", "first_actuals_at",
 ];
 
 const INTAKE_PRODUCT_COLUMNS = [
   "id", "company_id", "planning_input_id", "name", "product_type",
   "price_level", "payment_type", "delivery_mode",
   "average_price", "units_in_period", "display_order",
+  // --- migration 026 ---
+  "recurring_interval",
 ];
 
 const INTAKE_INITIATIVE_COLUMNS = [
@@ -61,6 +68,14 @@ const INTAKE_INITIATIVE_COLUMNS = [
   "cadence", "repeat_frequency", "start_month", "exact_date",
   "has_run_before", "audience_reached", "funnel_stages", "average_price",
   "failure_reason", "display_order",
+  // --- migration 026 ---
+  "custom_label", "needs_review",
+];
+
+/** The analytics sink (migration 026). */
+const INTAKE_EVENT_COLUMNS = [
+  "id", "company_id", "user_id", "event", "screen", "plan_path",
+  "properties", "created_at",
 ];
 
 /**
@@ -86,7 +101,7 @@ console.log("\nIntake v2 schema (migration 025)\n");
 
 // Table existence first: every column check below would otherwise fail
 // identically and bury the real cause.
-for (const table of ["intake_products", "intake_initiatives"]) {
+for (const table of ["intake_products", "intake_initiatives", "intake_events"]) {
   const { error } = await db.from(table).select("id").limit(0);
   if (error) {
     fail(`table ${table} is missing or unreadable — ${error.message}`);
@@ -99,6 +114,7 @@ console.log("");
 await checkColumns("planning_inputs", PLANNING_INPUT_COLUMNS);
 await checkColumns("intake_products", INTAKE_PRODUCT_COLUMNS);
 await checkColumns("intake_initiatives", INTAKE_INITIATIVE_COLUMNS);
+await checkColumns("intake_events", INTAKE_EVENT_COLUMNS);
 
 // The intake's initiative picker is populated from the workbook library, so an
 // empty library means screens 5 and 6 have nothing to offer.
@@ -116,6 +132,8 @@ if (!libraryCount) {
 console.log(
   failures === 0
     ? "\nSchema ready for intake v2.\n"
-    : `\n${failures} problem(s). Apply supabase/migrations/025_intake_v2.sql in the SQL editor.\n`
+    : `\n${failures} problem(s). Apply these in the Supabase SQL editor, in order:\n` +
+      "  supabase/migrations/025_intake_v2.sql\n" +
+      "  supabase/migrations/026_intake_v2_remaining.sql\n"
 );
 process.exit(failures === 0 ? 0 : 1);
