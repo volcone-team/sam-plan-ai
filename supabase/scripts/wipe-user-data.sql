@@ -16,6 +16,12 @@
 -- SAFE TO RE-RUN. Every clear is guarded so a missing table (e.g. a migration
 -- not yet applied here) is skipped with a notice rather than aborting the whole
 -- transaction and leaving the wipe half-done.
+--
+-- VERIFY IT WORKED. `node scripts/count-user-data.mjs` before and after. It
+-- counts every table this clears and separately checks the config tables are
+-- still populated — an empty wb_initiative_library is invisible in the UI
+-- (the intake picker simply shows nothing) and would look like a broken screen
+-- rather than missing data.
 -- ============================================================
 
 DO $$
@@ -34,6 +40,25 @@ DECLARE
     -- their company_id, leaving orphans that still counted towards "Collected
     -- to date" and showed up in payment history after a supposedly clean wipe.
     'billing_invoices',
+    /*
+     * Intake v2 (migrations 025 and 026).
+     *
+     * `planning_inputs`, `intake_products` and `intake_initiatives` all have
+     * NOT NULL company_id with ON DELETE CASCADE, so the `companies` truncate
+     * above already reaches them. They are named anyway: a wipe that silently
+     * misses one leaves the next test run RESUMING into the previous run's
+     * answers, which presents as a bug in the intake rather than as stale data.
+     *
+     * `intake_events` genuinely needs to be here. Its company_id is NULLABLE on
+     * purpose — a screen-0 event can fire before a company is resolved on a
+     * brand-new signup, and losing it would bias the very funnel being measured
+     * — so rows with a NULL company_id are NOT reached by the cascade and would
+     * otherwise survive every wipe forever.
+     */
+    'planning_inputs',
+    'intake_products',
+    'intake_initiatives',
+    'intake_events',
     'generation_events',
     'stripe_webhook_events',
     'two_factor_codes',
