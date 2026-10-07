@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import {
   serialiseAnswers,
@@ -8,6 +10,7 @@ import {
   statusUpdate,
   timestampColumnFor,
   INTAKE_VERSION,
+  NOT_NULL_NUMBER_FALLBACKS,
   type IntakeDraft,
 } from "./draft";
 import { AUDIENCE_FIELDS } from "./schema";
@@ -28,6 +31,105 @@ function draft(overrides: Partial<IntakeDraft> = {}): IntakeDraft {
   };
 }
 
+/**
+ * The partial-save contract, checked against the SCHEMA rather than against my
+ * memory of it.
+ *
+ * This is the bug that shipped: `revenue_goal` has been NOT NULL DEFAULT 0
+ * since migration 001, because the v1 questionnaire asked for it on its first
+ * screen. The v2 intake asks on screen 4, so screens 0 to 3 tried to save a row
+ * with no goal and Postgres rejected the whole insert — "null value in column
+ * revenue_goal violates not-null constraint", on screen 0, with no way past it.
+ *
+ * Unit tests all passed, because none of them touched a real database. So this
+ * reads the NOT NULL columns out of the migration and asserts the serialiser
+ * never writes null to one.
+ */
+describe("partial saves satisfy every NOT NULL column", () => {
+  const schema = readFileSync(
+    join(process.cwd(), "supabase", "migrations", "001_initial_schema.sql"),
+    "utf8"
+  );
+
+  /** NOT NULL column names from `CREATE TABLE planning_inputs (...)`. */
+  function notNullColumns(): string[] {
+    const table = schema.match(
+      /CREATE TABLE planning_inputs\s*\(([\s\S]*?)\n\);/i
+    );
+    if (!table) throw new Error("could not find CREATE TABLE planning_inputs");
+
+    return table[1]
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => /NOT NULL/i.test(line))
+      .map((line) => line.match(/^([a-z_][a-z0-9_]*)/i)?.[1])
+      .filter((name): name is string => Boolean(name));
+  }
+
+  /**
+   * The empty draft is the worst case: it is what screen 0 posts, before the
+   * user has answered anything at all.
+   */
+  it("writes no null to a NOT NULL column", () => {
+    const row = serialiseAnswers(draft());
+    const offenders: string[] = [];
+
+    for (const column of notNullColumns()) {
+      // Columns the serialiser does not touch keep their database default.
+      if (!(column in row)) continue;
+      if (row[column] === null) offenders.push(column);
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("finds the NOT NULL columns it is meant to be checking", () => {
+    // Guards the regex: a silently empty list would make the test above pass
+    // for the wrong reason.
+    const columns = notNullColumns();
+    expect(columns).toContain("revenue_goal");
+    expect(columns.length).toBeGreaterThan(3);
+  });
+
+  it("writes 0 for revenue_goal before the user reaches screen 4", () => {
+    expect(serialiseAnswers(draft()).revenue_goal).toBe(0);
+  });
+
+  it("writes the real goal once given", () => {
+    expect(
+      serialiseAnswers(draft({ answers: { revenue_goal: 750_000 } })).revenue_goal
+    ).toBe(750_000);
+  });
+
+  /**
+   * The fallback must read back as UNANSWERED. Otherwise someone resuming at
+   * screen 2 finds a "0" in the goal field they never typed and have to clear
+   * before entering their own.
+   */
+  it("restores the fallback as null rather than as a zero the user never typed", () => {
+    const row = serialiseAnswers(draft());
+    expect(restoreDraft(row).answers.revenue_goal).toBeNull();
+  });
+
+  it("restores a real goal unchanged", () => {
+    const row = serialiseAnswers(draft({ answers: { revenue_goal: 750_000 } }));
+    expect(restoreDraft(row).answers.revenue_goal).toBe(750_000);
+  });
+
+  /**
+   * Only `revenue_goal` is affected. Every other number keeps null, which is
+   * what tells the generator to use benchmarks instead of planning against a
+   * business with no budget or no team.
+   */
+  it("leaves the nullable numbers as null", () => {
+    const row = serialiseAnswers(draft());
+    expect(row.prior_period_revenue).toBeNull();
+    expect(row.weekly_hours).toBeNull();
+    expect(row.horizon_months).toBeNull();
+    expect(Object.keys(NOT_NULL_NUMBER_FALLBACKS)).toEqual(["revenue_goal"]);
+  });
+});
+
 describe("serialiseAnswers", () => {
   it("stamps the intake version so the generator knows which fields to read", () => {
     expect(serialiseAnswers(draft()).intake_version).toBe(INTAKE_VERSION);
@@ -45,8 +147,10 @@ describe("serialiseAnswers", () => {
   it("writes every known column even when the draft is empty", () => {
     const row = serialiseAnswers(draft());
     expect(row.industry).toBeNull();
-    expect(row.revenue_goal).toBeNull();
     expect(row.challenges).toEqual([]);
+    // revenue_goal is the one exception: NOT NULL in the schema, so it takes
+    // its fallback rather than a null. See the NOT NULL block above.
+    expect(row.revenue_goal).toBe(0);
   });
 
   it("keeps a real zero as zero", () => {
@@ -57,9 +161,10 @@ describe("serialiseAnswers", () => {
     expect(row.prior_period_revenue).toBe(0);
   });
 
+  // Checked on a NULLABLE number, since revenue_goal is the NOT NULL exception.
   it("turns a blank number into null, not zero", () => {
-    const row = serialiseAnswers(draft({ answers: { revenue_goal: "" } }));
-    expect(row.revenue_goal).toBeNull();
+    const row = serialiseAnswers(draft({ answers: { weekly_hours: "" } }));
+    expect(row.weekly_hours).toBeNull();
   });
 
   it("strips the commas a number input renders", () => {

@@ -117,6 +117,31 @@ const NUMBER_COLUMNS = [
   "revenue_goal",
 ] as const;
 
+/**
+ * Columns that are NOT NULL in the database, with the value to write instead
+ * of null.
+ *
+ * `planning_inputs` predates this intake. `revenue_goal` has been
+ * `NOT NULL DEFAULT 0` since migration 001, because the v1 questionnaire asked
+ * for it on its FIRST screen — so a row never existed without one. The v2
+ * intake asks on screen 4, which means screens 0 to 3 try to save a partial row
+ * with no goal yet and Postgres rejects the whole insert.
+ *
+ * Writing 0 rather than relaxing the constraint: a dozen places already read
+ * `revenue_goal` and assume a number, and making it nullable would push this
+ * problem into all of them. The null-versus-zero distinction carries no
+ * information here either — the field is REQUIRED on screen 4, so validation
+ * blocks the screen while it is unset, and 0 is never mistaken for a real
+ * answer the way a 0 email list would be.
+ *
+ * Kept as a map rather than a special case inside the loop so that adding
+ * another NOT NULL column is one line, and so the test can assert the map
+ * covers every NOT NULL column the serialiser touches.
+ */
+export const NOT_NULL_NUMBER_FALLBACKS: Record<string, number> = {
+  revenue_goal: 0,
+};
+
 const ARRAY_COLUMNS = ["customer_industries", "borrowed_audiences", "challenges"] as const;
 
 const DATE_COLUMNS = ["plan_start_month"] as const;
@@ -145,7 +170,14 @@ export function serialiseAnswers(draft: IntakeDraft): PlanningInputRow {
   }
 
   for (const column of NUMBER_COLUMNS) {
-    row[column] = toNumberOrNull(answers[column]);
+    const value = toNumberOrNull(answers[column]);
+    // A NOT NULL column cannot take the null, so it takes its fallback. Every
+    // other column keeps null, which is what tells the generator to use
+    // benchmarks rather than to plan against a zero.
+    row[column] =
+      value === null && column in NOT_NULL_NUMBER_FALLBACKS
+        ? NOT_NULL_NUMBER_FALLBACKS[column]
+        : value;
   }
 
   for (const column of ARRAY_COLUMNS) {
@@ -300,7 +332,23 @@ export function restoreDraft(
     answers[column] = input[column] ?? null;
   }
   for (const column of NUMBER_COLUMNS) {
-    answers[column] = toNumberOrNull(input[column]);
+    const value = toNumberOrNull(input[column]);
+    /**
+     * A NOT NULL column's fallback reads back as UNANSWERED, not as the
+     * fallback.
+     *
+     * Otherwise someone resuming at screen 2 finds "0" sitting in the revenue
+     * goal field — an answer they never gave, which they then have to clear
+     * before they can type their own. Safe because the fallback is only ever
+     * written while the field is genuinely unset: `revenue_goal` is required
+     * and validated above zero, so a real 0 can never reach the database.
+     */
+    answers[column] =
+      value !== null &&
+      column in NOT_NULL_NUMBER_FALLBACKS &&
+      value === NOT_NULL_NUMBER_FALLBACKS[column]
+        ? null
+        : value;
   }
   for (const column of ARRAY_COLUMNS) {
     answers[column] = toStringArray(input[column]);
