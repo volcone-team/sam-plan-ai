@@ -6,7 +6,22 @@ import { cookies } from "next/headers";
 import { checkEntitlement, statusForCode } from "@/lib/billing/enforce";
 import { LIMIT_KEYS } from "@/lib/billing/limits";
 import { statusUpdate, timestampColumnFor } from "@/lib/intake/draft";
+import { toRevenueType, toTicketTier } from "@/lib/intake/product-mapping";
+import {
+  forecastForStoredInitiative,
+  scenariosFor,
+  planTargets,
+  type RevenueScenarios,
+} from "@/lib/intake/build-forecast";
 import { productGoal } from "@/lib/intake-forecast";
+import { loadTaskTemplates } from "@/lib/workbook/read";
+import {
+  materialiseTasks,
+  templateRunwayDays,
+  type MaterialisedTask,
+} from "@/lib/workbook/materialise";
+import { sequenceEventDates } from "@/lib/plan-schedule";
+import { toDateOnly } from "@/lib/plan-dates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -158,8 +173,11 @@ export async function POST(request: NextRequest) {
           company_id: companyId,
           name,
           price: num(product.average_price) ?? 0,
-          revenue_type: product.payment_type === "recurring" ? "recurring" : "one_time",
-          ticket_tier: str(product.price_level),
+          // Both of these are TRANSLATED, not passed through: `products` has
+          // CHECK constraints from migration 001 with a different vocabulary to
+          // the intake's, so a raw value is rejected by the database.
+          revenue_type: toRevenueType(product.payment_type),
+          ticket_tier: toTicketTier(product.price_level),
           display_order: index,
           is_active: true,
         })
@@ -180,27 +198,189 @@ export async function POST(request: NextRequest) {
 
     /* ---- Initiatives ---- */
 
-    let initiativeCount = 0;
+    const largestProductId = largestProduct(intakeProducts, productIdByIntakeId);
 
-    // The user's own, with whatever timing they gave.
+    /**
+     * No product means no plan is possible: `initiatives.product_id` is NOT
+     * NULL, so every initiative would be rejected and the user would land on an
+     * empty dashboard believing their plan had been built.
+     *
+     * 409 and a plain explanation, pointing at the screen that fixes it. This
+     * is reachable whenever screen 3 was left blank or its cards were never
+     * named, so it is a real user state rather than a defensive check.
+     */
+    if (productIdByIntakeId.size === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Your plan needs at least one product before it can be built. " +
+            "Go back to Products and add what you sell.",
+          screen: "products",
+        },
+        { status: 409 }
+      );
+    }
+
+    /**
+     * Both sources are collected BEFORE anything is written, because the dates
+     * cannot be decided one initiative at a time.
+     *
+     * `sequenceEventDates` needs the whole set: its job is to stop two launches
+     * landing on the same day and to stop one initiative's preparation window
+     * starting before the previous launch. Inserting as we go would mean each
+     * initiative is dated in ignorance of the others, which is the pile-up
+     * generate-plan already had to solve.
+     */
+    const pending: {
+      libraryKey: string;
+      name: string;
+      /** The date the user asked for, or the plan start as a fallback. */
+      desiredEvent: string;
+      productIds: string[];
+      displayOrder: number;
+      /** good/better/best, so the dashboard has revenue to show. */
+      revenue: RevenueScenarios;
+    }[] = [];
+
+    // The horizon the funnel figures are projected over. Defaults to 12 so a
+    // missing answer does not silently zero every forecast.
+    const horizonMonths = num(input.horizon_months) ?? 12;
+
     for (const [index, initiative] of plannedInitiatives.entries()) {
       const key = str(initiative.initiative_key);
       if (!key) continue;
 
-      const ok = await insertInitiative(db, {
-        companyId,
+      /**
+       * Product chips are stored as `intake_products` ids, which have to be
+       * translated to the live `products` ids created above.
+       *
+       * Falling back to the largest product when that yields nothing, because
+       * `initiatives.product_id` is NOT NULL: screen 5's product selection is
+       * optional, and a draft saved before its products existed can carry
+       * stale ids. Dropping the initiative instead would silently shrink the
+       * plan the user just approved.
+       */
+      const mapped = toStringArray(initiative.product_ids)
+        .map((id) => productIdByIntakeId.get(id))
+        .filter((id): id is string => Boolean(id));
+
+      const productIds =
+        mapped.length > 0
+          ? mapped
+          : largestProductId
+            ? [largestProductId]
+            : [];
+
+      pending.push({
         libraryKey: key,
         name:
           str(initiative.initiative_label) ??
           str(initiative.custom_label) ??
           "Initiative",
         // An exact date wins over a month: it is the more specific answer.
-        activationDate:
+        desiredEvent:
           str(initiative.exact_date) ?? str(initiative.start_month) ?? planStart,
-        productIds: toStringArray(initiative.product_ids)
-          .map((id) => productIdByIntakeId.get(id))
-          .filter((id): id is string => Boolean(id)),
+        productIds,
         displayOrder: index,
+        /**
+         * The forecast the user already saw on the recommendations screen,
+         * recomputed from the same stored funnel. Without this the initiative
+         * is created with no revenue and the dashboard reads $0 everywhere.
+         */
+        revenue: scenariosFor(
+          forecastForStoredInitiative(initiative, horizonMonths)
+        ),
+      });
+    }
+
+    /**
+     * A recommendation has no funnel of its own — the user never ran it — so
+     * its forecast comes from the same benchmark the recommendations screen
+     * used: a conservative third of the average product goal.
+     *
+     * Recomputed here rather than accepted from the client, which could send
+     * any figure it liked.
+     */
+    const benchmarkRevenue = benchmarkPerInitiative(intakeProducts);
+
+    // Accepted recommendations start a month apart as an opening intent;
+    // sequencing below then spaces them by their real preparation windows.
+    for (const [offset, key] of acceptedKeys.entries()) {
+      pending.push({
+        libraryKey: key,
+        name: key,
+        desiredEvent: addMonths(planStart, offset),
+        productIds: largestProductId ? [largestProductId] : [],
+        displayOrder: plannedInitiatives.length + offset,
+        revenue: scenariosFor(benchmarkRevenue),
+      });
+    }
+
+    /**
+     * Task templates and runways come from the WORKBOOK, keyed by library key.
+     *
+     * This is what makes an intake-built plan equivalent to a generated one: an
+     * initiative with no tasks looks planned but has no project plan behind it,
+     * and the runway is also what `sequenceEventDates` uses to space launches.
+     * Loaded in one query for every key rather than per initiative.
+     */
+    /**
+     * Nothing to build.
+     *
+     * Path A and B users reach here with their own initiatives; a Path C user
+     * who accepted no recommendations has none. Either way the dashboard would
+     * be empty, so say so instead of reporting a successful build — that is
+     * exactly the "it loaded, then there was nothing" failure.
+     */
+    if (pending.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "There are no initiatives to build yet. Accept at least one " +
+            "recommendation, or add what you are already planning.",
+        },
+        { status: 409 }
+      );
+    }
+
+    const templatesByKey = await loadTaskTemplates(
+      db,
+      pending.map((p) => p.libraryKey)
+    );
+
+    const scheduled = sequenceEventDates(
+      pending.map((p) => ({
+        desiredEvent: p.desiredEvent,
+        runwayDays: templateRunwayDays(templatesByKey.get(p.libraryKey) ?? []),
+      }))
+    );
+
+    // Nothing may be dated before today, including tasks.
+    const floor = toDateOnly(new Date());
+    let initiativeCount = 0;
+
+    for (const [index, item] of pending.entries()) {
+      const slot = scheduled[index];
+      const templates = templatesByKey.get(item.libraryKey) ?? [];
+
+      const ok = await insertInitiative(db, {
+        companyId,
+        libraryKey: item.libraryKey,
+        name: item.name,
+        activationDate: toDateOnly(slot.activationDate),
+        eventDate: toDateOnly(slot.eventDate),
+        productIds: item.productIds,
+        displayOrder: item.displayOrder,
+        revenue: item.revenue,
+        // Same date handling as generate-plan: counted back from the event,
+        // floored at today.
+        tasks:
+          templates.length > 0
+            ? materialiseTasks(templates, {
+                eventDate: slot.eventDate,
+                floor,
+              })
+            : [],
       });
 
       if (!ok) {
@@ -212,28 +392,34 @@ export async function POST(request: NextRequest) {
       initiativeCount += 1;
     }
 
-    // Accepted recommendations. Sequenced one month apart from the plan start
-    // so they do not all land in the same week — the calendar is where the user
-    // refines this, but an unspaced default is unusable as a starting point.
-    const largestProductId = largestProduct(intakeProducts, productIdByIntakeId);
+    /* ---- Annual plan targets ---- */
 
-    for (const [offset, key] of acceptedKeys.entries()) {
-      const ok = await insertInitiative(db, {
-        companyId,
-        libraryKey: key,
-        name: key,
-        activationDate: addMonths(planStart, offset),
-        productIds: largestProductId ? [largestProductId] : [],
-        displayOrder: plannedInitiatives.length + offset,
-      });
+    /**
+     * Without this the dashboard's goal tiles read "No target set for this year
+     * yet" even though the user typed a revenue goal on screen 4 — the figure
+     * was saved on `planning_inputs` and never copied to the plan the dashboard
+     * actually reads.
+     *
+     * Baseline is the user's stated goal, NOT our forecast. Overwriting the
+     * goal with the forecast would hide the gap between them, which is the one
+     * thing the plan is meant to make visible.
+     */
+    const targets = planTargets(num(input.revenue_goal));
 
-      if (!ok) {
-        return NextResponse.json(
-          { error: "Could not create the recommended initiatives." },
-          { status: 500 }
-        );
+    if (targets.baseline > 0) {
+      const planIds = [...new Set(scheduled.map((s) => s.eventDate.getUTCFullYear()))];
+
+      for (const year of planIds) {
+        await db
+          .from("annual_plans")
+          .update({
+            baseline_revenue: targets.baseline,
+            stretch_revenue: targets.stretch,
+            status: "active",
+          })
+          .eq("company_id", companyId)
+          .eq("year", year);
       }
-      initiativeCount += 1;
     }
 
     /* ---- Lifecycle, last ---- */
@@ -282,11 +468,17 @@ async function insertInitiative(
     libraryKey: string;
     name: string;
     activationDate: string;
+    /** When the initiative actually happens. Tasks count back from this. */
+    eventDate: string;
     productIds: readonly string[];
     displayOrder: number;
+    revenue: RevenueScenarios;
+    tasks: readonly MaterialisedTask[];
   }
 ): Promise<boolean> {
-  const annualPlanId = await resolveAnnualPlan(db, args.companyId, args.activationDate);
+  // Filed under the EVENT's year, not the activation year: an initiative
+  // prepared in December and run in January belongs to January's plan.
+  const annualPlanId = await resolveAnnualPlan(db, args.companyId, args.eventDate);
   if (!annualPlanId) {
     console.error("[intake/build] no annual plan for", args.companyId);
     return false;
@@ -305,28 +497,90 @@ async function insertInitiative(
    * sell several (REQ-8.5). Splitting into one row per product keeps the
    * revenue attributable per product — which REQ-13.11's coverage rule depends
    * on — rather than silently discarding the extra products.
+   *
+   * `product_id` is NOT NULL, so an initiative with no product cannot be
+   * written at all. This used to iterate `[null]` and `continue` past it,
+   * returning TRUE having inserted nothing: the build reported success, the
+   * plan_built event counted the initiative, and the dashboard was empty. A
+   * caller that cannot supply a product needs to hear about it.
    */
-  const products = args.productIds.length > 0 ? args.productIds : [null];
+  if (args.productIds.length === 0) {
+    console.error(
+      "[intake/build] no product for initiative", args.libraryKey,
+      "— initiatives.product_id is NOT NULL, so there is nothing to attach it to"
+    );
+    return false;
+  }
 
-  for (const [index, productId] of products.entries()) {
-    if (!productId) continue;
+  for (const [index, productId] of args.productIds.entries()) {
+    const { data: created, error } = await db
+      .from("initiatives")
+      .insert({
+        company_id: args.companyId,
+        annual_plan_id: annualPlanId,
+        product_id: productId,
+        initiative_type_id: typeId,
+        name: args.name,
+        description: "",
+        kind: "one-time",
+        status: "planned",
+        activation_date: args.activationDate,
+        event_date: args.eventDate,
+        /**
+         * Split across the product rows so the totals do not multiply.
+         *
+         * One initiative selling three products becomes three rows, and the
+         * dashboard sums them — writing the full forecast on each would treble
+         * the plan's revenue.
+         */
+        revenue_good: share(args.revenue.good, args.productIds.length),
+        revenue_better: share(args.revenue.better, args.productIds.length),
+        revenue_best: share(args.revenue.best, args.productIds.length),
+        planned_budget: 0,
+        actual_spend: 0,
+        display_order: args.displayOrder * 10 + index,
+      })
+      .select("id")
+      .single();
 
-    const { error } = await db.from("initiatives").insert({
-      company_id: args.companyId,
-      annual_plan_id: annualPlanId,
-      product_id: productId,
-      initiative_type_id: typeId,
-      name: args.name,
-      description: "",
-      kind: "one-time",
-      status: "planned",
-      activation_date: args.activationDate,
-      display_order: args.displayOrder * 10 + index,
-    });
-
-    if (error) {
-      console.error("[intake/build] initiative insert failed:", error.message);
+    if (error || !created) {
+      console.error("[intake/build] initiative insert failed:", error?.message);
       return false;
+    }
+
+    /**
+     * Tasks come from the workbook, so an intake-built initiative arrives with
+     * the same project plan a generated one would have. Without this the plan
+     * looks scheduled but has nothing to actually do.
+     *
+     * Fresh ids per row: `materialiseTasks` resolves dependencies to the ids it
+     * generated, so reusing one set across several product rows would point
+     * every copy's dependencies at the first row's tasks.
+     */
+    if (args.tasks.length > 0) {
+      const rows = args.tasks.map((task) => ({
+        id: task.id,
+        initiative_id: created.id as string,
+        company_id: args.companyId,
+        name: task.name,
+        description: task.description,
+        due_date: task.dueDate,
+        estimated_hours: task.estimatedHours,
+        status: "not_started",
+        priority: task.priority,
+        display_order: task.displayOrder,
+        dependency_ids: task.dependencyIds,
+      }));
+
+      // Only the first product row carries the task list. Duplicating it per
+      // product would show the same work several times in the planner.
+      if (index === 0) {
+        const { error: taskError } = await db.from("tasks").insert(rows);
+        if (taskError) {
+          console.error("[intake/build] task insert failed:", taskError.message);
+          return false;
+        }
+      }
     }
   }
 
@@ -458,6 +712,41 @@ function largestProduct(
   }
 
   return best?.id ?? null;
+}
+
+/**
+ * One product row's share of an initiative's forecast.
+ *
+ * Divided rather than repeated because the dashboard SUMS initiative rows: an
+ * initiative selling three products becomes three rows, and writing the whole
+ * forecast on each would report three times the revenue.
+ */
+function share(amount: number, rows: number): number {
+  if (rows <= 1) return amount;
+  return Math.round(amount / rows);
+}
+
+/**
+ * Benchmark revenue for one recommended initiative.
+ *
+ * Mirrors `benchmarkRevenuePerProduct` in `/api/intake/recommend` so the figure
+ * stored matches the figure the user was shown when they accepted it. A third
+ * of the average product goal: deliberately conservative, since we have no
+ * history for an initiative the business has never run.
+ */
+function benchmarkPerInitiative(
+  intakeProducts: readonly Record<string, unknown>[]
+): number {
+  if (intakeProducts.length === 0) return 0;
+
+  const total = intakeProducts.reduce(
+    (sum, product) =>
+      sum + productGoal(num(product.average_price), num(product.units_in_period)),
+    0
+  );
+
+  if (total <= 0) return 0;
+  return Math.round(total / intakeProducts.length / 3);
 }
 
 /** Add whole months to a `YYYY-MM-DD`, in UTC so no offset shifts the month. */
