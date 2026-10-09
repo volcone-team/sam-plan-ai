@@ -30,7 +30,7 @@ export function IntakeProgress({
   if (step === 0) return null;
 
   return (
-    <div className="border-b border-border bg-background">
+    <div className="bg-background">
       <div className="mx-auto max-w-3xl px-4 py-3 sm:px-6">
         <div className="mb-2 flex items-center justify-between">
           <p className="text-xs font-medium text-[hsl(var(--foreground-muted))]">
