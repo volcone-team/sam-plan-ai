@@ -44,22 +44,21 @@ export default function SignupPage() {
 
       // Where the user should land once their account is usable.
       //
-      // ONLY an explicit ?next= is honoured. That is set by the flows that
-      // genuinely need to resume something — e.g. /onboarding/generating sends
-      // anonymous visitors to /auth/signup?next=/onboarding/generating so the
-      // questionnaire they just completed still gets generated.
+      // ONLY an explicit ?next= is honoured, for flows that genuinely need to
+      // resume a specific page.
       //
-      // We deliberately do NOT inspect localStorage for a questionnaire draft
-      // here. That heuristic was wrong in three ways:
-      //   1. The draft is not scoped to a user, so an abandoned draft from a
+      // We deliberately do NOT inspect localStorage to guess a destination.
+      // That heuristic was wrong in three ways:
+      //   1. A draft is not scoped to a user, so an abandoned one from a
       //      previous account in this browser hijacked a brand-new signup and
       //      generated their plan from someone else's answers.
       //   2. The decision was baked into the confirmation EMAIL LINK at signup
       //      time but acted on much later — possibly in a different browser,
-      //      where the draft state is completely different.
-      //   3. It was redundant: the only flow that legitimately needs to resume
-      //      already passes an explicit ?next=.
-      // Everyone else lands on the welcome screen and chooses for themselves.
+      //      where the local state is completely different.
+      //   3. It is unnecessary now: the intake saves its answers server-side
+      //      against the account, so resuming is driven by `resume_screen`
+      //      rather than by anything in this browser.
+      // Everyone lands on the welcome screen, which starts the intake.
       const requestedNext = new URLSearchParams(window.location.search).get('next');
       const destination = requestedNext || '/onboarding/welcome';
 

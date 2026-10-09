@@ -12,9 +12,8 @@ export const metadata = {
  * admin add, reorder, reword and delete questions, and those edits survived a
  * refresh — but they were written to that one admin's `localStorage` under
  * `sam-flow-admin-questionnaire`. There was no API route behind it, and the
- * customer questionnaire reads a hardcoded config
- * (`src/components/questionnaire/questionnaire-config.ts`), so nothing an admin
- * did here ever reached a customer.
+ * customer intake reads definitions from code, so nothing an admin did here
+ * ever reached a customer.
  *
  * That is worse than having no page: it looks like it works. An admin could
  * reword every question, see it stick, and ship nothing.
@@ -24,8 +23,8 @@ export const metadata = {
  * the repo at `src/components/admin/questionnaire-management.tsx` for whoever
  * wires it up properly.
  *
- * To actually change the customer questions today, edit the config and step
- * components under `src/components/questionnaire/`.
+ * To change the customer questions today, edit `src/lib/intake/schema.ts`
+ * (copy and option lists) and the screens under `src/components/intake/`.
  */
 export default function AdminQuestionnairePage() {
   return (
@@ -56,9 +55,9 @@ export default function AdminQuestionnairePage() {
       <div className="mt-5 rounded-[var(--radius-lg)] border border-border bg-card p-5">
         <h2 className="text-sm font-semibold">Changing the questions today</h2>
         <p className="mt-2 text-sm text-[hsl(var(--foreground-muted))]">
-          The questionnaire is currently defined in code. Ask the development
-          team to update it — question wording, order and which steps appear in
-          Quickstart can all be changed and deployed.
+          The intake is currently defined in code. Ask the development team to
+          update it — question wording, option lists and which screens appear
+          can all be changed and deployed.
         </p>
         <p className="mt-3 text-sm text-[hsl(var(--foreground-muted))]">
           A database-backed editor that genuinely drives the customer form is on

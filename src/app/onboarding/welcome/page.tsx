@@ -17,9 +17,11 @@ import { toDateOnly } from "@/lib/plan-dates";
  *
  * The three steps UNLOCK from real data rather than being hardcoded: step 2
  * opens once a plan has been generated, step 3 once there is a plan to record
- * against. Generation returns the user here (see onboarding/generating) so the
- * next step is visibly unlocked instead of dropping them on the dashboard with
- * no sense of progress.
+ * against.
+ *
+ * Step 1 starts the intake at /intake/start. The intake owns its own completion
+ * — it commits through /api/intake/build and returns the user to the dashboard
+ * — so there is no separate "generating" screen in this flow any more.
  */
 export default function OnboardingWelcomePage() {
   const router = useRouter();

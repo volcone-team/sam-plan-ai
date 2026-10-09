@@ -16,7 +16,7 @@ export { ProductService, productService } from './product.service';
 // Planning
 export { PlanService, planService } from './plan.service';
 export { PlanningService, planningService } from './planning.service';
-export { QuestionnaireService, questionnaireService } from './questionnaire.service';
+
 
 // Execution
 export { InitiativeService, initiativeService } from './initiative.service';
