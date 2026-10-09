@@ -18,6 +18,8 @@ import { PageContainer, PageHeader } from "@/components/layout";
 import { useToast } from "@/components/ui/toast";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { usePermission } from "@/hooks/use-permission";
+import { useCompanyId } from "@/hooks/use-auth";
+import { usePlanYears } from "@/hooks/use-plan-years";
 
 interface Suggestion {
   id: string;
@@ -63,6 +65,15 @@ function labelize(k: string): string {
 
 export default function EnhancePlanPage() {
   const router = useRouter();
+  /**
+   * The year being enhanced, from the same picker every other screen reads.
+   *
+   * Previously this page sent no year at all, so the route defaulted to "the
+   * newest annual plan" and the model was given no date context — which is how
+   * enhancing 2026 produced suggestions dated 2025.
+   */
+  const companyId = useCompanyId() || "";
+  const { selectedYear, currentYear } = usePlanYears(companyId);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -97,8 +108,11 @@ export default function EnhancePlanPage() {
     loadSuggestions();
   }, [loadSuggestions]);
 
+  /** A year that has already ended cannot be scheduled into. */
+  const isPastYear = selectedYear < currentYear;
+
   const handleGenerate = async () => {
-    if (!canEditPlan) return;
+    if (!canEditPlan || isPastYear) return;
     setGenerating(true);
     setError(null);
     console.log("[EnhancePlan] Requesting AI enhancement...");
@@ -107,7 +121,9 @@ export default function EnhancePlanPage() {
       { variant: "wait" }
     );
     try {
-      const res = await fetch("/api/plan/enhance", { method: "POST" });
+      const res = await fetch(`/api/plan/enhance?year=${selectedYear}`, {
+        method: "POST",
+      });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Failed to generate suggestions");
@@ -245,7 +261,20 @@ export default function EnhancePlanPage() {
               ? "The AI will review your current plan and suggest improvements — new initiatives, budget tweaks, timing changes, and more. Nothing changes until you approve it."
               : "There are no AI recommendations waiting right now. An owner or operator can generate new recommendations for this plan."}
           </p>
-          {canEditPlan && (
+          {/*
+            A finished year has no date left to schedule work on, so there is
+            nothing useful to suggest. Said here rather than letting the request
+            go out and come back with a 409 — and it saves an AI call.
+          */}
+          {canEditPlan && isPastYear && (
+            <p className="mt-6 max-w-md rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))] px-4 py-3 text-sm text-[hsl(var(--foreground-muted))]">
+              The {selectedYear} plan year has already finished, so there is
+              nothing left to schedule. Switch to {currentYear} or a future year
+              in the plan year picker to enhance it.
+            </p>
+          )}
+
+          {canEditPlan && !isPastYear && (
           <>
           <button
             onClick={handleGenerate}
@@ -260,7 +289,7 @@ export default function EnhancePlanPage() {
             ) : (
               <>
                 <Sparkles className="h-4 w-4" />
-                Get Recommendations
+                Get Recommendations for {selectedYear}
               </>
             )}
           </button>

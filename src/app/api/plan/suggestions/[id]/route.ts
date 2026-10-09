@@ -136,16 +136,26 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
     if (!s.target_id) throw new Error("No target initiative for date change");
     // AI may return a full ISO date string ("2025-01-31") or a month number (1-12).
     const raw = proposed.activationMonth;
+    const today = todayDateOnly();
     let activationDate: string;
     if (typeof raw === "string" && /^\d{4}-\d{2}-\d{2}/.test(raw)) {
-      // Full date string - use it directly (strip any time portion)
-      activationDate = raw.split("T")[0];
+      /**
+       * FLOORED AT TODAY.
+       *
+       * This used to take the model's date verbatim, which is how enhancing
+       * the 2026 plan moved an initiative to 2025 — a date already in the
+       * past, with tasks the user could never perform. `new_initiative` below
+       * has always clamped; this branch did not.
+       */
+      activationDate = toDateOnly(clampNotBefore(raw.split("T")[0], today));
     } else {
-      // Month number - build a date in the current year
+      // Month number - build a date in the current year, never in the past.
       const month = Number(raw);
       if (!month || month < 1 || month > 12) throw new Error("Invalid activation month: " + raw);
       const year = new Date().getFullYear();
-      activationDate = toDateOnly(new Date(year, month - 1, 1));
+      activationDate = toDateOnly(
+        clampNotBefore(new Date(year, month - 1, 1), today)
+      );
     }
     console.log("[applySuggestion] date_change:", s.target_id, "->", activationDate);
     const { error } = await db.from("initiatives").update({ activation_date: activationDate }).eq("id", s.target_id).eq("company_id", companyId);

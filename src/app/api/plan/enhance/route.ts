@@ -9,6 +9,7 @@ import { classifyAiFailure, aiFailureLogDetail, operatorHint } from "@/lib/ai-er
 import { loadLibrary, loadAiContext, renderLibraryForPrompt } from "@/lib/workbook/read";
 import { checkEntitlement, recordUsage, statusForCode, serviceClient } from "@/lib/billing/enforce";
 import { LIMIT_KEYS } from "@/lib/billing/limits";
+import { toDateOnly, todayDateOnly } from "@/lib/plan-dates";
 
 export const maxDuration = 60;
 
@@ -46,6 +47,12 @@ Return ONLY valid JSON (no markdown) in this exact shape:
 
 Rules:
 - Suggest 3-8 high-value improvements. Quality over quantity.
+- DATES MUST BE IN THE FUTURE. The CURRENT DATE and the PLAN YEAR are given below.
+  Never propose a date in the past or in an earlier year — the work could not be
+  done. Every activationMonth you return must fall on or after the current date
+  and within the plan year.
+- Use a full ISO date ("YYYY-MM-DD") for activationMonth, not a bare month
+  number, so there is no ambiguity about which year you mean.
 - new_initiative: propose "proposed" as { name, description, libraryKey, activationMonth, plannedBudget, revenueBetter, tasks }
   - libraryKey MUST be one of the key= values from the INITIATIVE LIBRARY below. Do not invent one.
   - tasks is a FALLBACK only: [{ name, description, daysBeforeEvent (positive), estimatedHours, priority }].
@@ -59,7 +66,7 @@ Rules:
 - Do NOT suggest deleting anything. Only additions and adjustments.
 `;
 
-export async function POST() {
+export async function POST(request: Request) {
   // Hoisted so the outer catch can log a FAILED enhancement event. They stay
   // null until auth resolves, so an early failure logs nothing rather than
   // logging an unattributable row.
@@ -143,6 +150,46 @@ export async function POST() {
       supabase.from("annual_plans").select("baseline_revenue, stretch_revenue, operating_budget").eq("company_id", companyId).order("year", { ascending: false }).limit(1).single(),
     ]);
 
+    /**
+     * WHICH YEAR is being enhanced.
+     *
+     * The caller passes the year it is showing. Without it this route had no
+     * notion of a plan year at all, which is how enhancing 2026 produced
+     * suggestions dated 2025: the model was handed a plan with no date context
+     * and invented its own.
+     *
+     * Falls back to the current year rather than erroring, so an older client
+     * that sends nothing still behaves sensibly.
+     */
+    const planYear = (() => {
+      const raw = Number(new URL(request.url).searchParams.get("year"));
+      return Number.isInteger(raw) && raw > 2000 && raw < 2200
+        ? raw
+        : new Date().getFullYear();
+    })();
+
+    const today = toDateOnly(todayDateOnly());
+
+    /**
+     * A plan year that has already finished cannot be enhanced.
+     *
+     * Every suggestion is work to be scheduled, and there is no valid date left
+     * in a past year to schedule it on. Refusing here is clearer than returning
+     * suggestions the user cannot act on — and it avoids spending an AI call to
+     * produce them.
+     */
+    if (planYear < new Date().getFullYear()) {
+      console.log("[plan/enhance] Refused: plan year", planYear, "is in the past");
+      return NextResponse.json(
+        {
+          error:
+            `The ${planYear} plan year has already finished, so there is nothing left to schedule. ` +
+            `Switch to ${new Date().getFullYear()} or a future year to enhance it.`,
+        },
+        { status: 409 }
+      );
+    }
+
     if (initErr) {
       console.error("[plan/enhance] Failed to load initiatives:", initErr.message);
       return NextResponse.json(
@@ -160,6 +207,14 @@ export async function POST() {
 
     // 3. Build the plan summary for Claude
     const planSummary = `CURRENT PLAN
+
+CURRENT DATE: ${today}
+PLAN YEAR: ${planYear}
+EARLIEST ALLOWED DATE: ${today}
+LATEST ALLOWED DATE: ${planYear}-12-31
+
+Every date you propose must fall between the earliest and latest allowed dates
+above. Anything earlier is in the past and cannot be executed.
 
 Revenue Targets:
 - Baseline: $${annualPlan?.baseline_revenue || company?.baseline_revenue || 0}
