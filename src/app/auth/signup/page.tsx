@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
@@ -9,6 +9,48 @@ import { Button } from '@/components/ui/button';
 import { BrandLogo } from '@/components/brand-logo';
 import { getAppUrl } from '@/lib/app-url';
 import { asPlanId, pathForStep } from '@/lib/billing/signup-flow';
+
+/**
+ * Does this signup need a plan chosen first?
+ *
+ * ASKED HERE, not at each link. There are six places that link to signup
+ * (landing ×4, sample plan ×2, login, the demo banner, the confirmed page) and
+ * the route is reachable directly, so gating it link-by-link guarantees the
+ * next one added misses it — which is exactly what happened.
+ *
+ * Returns null while unknown so the form is not rendered before the answer
+ * arrives; showing the form and then yanking it away is worse than a brief
+ * spinner.
+ */
+function useRequiresPlanFirst(): boolean | null {
+  const [requires, setRequires] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch('/api/billing/signup-flow', { cache: 'no-store' });
+        if (!res.ok) throw new Error(String(res.status));
+        const body = (await res.json()) as { requiresPlanFirst?: boolean };
+        if (!cancelled) setRequires(body.requiresPlanFirst === true);
+      } catch {
+        /*
+         * Fails OPEN: on a read failure the form is shown. A plan can still be
+         * bought afterwards via the entitlement gate, whereas blocking signup
+         * on a settings lookup loses the customer outright.
+         */
+        if (!cancelled) setRequires(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return requires;
+}
 
 export default function SignupPage() {
   const router = useRouter();
@@ -25,6 +67,26 @@ export default function SignupPage() {
    * consent, and the stored value has to reflect a deliberate action.
    */
   const [marketingConsent, setMarketingConsent] = useState(false);
+
+  const requiresPlanFirst = useRequiresPlanFirst();
+
+  /**
+   * Send anyone who arrived without a plan to pick one first.
+   *
+   * Covers every entry point at once, including a direct visit to
+   * /auth/signup. The plan already in the URL is honoured, so returning from
+   * /get-started does not bounce back.
+   */
+  useEffect(() => {
+    if (requiresPlanFirst !== true) return;
+
+    const planInUrl = asPlanId(
+      new URLSearchParams(window.location.search).get('plan')
+    );
+    if (planInUrl) return;
+
+    router.replace('/get-started');
+  }, [requiresPlanFirst, router]);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -147,6 +209,34 @@ export default function SignupPage() {
       setLoading(false);
     }
   };
+
+  /**
+   * Hold the form until the plan-first rule is known, and while redirecting.
+   *
+   * Rendering the form first and then replacing the route lets someone start
+   * typing into a page that is about to vanish — which is how the plan step
+   * got skipped entirely in testing.
+   */
+  if (requiresPlanFirst === null) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center px-4">
+        <Loader2 className="h-6 w-6 animate-spin text-[hsl(var(--primary))]" />
+      </div>
+    );
+  }
+
+  if (
+    requiresPlanFirst &&
+    typeof window !== 'undefined' &&
+    !asPlanId(new URLSearchParams(window.location.search).get('plan'))
+  ) {
+    // The effect above is navigating to /get-started.
+    return (
+      <div className="flex min-h-dvh items-center justify-center px-4">
+        <Loader2 className="h-6 w-6 animate-spin text-[hsl(var(--primary))]" />
+      </div>
+    );
+  }
 
   if (success) {
     return (

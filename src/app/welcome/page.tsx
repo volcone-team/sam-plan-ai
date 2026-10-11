@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { loadBillingConfig } from "@/lib/billing/stripe-client";
 import { evaluateAccess } from "@/lib/billing/entitlement";
 import { WelcomeClient } from "./welcome-client";
+import { ConfirmPayment } from "./confirm-payment";
 
 export const metadata = {
   title: "Welcome | SAM Plan AI",
@@ -28,7 +29,12 @@ export const dynamic = "force-dynamic";
  * return for the booking links and the video — the perks are not single-use —
  * so the only redirect is for people who should not be here at all.
  */
-export default async function WelcomePage() {
+export default async function WelcomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const query = await searchParams;
   const cookieStore = await cookies();
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -113,8 +119,26 @@ export default async function WelcomePage() {
    * No entitlement means they have not paid, so there is nothing to welcome
    * them to. The middleware would catch this on any app route, but this page
    * sits outside the gate's reach by design and has to check for itself.
+   *
+   * EXCEPT right after Checkout. The webhook is the only writer of
+   * subscription state and it arrives asynchronously — it cannot reach
+   * localhost at all, and in production it can lag the browser redirect. So
+   * the honest answer here is not "unentitled", it is "we do not know yet":
+   * reconcile from Stripe first, and only then decide.
+   *
+   * `?checkout=success` grants nothing. It triggers a reconcile that reads
+   * Stripe server-side; `confirmed=1` records that the attempt has been made,
+   * so someone who never paid is redirected on the second pass instead of
+   * reconciling in a loop.
    */
   if (!access.allowed) {
+    const justPaid = query.checkout === "success";
+    const alreadyReconciled = query.confirmed === "1";
+
+    if (justPaid && !alreadyReconciled && access.reason !== "paused") {
+      return <ConfirmPayment />;
+    }
+
     redirect(access.reason === "paused" ? "/account-paused" : "/choose-plan");
   }
 

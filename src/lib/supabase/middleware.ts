@@ -293,10 +293,37 @@ export async function updateSession(request: NextRequest) {
   const isPublicApiRoute =
     request.nextUrl.pathname.startsWith('/api/cron/') ||
     request.nextUrl.pathname.startsWith('/api/notifications/unsubscribe') ||
+    /**
+     * STRIPE WEBHOOKS. Load-bearing, and its absence here was a real outage.
+     *
+     * Stripe is a server calling a server: there is no session cookie and
+     * never will be. The gate below returns 401 to any unauthenticated API
+     * request, so every webhook was rejected by the MIDDLEWARE and the handler
+     * never ran — confirmed in the Vercel log as "Middleware 401 Unauthorized"
+     * with the Stripe user agent.
+     *
+     * The consequence was silent and expensive: Stripe took payments, retried
+     * delivery, got 401 every time, and the subscription was never recorded.
+     * Customers paid and the app believed they had not.
+     *
+     * It is NOT unauthenticated in substance. The handler verifies the
+     * `stripe-signature` HMAC against STRIPE_WEBHOOK_SECRET over the raw body
+     * before trusting a single field, which is strictly stronger proof of
+     * origin than a session cookie — so letting it through the middleware
+     * removes nothing.
+     */
+    request.nextUrl.pathname === '/api/stripe/webhook' ||
     // Password reset: the caller has lost their password and therefore has no
     // session by definition. The handler withholds whether the address exists
     // and always answers 200, so being public leaks nothing.
-    request.nextUrl.pathname === '/api/auth/forgot-password';
+    request.nextUrl.pathname === '/api/auth/forgot-password' ||
+    /**
+     * Whether signup must start with a plan choice. The signup page is reached
+     * by ANONYMOUS visitors, so a 401 here would make the page unable to learn
+     * the rule and it would fall back to skipping plan selection. Returns a
+     * single boolean that the pricing page already discloses.
+     */
+    request.nextUrl.pathname === '/api/billing/signup-flow';
   // Onboarding is NO LONGER public. The flow is account-first:
   //   Landing -> "Create an Account" -> /auth/signup -> /onboarding/welcome
   // Leaving /onboarding open let anyone walk the questionnaire with no account,

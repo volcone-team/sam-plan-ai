@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Loader2, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "@/components/brand-logo";
@@ -63,6 +63,62 @@ export function ChoosePlanClient({
   const [cycle, setCycle] = useState<Cycle>("monthly");
   const [busyPlanId, setBusyPlanId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** True while recovering a payment Stripe made but no webhook recorded. */
+  const [reconciling, setReconciling] = useState(false);
+
+  /**
+   * RECOVER A PAYMENT THAT NEVER REACHED US.
+   *
+   * The webhook is the only writer of subscription state, and Stripe cannot
+   * deliver webhooks to localhost at all — nor is delivery instant in
+   * production. Returning from a successful Checkout therefore found no
+   * subscription, so this page decided the user was still unentitled and
+   * showed the purchase screen again. They had paid.
+   *
+   * `?checkout=success` is a HINT ONLY and grants nothing: it merely triggers
+   * a reconcile, which reads the truth from Stripe server-side. A forged URL
+   * gets a reconcile that finds no subscription and changes nothing.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("checkout") !== "success") {
+      return;
+    }
+
+    let cancelled = false;
+    setReconciling(true);
+
+    (async () => {
+      try {
+        await fetch("/api/billing/reconcile", {
+          method: "POST",
+          credentials: "same-origin",
+        });
+        if (cancelled) return;
+        /*
+         * Full reload rather than a router refresh: entitlement is evaluated
+         * server-side on this page, and a reload is the only way to re-run it
+         * and leave the redirect to the dashboard to the page itself.
+         */
+        const url = new URL(window.location.href);
+        url.searchParams.delete("checkout");
+        window.location.replace(url.toString());
+      } catch {
+        if (!cancelled) {
+          setReconciling(false);
+          setError(
+            "Your payment went through, but we could not confirm it yet. " +
+              "Wait a moment and refresh — if it persists, contact support and " +
+              "we will sort it out."
+          );
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /**
    * A failed payment is fixed in the Stripe portal, not by buying again:
