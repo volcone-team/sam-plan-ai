@@ -257,8 +257,12 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith('/sample-plan') ||
     request.nextUrl.pathname.startsWith('/admin-login');
   const isAdminRoute = request.nextUrl.pathname.startsWith('/admin');
+  // Where a paused account is sent. Must be excluded from isAppRoute, or the
+  // redirect below would target a page that redirects to itself.
+  const isPausedRoute = request.nextUrl.pathname.startsWith('/account-paused');
   const isAppRoute =
-    !isAuthRoute && !isApiRoute && !isPublicRoute && !isAdminRoute && !isOnboardingRoute;
+    !isAuthRoute && !isApiRoute && !isPublicRoute && !isAdminRoute &&
+    !isOnboardingRoute && !isPausedRoute;
 
   // Some auth pages must stay reachable EVEN with a session:
   //  - Password-setting pages: an invite or recovery link signs the user in
@@ -308,7 +312,10 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith('/api/auth/2fa') ||
     request.nextUrl.pathname === '/api/me' ||
     isPublicApiRoute ||
-    isPublicRoute;
+    isPublicRoute ||
+    // A paused user still holds a valid session; sending them through the code
+    // challenge to reach a "your plan is paused" page is pure friction.
+    isPausedRoute;
 
   // Unauthenticated API calls get a JSON 401, never a redirect — except public
   // API routes, which own their own authorization and must reach their handler.
@@ -395,6 +402,59 @@ export async function updateSession(request: NextRequest) {
       url.pathname = '/auth/verify-code';
       url.search = `?next=${encodeURIComponent(intended)}`;
       return NextResponse.redirect(url);
+    }
+  }
+
+  /**
+   * PAUSED ACCOUNT GATE
+   *
+   * An admin-paused company cannot reach ANY app page or customer API. It runs
+   * after the 2FA gate so a paused user is not asked for a code on their way to
+   * a page that only tells them they are paused.
+   *
+   * Only ONE query, and only for routes that could be blocked — admin routes,
+   * auth pages and the paused page itself skip it entirely, so an admin
+   * suspending an account never locks themselves out of the admin area.
+   *
+   * `is_paused` is read directly rather than through `evaluateAccess`: the
+   * middleware runs on the Edge on every request, and loading billing settings
+   * plus the full entitlement evaluation here would tax every page load. The
+   * flag is a single boolean with one meaning, and the full evaluation still
+   * runs server-side in the API routes that enforce limits.
+   */
+  if (userId && (isAppRoute || (isApiRoute && !isPublicApiRoute))) {
+    const { data: pausedProfile } = await supabase
+      .from('profiles')
+      .select('company_id, is_admin')
+      .eq('id', userId)
+      .maybeSingle();
+
+    // Super admins are never locked out — they are the people who undo it.
+    if (pausedProfile?.company_id && !pausedProfile.is_admin) {
+      const { data: pausedSub } = await supabase
+        .from('subscriptions')
+        .select('is_paused')
+        .eq('company_id', pausedProfile.company_id)
+        .maybeSingle();
+
+      if (pausedSub?.is_paused) {
+        // APIs get JSON. A client fetching data must see a real error rather
+        // than the HTML of a login page.
+        if (isApiRoute) {
+          return NextResponse.json(
+            {
+              error: 'account_paused',
+              message: 'This account is paused. Contact your administrator to continue.',
+            },
+            { status: 403 }
+          );
+        }
+
+        const url = request.nextUrl.clone();
+        url.pathname = '/account-paused';
+        url.search = '';
+        return NextResponse.redirect(url);
+      }
     }
   }
 

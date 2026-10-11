@@ -7,10 +7,20 @@
  *
  * PRECEDENCE, highest first. Order matters more than any individual rule:
  *   1. Billing disabled globally  -> everyone has full access (today's behaviour)
- *   2. Comped                     -> full plan access, no Stripe involvement
- *   3. Active / trialing          -> full plan access
- *   4. past_due within grace      -> access continues, warning shown
- *   5. Everything else            -> restricted
+ *   2. Admin-paused               -> locked out, whatever else is true
+ *   3. Comped                     -> full plan access, no Stripe involvement
+ *   4. Active / trialing          -> full plan access
+ *   5. past_due within grace      -> access continues, warning shown
+ *   6. Everything else            -> restricted
+ *
+ * The pause sits at 2 deliberately. It is a direct instruction from an admin to
+ * suspend an account, so it must outrank a comp and a trial — both of which
+ * would otherwise grant access to the very accounts most likely to be paused
+ * (an unpaid pilot, a disputed contract, an abusive trial).
+ *
+ * It sits BELOW the master switch because that switch means "this deployment is
+ * not doing billing at all", and honouring a pause then would lock someone out
+ * of a product that is not charging anyone.
  */
 
 /** Stripe subscription statuses, plus the local-only ones we set ourselves. */
@@ -41,10 +51,18 @@ export interface SubscriptionState {
   currentPeriodEnd: string | null;
   pastDueSince: string | null;
   cancelAtPeriodEnd: boolean;
+  /**
+   * Admin-applied suspension. Optional so every existing caller keeps
+   * compiling and behaves exactly as before when it is absent.
+   */
+  isPaused?: boolean;
+  /** Auto-resume date, if one was set. Informational only. */
+  pauseResumesAt?: string | null;
 }
 
 export type AccessReason =
   | "billing_disabled"
+  | "paused"
   | "comped"
   | "active"
   | "trialing"
@@ -98,7 +116,25 @@ export function evaluateAccess(
     return { allowed: false, reason: "no_subscription", warn: false, daysRemaining: null };
   }
 
-  // 2. Comped: full access with no payment. Checked before status because a
+  /**
+   * 2. Admin-paused. Checked before everything except the master switch.
+   *
+   * A pause is an explicit instruction, so it beats a comp and a trial — which
+   * is the whole point, since those are exactly the accounts an admin is most
+   * likely to want suspended. Deliberately NOT derived from Stripe's status:
+   * `pause_collection` leaves a subscription 'active', so only this flag knows.
+   */
+  if (sub.isPaused) {
+    const resumes = parseTime(sub.pauseResumesAt ?? null);
+    return {
+      allowed: false,
+      reason: "paused",
+      warn: false,
+      daysRemaining: resumes !== null && resumes > now ? daysBetween(now, resumes) : null,
+    };
+  }
+
+  // 3. Comped: full access with no payment. Checked before status because a
   //    comped account may have no Stripe subscription at all, so its status is
   //    meaningless.
   if (sub.isComped) {

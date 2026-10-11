@@ -118,7 +118,7 @@ export async function GET() {
             "plan_id, tier, status, stripe_status, billing_cycle, is_comped, comped_until, " +
             "comped_reason, trial_ends_at, current_period_start, current_period_end, " +
             "cancel_at_period_end, past_due_since, pending_plan_id, pending_billing_cycle, " +
-            "stripe_subscription_id, stripe_mode"
+            "stripe_subscription_id, stripe_mode, is_paused, paused_at, pause_resumes_at"
           )
           .eq("company_id", companyId)
           .maybeSingle()
@@ -132,6 +132,8 @@ export async function GET() {
       cancel_at_period_end: boolean; past_due_since: string | null;
       pending_plan_id: string | null; pending_billing_cycle: string | null;
       stripe_subscription_id: string | null; stripe_mode: string | null;
+      is_paused: boolean | null; paused_at: string | null;
+      pause_resumes_at: string | null;
     } | null;
 
     /**
@@ -171,6 +173,8 @@ export async function GET() {
             currentPeriodEnd: sub.current_period_end,
             pastDueSince: sub.past_due_since,
             cancelAtPeriodEnd: sub.cancel_at_period_end,
+            isPaused: sub.is_paused ?? false,
+            pauseResumesAt: sub.pause_resumes_at,
           }
         : null
     );
@@ -259,6 +263,11 @@ export async function GET() {
             trialEndsAt: sub.trial_ends_at,
             currentPeriodEnd: sub.current_period_end,
             cancelAtPeriodEnd: sub.cancel_at_period_end,
+            isPaused: sub.is_paused ?? false,
+            pausedAt: sub.paused_at,
+            pauseResumesAt: sub.pause_resumes_at,
+            // `pause_reason` is deliberately NOT exposed: it is an internal
+            // admin note and may say "non-payment" or "contract dispute".
             pendingPlanName: sub.pending_plan_id
               ? plans.find((p) => p.id === sub.pending_plan_id)?.name ?? null
               : null,

@@ -78,6 +78,15 @@ function accessNotice(me: BillingMe): { tone: 'warn' | 'error'; text: string } |
 
   if (!access.allowed) {
     switch (access.reason) {
+      case 'paused':
+        // Mostly unreachable: the middleware redirects a paused user to
+        // /account-paused before any app page renders. Kept so the panel never
+        // falls through to "not active yet", which would misdescribe a pause as
+        // an unfinished signup.
+        return {
+          tone: 'error',
+          text: 'Your plan is paused. Contact your administrator to restore access.',
+        };
       case 'trial_expired':
         return {
           tone: 'error',

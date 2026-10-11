@@ -34,6 +34,7 @@ export interface EnforcementResult {
     | "past_due"
     | "canceled"
     | "comp_expired"
+    | "paused"
     | "incomplete"
     | "limit_reached"
     | "not_included";
@@ -60,6 +61,13 @@ function accessFailure(access: AccessDecision): { code: EnforcementResult["code"
       return { code: "past_due", message: "Your last payment failed. Update your card to restore access." };
     case "comp_expired":
       return { code: "comp_expired", message: "Your complimentary access has ended." };
+    case "paused":
+      // Deliberately does NOT repeat the admin's internal pause reason, which
+      // may be "non-payment" or "contract dispute".
+      return {
+        code: "paused",
+        message: "This account is paused. Contact your administrator to continue.",
+      };
     case "canceled":
       return { code: "canceled", message: "Your subscription has been cancelled." };
     default:
@@ -86,7 +94,8 @@ export async function checkEntitlement(
         .from("subscriptions")
         .select(
           "plan_id, status, stripe_status, is_comped, comped_until, trial_ends_at, " +
-          "current_period_start, current_period_end, past_due_since, cancel_at_period_end"
+          "current_period_start, current_period_end, past_due_since, cancel_at_period_end, " +
+          "is_paused, pause_resumes_at"
         )
         .eq("company_id", companyId)
         .maybeSingle()
@@ -97,6 +106,7 @@ export async function checkEntitlement(
     is_comped: boolean; comped_until: string | null; trial_ends_at: string | null;
     current_period_start: string | null; current_period_end: string | null;
     past_due_since: string | null; cancel_at_period_end: boolean;
+    is_paused: boolean | null; pause_resumes_at: string | null;
   } | null;
 
   const access = evaluateAccess(
@@ -115,6 +125,8 @@ export async function checkEntitlement(
           currentPeriodEnd: row.current_period_end,
           pastDueSince: row.past_due_since,
           cancelAtPeriodEnd: row.cancel_at_period_end,
+          isPaused: row.is_paused ?? false,
+          pauseResumesAt: row.pause_resumes_at,
         }
       : null
   );

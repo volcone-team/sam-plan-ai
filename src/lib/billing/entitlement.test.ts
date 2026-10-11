@@ -55,6 +55,74 @@ describe("evaluateAccess — master switch", () => {
   });
 });
 
+describe("evaluateAccess — admin pause", () => {
+
+  it("locks out a paused account", () => {
+    const d = evaluateAccess(ON, sub({ isPaused: true }), NOW);
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("paused");
+  });
+
+  /**
+   * The precedence that matters. A comp or a trial would otherwise grant access
+   * to exactly the accounts most likely to be paused — an unpaid pilot, a
+   * disputed contract, an abusive trial.
+   */
+  it("beats an indefinite comp", () => {
+    const d = evaluateAccess(ON, sub({ isPaused: true, isComped: true, status: null }), NOW);
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("paused");
+  });
+
+  it("beats an in-progress trial", () => {
+    const d = evaluateAccess(
+      ON,
+      sub({
+        isPaused: true,
+        status: "trialing",
+        trialEndsAt: new Date(NOW + 10 * DAY).toISOString(),
+      }),
+      NOW
+    );
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("paused");
+  });
+
+  it("beats an active paid subscription", () => {
+    const d = evaluateAccess(ON, sub({ isPaused: true, status: "active" }), NOW);
+    expect(d.allowed).toBe(false);
+  });
+
+  /**
+   * The master switch still wins: "this deployment is not doing billing" must
+   * not lock anyone out of a product that charges nobody.
+   */
+  it("is ignored when billing is switched off globally", () => {
+    const d = evaluateAccess(OFF, sub({ isPaused: true }), NOW);
+    expect(d.allowed).toBe(true);
+    expect(d.reason).toBe("billing_disabled");
+  });
+
+  it("reports days until an auto-resume date", () => {
+    const d = evaluateAccess(
+      ON,
+      sub({ isPaused: true, pauseResumesAt: new Date(NOW + 5 * DAY).toISOString() }),
+      NOW
+    );
+    expect(d.daysRemaining).toBe(5);
+  });
+
+  it("has no countdown when the pause is indefinite", () => {
+    expect(evaluateAccess(ON, sub({ isPaused: true }), NOW).daysRemaining).toBeNull();
+  });
+
+  /** Absent flag must behave exactly as before the column existed. */
+  it("changes nothing when not paused", () => {
+    expect(evaluateAccess(ON, sub({ isPaused: false }), NOW).reason).toBe("active");
+    expect(evaluateAccess(ON, sub(), NOW).reason).toBe("active");
+  });
+});
+
 describe("evaluateAccess — comped", () => {
   it("grants indefinite access when comped with no expiry", () => {
     const d = evaluateAccess(ON, sub({ isComped: true, status: null }), NOW);
