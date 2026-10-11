@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { cancelSubscriptionsForCompany } from "@/lib/billing/cancel-on-delete";
 
 export const runtime = "nodejs";
 
@@ -241,6 +242,16 @@ export async function DELETE(request: Request) {
         return NextResponse.json({ error: "confirm" }, { status: 400 });
       }
 
+      /**
+       * Cancel Stripe BEFORE the cascade, while the subscription rows still
+       * exist to find the customer by.
+       *
+       * Without this the subscription keeps billing an account that no longer
+       * exists, and a later signup reusing the same email could adopt it —
+       * reconcile recovers a lost customer link by email address.
+       */
+      const stripeCancel = await cancelSubscriptionsForCompany(adminClient, companyId);
+
       // Company cascade: delete every member auth user, then the company row.
       const { data: members } = await adminClient
         .from("profiles")
@@ -268,8 +279,17 @@ export async function DELETE(request: Request) {
         return NextResponse.json({ error: compErr.message }, { status: 500 });
       }
 
-      console.log("[api/me] DELETE company complete:", companyId);
-      return NextResponse.json({ success: true, deleted: "company" });
+      console.log(
+        "[api/me] DELETE company complete:", companyId,
+        "| stripe cancelled:", stripeCancel.cancelled.length,
+        "| stripe failed:", stripeCancel.failed.length
+      );
+      return NextResponse.json({
+        success: true,
+        deleted: "company",
+        stripeCancelled: stripeCancel.cancelled.length,
+        stripeFailed: stripeCancel.failed,
+      });
     }
 
     // 5. Last-owner guard (normal self-delete path for owners).

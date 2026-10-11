@@ -78,6 +78,22 @@ export async function POST() {
       return NextResponse.json({ reconciled: false, reason: "no_company" });
     }
 
+    /**
+     * When this account came into existence.
+     *
+     * Needed to bound the email lookup below. Without it, a recreated account
+     * reusing an old address adopts the deleted account's Stripe subscription.
+     */
+    const { data: companyRow } = await db
+      .from("companies")
+      .select("created_at")
+      .eq("id", companyId)
+      .maybeSingle();
+
+    const companyCreatedMs = companyRow?.created_at
+      ? new Date(companyRow.created_at as string).getTime()
+      : null;
+
     const mode = STRIPE_MODE_TAG;
     const stripe = getStripe();
 
@@ -95,15 +111,42 @@ export async function POST() {
     /**
      * No stored customer id: find one by email.
      *
-     * This is the case that matters locally. Checkout stores the customer id
-     * before redirecting, but if that write was lost — or the account was
-     * recreated — the link is missing and the payment can never be matched.
+     * This exists for a real failure — Checkout stores the customer id before
+     * redirecting, and if that write is lost the payment can never be matched.
      * Searching by email recovers it.
+     *
+     * BOUNDED BY THE ACCOUNT'S OWN AGE. Deleting a user or company removes the
+     * local rows but does not touch Stripe, so the customer and their live
+     * subscription survive. An unbounded email search then let a BRAND-NEW
+     * account reusing that address adopt the old subscription: registering
+     * team+1@volcone.com again and pressing "Refresh billing" silently granted
+     * Mastery, bought by an account that no longer existed.
+     *
+     * Email is not an identity here — it is reusable, and the only thing that
+     * distinguishes "my payment did not link" from "this is a different account
+     * at the same address" is whether the Stripe customer predates the company.
+     * A small grace window absorbs clock skew between Stripe and Postgres.
      */
     if (!customerId && user.email) {
       const found = await stripe.customers.list({ email: user.email, limit: 10 });
-      // Newest first, so a re-created customer wins over an abandoned one.
-      const candidate = found.data.sort((a, b) => b.created - a.created)[0];
+
+      const GRACE_MS = 5 * 60 * 1000;
+      const eligible = found.data.filter((c) => {
+        if (companyCreatedMs === null) return true;
+        return c.created * 1000 >= companyCreatedMs - GRACE_MS;
+      });
+
+      const rejected = found.data.length - eligible.length;
+      if (rejected > 0) {
+        console.log(
+          "[billing/reconcile] Ignored", rejected, "Stripe customer(s) for",
+          user.email, "— created before this account, so they belong to a",
+          "previous account at the same address."
+        );
+      }
+
+      // Newest first among those that could legitimately be this account's.
+      const candidate = eligible.sort((a, b) => b.created - a.created)[0];
       if (candidate) {
         customerId = candidate.id;
         console.log("[billing/reconcile] Recovered customer by email for", user.email);

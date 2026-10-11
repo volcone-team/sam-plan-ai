@@ -19,6 +19,11 @@ export default function SignupPage() {
     password: '',
     confirmPassword: '',
   });
+  /**
+   * Marketing consent. Defaults to UNCHECKED — a pre-ticked box is not
+   * consent, and the stored value has to reflect a deliberate action.
+   */
+  const [marketingConsent, setMarketingConsent] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +77,13 @@ export default function SignupPage() {
             first_name: formData.firstName,
             last_name: formData.lastName,
             company_name: formData.companyName,
+            /**
+             * Sent as a STRING because raw_user_meta_data is JSON read with
+             * ->> in the trigger, which yields text. Always sent, so the
+             * trigger can tell "declined" from "never asked" — the latter is
+             * what an invited team member gets, and it must stay distinct.
+             */
+            marketing_consent: marketingConsent ? 'true' : 'false',
           },
         },
       });
@@ -277,6 +289,30 @@ export default function SignupPage() {
               />
             </div>
           </div>
+
+          {/*
+            Marketing consent. NOT required and NOT pre-ticked: a pre-ticked
+            box is not consent, and blocking signup on it would make it a
+            condition of service rather than a choice.
+          */}
+          <label
+            htmlFor="marketingConsent"
+            className="flex cursor-pointer items-start gap-2.5 text-xs text-[hsl(var(--foreground-muted))]"
+          >
+            <input
+              id="marketingConsent"
+              name="marketingConsent"
+              type="checkbox"
+              checked={marketingConsent}
+              onChange={(e) => setMarketingConsent(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-[hsl(var(--primary))]"
+            />
+            <span>
+              Keep me updated with product news, tips and offers by email. You
+              can unsubscribe at any time. This is optional — leaving it
+              unticked will not affect your account.
+            </span>
+          </label>
 
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? (

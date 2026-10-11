@@ -181,6 +181,16 @@ export function BillingManagement() {
 
   const [trialDaysDraft, setTrialDaysDraft] = useState("");
   const [graceDraft, setGraceDraft] = useState("");
+  /** "" means "choose automatically" — see the picker below. */
+  const [trialPlanDraft, setTrialPlanDraft] = useState("");
+
+  /**
+   * Plans a trial may be assigned to.
+   *
+   * Active only: pinning a trial to a retired plan would put new signups on
+   * something they cannot later buy or upgrade from.
+   */
+  const activePlans = (billing?.plans ?? []).filter((p) => p.is_active);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -201,6 +211,7 @@ export function BillingManagement() {
       setBilling(b);
       setData(s);
       setTrialDaysDraft(String(b.settings.trialDays));
+      setTrialPlanDraft(b.settings.trialPlanId ?? "");
       setGraceDraft(String(b.settings.dunningGraceDays));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -466,17 +477,72 @@ export function BillingManagement() {
                     </button>
                   </div>
 
-                  <p className="text-xs text-[hsl(var(--foreground-muted))]">
-                    Trial accounts get the limits of the plan marked as default
-                    (Starter). There is no separate trial allowance — the only trial
-                    control is how many days it lasts.
-                  </p>
+                  {/*
+                    WHICH PLAN A TRIAL GRANTS.
+                    
+                    Explicit rather than implied. It used to fall back to
+                    whichever plan was marked default, with no is_active check —
+                    so retiring that plan silently put every new signup on
+                    something nobody could buy. Only active plans are listed
+                    here for the same reason.
+                  */}
+                  <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                    <label htmlFor="trial-plan" className="text-xs text-[hsl(var(--foreground-muted))]">
+                      Trial gives the limits of
+                    </label>
+                    <select
+                      id="trial-plan"
+                      value={trialPlanDraft}
+                      onChange={(e) => setTrialPlanDraft(e.target.value)}
+                      className="rounded-[var(--radius-md)] border border-border bg-background px-3 py-1.5 text-sm"
+                    >
+                      {/*
+                        Empty = let the server resolve it (active default, then
+                        cheapest active). Kept as an option so an admin can
+                        return to automatic rather than being forced to pin one.
+                      */}
+                      <option value="">Choose automatically</option>
+                      {activePlans.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      disabled={busy || trialPlanDraft === (s.trialPlanId ?? "")}
+                      onClick={() =>
+                        saveSettings(
+                          { trialPlanId: trialPlanDraft === "" ? null : trialPlanDraft },
+                          "Trial plan saved."
+                        )
+                      }
+                      className="rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+                    >
+                      Save
+                    </button>
+                  </div>
 
                   {/*
-                    Removed: the per-trial initiative cap (a trial now simply uses
-                    Starter's limits) and the "require a card" toggle (the trial
-                    does not run through Checkout, so no card can be collected).
+                    The selected plan has since been retired. Worth saying
+                    loudly: trials still work, but they are silently falling
+                    back to a different plan than the one chosen here.
                   */}
+                  {s.trialPlanId &&
+                    !activePlans.some((p) => p.id === s.trialPlanId) && (
+                      <p className="flex items-start gap-2 rounded-[var(--radius-md)] border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                        <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        The plan chosen for trials has been retired, so new
+                        trials fall back to the cheapest active plan. Pick a
+                        current plan above.
+                      </p>
+                    )}
+
+                  <p className="text-xs text-[hsl(var(--foreground-muted))]">
+                    A trial is time-boxed access to this plan&apos;s limits — there
+                    is no separate trial allowance. No card is collected, and
+                    when the days run out the account is locked out until a plan
+                    is purchased.
+                  </p>
                 </div>
               )}
             </div>

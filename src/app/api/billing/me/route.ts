@@ -57,16 +57,39 @@ export async function GET() {
 
     const companyId = profile?.company_id ?? null;
 
+    /**
+     * EVERY plan, active or not.
+     *
+     * This used to filter on `is_active`, which broke the one case that matters
+     * when a plan is retired: a subscriber on it could no longer be NAMED. The
+     * lookup below (`plans.find(p => p.id === sub.plan_id)`) returned undefined
+     * and fell back to `sub.tier` — a legacy pre-Stripe string — so a customer
+     * paying for Pro was told they were on Starter.
+     *
+     * Retiring a plan means "stop offering it to new customers", not "take it
+     * away from existing ones". Their limits and their Stripe billing are both
+     * unchanged, so the label has to match that.
+     *
+     * The active filter now applies only to the PURCHASABLE list below.
+     */
     const { data: plansRaw } = await db
       .from("subscription_plans")
-      .select("id, name, description, tagline, monthly_price, annual_price, is_default, display_order")
-      .eq("is_active", true)
+      .select(
+        "id, name, description, tagline, monthly_price, annual_price, " +
+        "is_default, is_active, display_order"
+      )
       .order("display_order");
 
-    const plans = (plansRaw ?? []) as {
+    // Via `unknown`: supabase-js cannot infer a row shape from a concatenated
+    // select string and falls back to a union including an error type.
+    const allPlans = (plansRaw ?? []) as unknown as {
       id: string; name: string; description: string | null; tagline: string | null;
       monthly_price: number; annual_price: number; is_default: boolean;
+      is_active: boolean;
     }[];
+
+    /** Offered to new buyers. A retired plan is not on the pricing cards. */
+    const plans = allPlans.filter((p) => p.is_active);
 
     // Which plans can actually be bought right now: a plan with no synced price
     // for the active mode cannot go through checkout, so the UI must not offer it.
@@ -254,7 +277,18 @@ export async function GET() {
       subscription: sub
         ? {
             planId: sub.plan_id,
-            planName: plans.find((p) => p.id === sub.plan_id)?.name ?? sub.tier,
+            // Resolved against ALL plans, so a retired plan still has a name.
+            // `sub.tier` remains the last resort for rows with no plan_id at all.
+            planName:
+              allPlans.find((p) => p.id === sub.plan_id)?.name ?? sub.tier,
+            /**
+             * The plan exists but is no longer sold. The UI says so plainly
+             * rather than implying the customer was moved or must act — their
+             * price and limits are untouched.
+             */
+            planRetired:
+              !!sub.plan_id &&
+              allPlans.some((p) => p.id === sub.plan_id && !p.is_active),
             billingCycle: sub.billing_cycle,
             status: sub.stripe_status ?? sub.status,
             isComped: sub.is_comped,
@@ -268,8 +302,10 @@ export async function GET() {
             pauseResumesAt: sub.pause_resumes_at,
             // `pause_reason` is deliberately NOT exposed: it is an internal
             // admin note and may say "non-payment" or "contract dispute".
+            // Also resolved against ALL plans: a scheduled downgrade to a plan
+            // retired after it was scheduled must still show its name.
             pendingPlanName: sub.pending_plan_id
-              ? plans.find((p) => p.id === sub.pending_plan_id)?.name ?? null
+              ? allPlans.find((p) => p.id === sub.pending_plan_id)?.name ?? null
               : null,
             pendingBillingCycle: sub.pending_billing_cycle,
             // Drives whether the portal link is shown: no Stripe subscription in

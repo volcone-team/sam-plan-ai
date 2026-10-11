@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   CreditCard, ExternalLink, TriangleAlert, CheckCircle2, Gift, RefreshCw,
-  CalendarClock,
+  CalendarClock, Info,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Spinner, LoadingPanel } from '@/components/ui/spinner';
@@ -45,7 +45,7 @@ interface BillingMe {
   trial: { enabled: boolean; days: number; requiresCard: boolean };
   plans: Plan[];
   subscription: {
-    planName: string; billingCycle: string; status: string;
+    planName: string; planRetired: boolean; billingCycle: string; status: string;
     isComped: boolean; compedUntil: string | null; compedReason: string | null;
     trialEndsAt: string | null; currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean; pendingPlanName: string | null;
@@ -410,6 +410,25 @@ export function BillingPanel() {
                     ? ` (${me.subscription.pendingBillingCycle})`
                     : ''}{' '}
                   on {shortDate(me.subscription.currentPeriodEnd)}
+                </p>
+              )}
+
+              {/*
+                Retired plan: no longer sold, but nothing about this customer's
+                arrangement changed. The copy is deliberately reassuring and
+                asks nothing of them — they keep the same price and the same
+                limits, and the plan simply does not appear in the cards below.
+                Without this the plan name looked like an error, because the
+                plan they are on is absent from the list of plans.
+              */}
+              {me.subscription.planRetired && !me.subscription.isComped && (
+                <p className="mt-2 inline-flex items-start gap-1.5 rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))] px-2.5 py-1.5 text-xs text-[hsl(var(--foreground-muted))]">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    {me.subscription.planName} is no longer offered to new
+                    customers. Your price and limits stay exactly as they are —
+                    nothing changes unless you choose a different plan.
+                  </span>
                 </p>
               )}
             </div>

@@ -128,9 +128,12 @@ export async function GET(request: Request) {
             )
             .in("company_id", companyIds)
         : Promise.resolve({ data: [] }),
+      // Unfiltered by `is_active`: a subscriber on a RETIRED plan must still be
+      // nameable. The active filter applies only to the grant-access dropdown
+      // below, which offers plans to assign.
       adminClient
         .from("subscription_plans")
-        .select("id, name, monthly_price, annual_price"),
+        .select("id, name, monthly_price, annual_price, is_active"),
       // Lifetime paid per company. Unattributed invoices are excluded: they are
       // not any company's spend.
       companyIds.length
@@ -161,8 +164,9 @@ export async function GET(request: Request) {
     }
 
     const planById = new Map(
-      ((plansCatalogRes.data ?? []) as {
+      ((plansCatalogRes.data ?? []) as unknown as {
         id: string; name: string; monthly_price: number; annual_price: number;
+        is_active: boolean;
       }[]).map((p) => [p.id, p])
     );
 
@@ -211,6 +215,8 @@ export async function GET(request: Request) {
             subscriptionId: sub.id,
             planId: sub.plan_id,
             planName: subPlan?.name ?? sub.tier,
+            // Retired: still billed and still entitled, just not sold any more.
+            planRetired: !!subPlan && !subPlan.is_active,
             billingCycle: sub.billing_cycle,
             price: subPlan
               ? sub.billing_cycle === "annual"
@@ -310,8 +316,12 @@ export async function GET(request: Request) {
       offset,
       // The comp controls need the plan list to offer a choice, and whether
       // Stripe is on at all changes what the subscription columns mean.
+      // ACTIVE ONLY: granting someone a retired plan would put them on
+      // something that cannot be bought or upgraded from.
       stripeEnabled: config.stripeEnabled,
-      plans: [...planById.values()].map((p) => ({ id: p.id, name: p.name })),
+      plans: [...planById.values()]
+        .filter((p) => p.is_active)
+        .map((p) => ({ id: p.id, name: p.name })),
     });
   } catch (err: any) {
     console.error("[admin/companies] Error:", err?.message || err);

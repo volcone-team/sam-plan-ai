@@ -24,6 +24,8 @@ interface CompanySubscription {
   subscriptionId: string;
   planId: string | null;
   planName: string;
+  /** Plan still exists and still bills, but is no longer sold. */
+  planRetired: boolean;
   billingCycle: string;
   price: number | null;
   status: string;
@@ -566,6 +568,20 @@ export function CompanyManagement() {
                             <span className="text-[hsl(var(--foreground))]">
                               {sub.planName}
                             </span>
+                            {/*
+                              Flagged because it is not visible anywhere else:
+                              the account bills and is entitled as normal, but
+                              the plan is gone from the pricing cards, so an
+                              admin reading just the name would not know.
+                            */}
+                            {sub.planRetired && (
+                              <span
+                                className="ml-1.5 inline-flex rounded-full bg-[hsl(var(--background-muted))] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[hsl(var(--foreground-muted))]"
+                                title="No longer sold to new customers. Billing and limits unchanged."
+                              >
+                                Retired
+                              </span>
+                            )}
                             <p className="text-xs text-[hsl(var(--foreground-muted))]">
                               {sub.billingCycle}
                               {company.lifetimePaid > 0 && ` · ${money(company.lifetimePaid)} paid`}

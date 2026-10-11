@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { logActivity } from "@/lib/activity-log";
+import { cancelSubscriptionsForCompany } from "@/lib/billing/cancel-on-delete";
 
 /**
  * GET /api/admin/companies/[id]
@@ -236,6 +237,20 @@ export async function DELETE(
       .eq("id", id)
       .maybeSingle();
 
+    /**
+     * Cancel Stripe FIRST, while the subscription rows still exist.
+     *
+     * After the cascade there is no way to find the customer, so the
+     * subscription would bill forever with no account behind it. It also stops
+     * the orphan being adopted later: reconcile recovers a lost customer link
+     * by email, so a deleted address that is registered again would otherwise
+     * inherit this subscription.
+     *
+     * Never throws — a half-deleted account is worse than an orphan — so the
+     * result is recorded in the audit log instead.
+     */
+    const stripeCancel = await cancelSubscriptionsForCompany(adminClient, id);
+
     // 1. Get all members (auth users) of this company
     const { data: members } = await adminClient
       .from("profiles")
@@ -278,12 +293,23 @@ export async function DELETE(
         targetId: id,
         targetLabel: doomedCompany?.name ?? null,
         companyId: null,
-        metadata: { membersDeleted: members?.length || 0 },
+        metadata: {
+          membersDeleted: members?.length || 0,
+          stripeCancelled: stripeCancel.cancelled,
+          // Anything here needs cancelling by hand in Stripe, so it must be
+          // recorded rather than lost with the rest of the account.
+          stripeFailed: stripeCancel.failed,
+        },
       },
       adminClient
     );
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      // Surfaced so the admin is told when a subscription is still billing.
+      stripeCancelled: stripeCancel.cancelled.length,
+      stripeFailed: stripeCancel.failed,
+    });
   } catch (err: any) {
     console.error("[admin/companies/id] DELETE Error:", err?.message || err);
     return NextResponse.json({ error: err?.message || "Internal error" }, { status: 500 });

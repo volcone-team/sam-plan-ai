@@ -81,7 +81,26 @@ export function SubscriptionPlanEditor() {
     ));
   };
 
-  const handleToggleActive = async (planId: string, current: boolean) => {
+  /**
+   * Deactivating RETIRES a plan: it stops being offered to new customers while
+   * existing subscribers keep their price, their limits and their Stripe
+   * billing. That is a meaningful difference from deleting, and the button
+   * previously fired with no explanation — so an admin could reasonably expect
+   * it to move people off the plan, which it does not do.
+   */
+  const handleToggleActive = async (planId: string, current: boolean, planName: string) => {
+    if (current) {
+      const ok = window.confirm(
+        `Retire ${planName}?\n\n` +
+          `New customers will no longer see it.\n\n` +
+          `Anyone already on it KEEPS it — same price, same limits, and Stripe ` +
+          `keeps billing them as before. Nothing changes for them, and they are ` +
+          `told the plan is no longer offered.\n\n` +
+          `You can re-activate it at any time.`
+      );
+      if (!ok) return;
+    }
+
     await subscriptionPlanService.updatePlan(planId, { isActive: !current });
     setPlans(prev => prev.map(p =>
       p.plan.id === planId ? { ...p, plan: { ...p.plan, isActive: !current } } : p
@@ -147,7 +166,12 @@ export function SubscriptionPlanEditor() {
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-[hsl(var(--foreground))]">{plan.name}</span>
                     {!plan.isActive && (
-                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600">Inactive</span>
+                      <span
+                        className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                        title="Not offered to new customers. Existing subscribers keep their price and limits."
+                      >
+                        Retired
+                      </span>
                     )}
                     {plan.tagline && (
                       <span className="rounded-full bg-[hsl(var(--primary)_/_0.1)] px-2 py-0.5 text-[10px] font-medium text-[hsl(var(--primary))]">{plan.tagline}</span>
@@ -245,10 +269,14 @@ export function SubscriptionPlanEditor() {
                 {/* Actions */}
                 <div className="flex items-center justify-between border-t border-border pt-3">
                   <button
-                    onClick={() => handleToggleActive(plan.id, plan.isActive)}
+                    onClick={() => handleToggleActive(plan.id, plan.isActive, plan.name)}
                     className={`text-xs font-medium ${plan.isActive ? 'text-amber-600 hover:text-amber-700' : 'text-[hsl(var(--primary))] hover:underline'}`}
                   >
-                    {plan.isActive ? 'Deactivate Plan' : 'Activate Plan'}
+                    {/*
+                      "Retire" rather than "Deactivate": existing subscribers
+                      are unaffected, which "deactivate" does not convey.
+                    */}
+                    {plan.isActive ? 'Retire Plan' : 'Re-activate Plan'}
                   </button>
                   <button
                     onClick={() => handleDeletePlan(plan.id)}

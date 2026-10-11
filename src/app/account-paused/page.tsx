@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { PauseCircle, Mail } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
@@ -49,7 +52,80 @@ async function loadContactEmail(): Promise<string | null> {
   }
 }
 
+/**
+ * Is the caller's account actually paused?
+ *
+ * The middleware redirects paused users HERE, so it never redirects away from
+ * here — which left the page reachable by anyone, including after an admin
+ * resumed the account. A stale tab or a bookmark then showed "your plan is
+ * paused" to someone whose access was fine.
+ *
+ * Checked server-side on every request (the page is force-dynamic), so the
+ * answer cannot be cached from when the pause was real.
+ */
+async function isCallerPaused(): Promise<boolean> {
+  try {
+    const cookieStore = await cookies();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          // A server component cannot set cookies; refresh is the middleware's job.
+          setAll() {},
+        },
+      }
+    );
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    // Not signed in: there is no account to be paused, so nothing to show.
+    if (!user) return false;
+
+    const db = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    const { data: profile } = await db
+      .from("profiles")
+      .select("company_id")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const companyId = (profile as { company_id?: string | null } | null)?.company_id;
+    if (!companyId) return false;
+
+    const { data: sub } = await db
+      .from("subscriptions")
+      .select("is_paused")
+      .eq("company_id", companyId)
+      .maybeSingle();
+
+    return (sub as { is_paused?: boolean | null } | null)?.is_paused === true;
+  } catch (err) {
+    /*
+     * Fails CLOSED on the redirect, OPEN on the message: a read failure shows
+     * the paused page rather than bouncing someone into an app they may not be
+     * entitled to. Being told to contact an admin is recoverable; silently
+     * granting access is not.
+     */
+    console.error("[account-paused] Could not verify pause state:", err);
+    return true;
+  }
+}
+
 export default async function AccountPausedPage() {
+  // Anyone not actually paused has no business here.
+  if (!(await isCallerPaused())) {
+    redirect("/year-at-a-glance");
+  }
+
   const contactEmail = await loadContactEmail();
 
   return (

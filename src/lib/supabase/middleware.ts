@@ -1,6 +1,8 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { TWO_FACTOR_COOKIE, verifyDeviceToken } from '@/lib/two-factor';
+import { evaluateAccess } from '@/lib/billing/entitlement';
+import { requiresPurchase, isAllowedWhileLockedOut } from '@/lib/billing/lockout';
 
 /**
  * Reads the authentication method out of a JWT's `amr` (Authentication Methods
@@ -78,6 +80,54 @@ function decodeJwtPayload(accessToken: string): unknown {
     return JSON.parse(atob(padded));
   } catch {
     return null;
+  }
+}
+
+/**
+ * Billing settings for the entitlement gate.
+ *
+ * Read through the SESSION client, not the service role: the Edge runtime has
+ * no service key, and `app_settings` is readable by authenticated users.
+ *
+ * FAILS OPEN. If the row cannot be read we report billing as DISABLED, which
+ * `evaluateAccess` treats as "everyone has access". A settings read failure
+ * must degrade to the pre-billing app rather than locking out every paying
+ * customer at once — the same rule `loadBillingConfig` follows.
+ */
+async function loadGateSettings(
+  supabase: ReturnType<typeof createServerClient>
+): Promise<{
+  stripeEnabled: boolean;
+  trialEnabled: boolean;
+  trialDays: number;
+  dunningGraceDays: number;
+}> {
+  try {
+    const { data } = await supabase
+      .from('app_settings')
+      .select('stripe_enabled, trial_enabled, trial_days, dunning_grace_days')
+      .eq('id', 'global')
+      .maybeSingle();
+
+    if (!data) {
+      return { stripeEnabled: false, trialEnabled: true, trialDays: 14, dunningGraceDays: 7 };
+    }
+
+    const row = data as {
+      stripe_enabled?: boolean | null;
+      trial_enabled?: boolean | null;
+      trial_days?: number | null;
+      dunning_grace_days?: number | null;
+    };
+
+    return {
+      stripeEnabled: row.stripe_enabled === true,
+      trialEnabled: row.trial_enabled !== false,
+      trialDays: row.trial_days ?? 14,
+      dunningGraceDays: row.dunning_grace_days ?? 7,
+    };
+  } catch {
+    return { stripeEnabled: false, trialEnabled: true, trialDays: 14, dunningGraceDays: 7 };
   }
 }
 
@@ -260,9 +310,11 @@ export async function updateSession(request: NextRequest) {
   // Where a paused account is sent. Must be excluded from isAppRoute, or the
   // redirect below would target a page that redirects to itself.
   const isPausedRoute = request.nextUrl.pathname.startsWith('/account-paused');
+  // The purchase screen, for the same reason.
+  const isChoosePlanRoute = request.nextUrl.pathname.startsWith('/choose-plan');
   const isAppRoute =
     !isAuthRoute && !isApiRoute && !isPublicRoute && !isAdminRoute &&
-    !isOnboardingRoute && !isPausedRoute;
+    !isOnboardingRoute && !isPausedRoute && !isChoosePlanRoute;
 
   // Some auth pages must stay reachable EVEN with a session:
   //  - Password-setting pages: an invite or recovery link signs the user in
@@ -315,7 +367,10 @@ export async function updateSession(request: NextRequest) {
     isPublicRoute ||
     // A paused user still holds a valid session; sending them through the code
     // challenge to reach a "your plan is paused" page is pure friction.
-    isPausedRoute;
+    isPausedRoute ||
+    // Same for the purchase screen: it exists to take money from someone who
+    // cannot use the product, and a code challenge in the way only loses sales.
+    isChoosePlanRoute;
 
   // Unauthenticated API calls get a JSON 401, never a redirect — except public
   // API routes, which own their own authorization and must reach their handler.
@@ -423,21 +478,47 @@ export async function updateSession(request: NextRequest) {
    * runs server-side in the API routes that enforce limits.
    */
   if (userId && (isAppRoute || (isApiRoute && !isPublicApiRoute))) {
-    const { data: pausedProfile } = await supabase
+    const { data: gateProfile } = await supabase
       .from('profiles')
       .select('company_id, is_admin')
       .eq('id', userId)
       .maybeSingle();
 
     // Super admins are never locked out — they are the people who undo it.
-    if (pausedProfile?.company_id && !pausedProfile.is_admin) {
-      const { data: pausedSub } = await supabase
+    if (gateProfile?.company_id && !gateProfile.is_admin) {
+      /**
+       * ONE QUERY for both gates.
+       *
+       * Reading the pause flag and the entitlement columns together, because
+       * this runs on the Edge for every request and a second round trip would
+       * tax every page load.
+       */
+      const { data: gateSubRaw } = await supabase
         .from('subscriptions')
-        .select('is_paused')
-        .eq('company_id', pausedProfile.company_id)
+        .select(
+          'is_paused, pause_resumes_at, status, stripe_status, is_comped, ' +
+          'comped_until, trial_ends_at, current_period_end, past_due_since, ' +
+          'cancel_at_period_end'
+        )
+        .eq('company_id', gateProfile.company_id)
         .maybeSingle();
 
-      if (pausedSub?.is_paused) {
+      // Via `unknown`: supabase-js cannot infer a row shape from a
+      // concatenated select string and falls back to an error-type union.
+      const gateSub = gateSubRaw as unknown as {
+        is_paused: boolean | null;
+        pause_resumes_at: string | null;
+        status: string | null;
+        stripe_status: string | null;
+        is_comped: boolean | null;
+        comped_until: string | null;
+        trial_ends_at: string | null;
+        current_period_end: string | null;
+        past_due_since: string | null;
+        cancel_at_period_end: boolean | null;
+      } | null;
+
+      if (gateSub?.is_paused) {
         // APIs get JSON. A client fetching data must see a real error rather
         // than the HTML of a login page.
         if (isApiRoute) {
@@ -455,7 +536,79 @@ export async function updateSession(request: NextRequest) {
         url.search = '';
         return NextResponse.redirect(url);
       }
+
+      /**
+       * ENTITLEMENT GATE — no plan, no product.
+       *
+       * Covers the three ways an account ends up with nothing: an expired
+       * trial, a registration that abandoned Checkout, and a cancelled
+       * subscription. Previously these only blocked API routes, so the
+       * dashboard still rendered and an expired trial could keep building
+       * plans indefinitely.
+       *
+       * The decision comes from `evaluateAccess`, the same function the API
+       * enforcement path and the admin table use, so the three cannot
+       * disagree about who is entitled.
+       *
+       * Settings is INTENTIONALLY blocked. Plan purchase moved to its own
+       * route precisely so profile, team and notification settings could be
+       * shut without taking the way out with them.
+       */
+      const settings = await loadGateSettings(supabase);
+
+      const access = evaluateAccess(
+        settings,
+        {
+          status: (gateSub?.stripe_status ?? gateSub?.status ?? null) as never,
+          isComped: gateSub?.is_comped ?? false,
+          compedUntil: gateSub?.comped_until ?? null,
+          trialEndsAt: gateSub?.trial_ends_at ?? null,
+          currentPeriodEnd: gateSub?.current_period_end ?? null,
+          pastDueSince: gateSub?.past_due_since ?? null,
+          cancelAtPeriodEnd: gateSub?.cancel_at_period_end ?? false,
+          isPaused: false,
+        }
+      );
+
+      if (
+        !access.allowed &&
+        requiresPurchase(access.reason) &&
+        !isAllowedWhileLockedOut(request.nextUrl.pathname)
+      ) {
+        if (isApiRoute) {
+          return NextResponse.json(
+            {
+              error: 'subscription_required',
+              reason: access.reason,
+              message: 'This account needs an active plan to continue.',
+            },
+            { status: 402 }
+          );
+        }
+
+        const url = request.nextUrl.clone();
+        url.pathname = '/choose-plan';
+        url.search = '';
+        return NextResponse.redirect(url);
+      }
     }
+  }
+
+  /**
+   * A signed-in customer has no use for the marketing landing page.
+   *
+   * Sends them to the dashboard instead. Only the EXACT root is redirected —
+   * /sample-plan and /admin-login stay reachable, since an admin may legitimately
+   * want the admin sign-in page while holding a customer session.
+   *
+   * Runs after the paused gate, so a paused user lands on /account-paused
+   * rather than being bounced to a dashboard they cannot use.
+   */
+  if (isAuthenticated && request.nextUrl.pathname === '/') {
+    const url = request.nextUrl.clone();
+    url.pathname = '/year-at-a-glance';
+    url.search = '';
+    return NextResponse.redirect(url);
   }
 
   // Onboarding requires an account. Send guests to SIGNUP (not login), since
