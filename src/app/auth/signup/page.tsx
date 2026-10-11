@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { BrandLogo } from '@/components/brand-logo';
 import { getAppUrl } from '@/lib/app-url';
+import { asPlanId, pathForStep } from '@/lib/billing/signup-flow';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -49,6 +50,19 @@ export default function SignupPage() {
 
       // Where the user should land once their account is usable.
       //
+      /**
+       * A plan chosen BEFORE registering (no-trial flow) rides through to the
+       * confirmation link, so the user lands on checkout for the plan they
+       * picked rather than being asked again.
+       *
+       * UNTRUSTED: it comes from a query string the user can edit. It only
+       * selects which plan to OFFER at checkout — the server re-validates the
+       * plan and Stripe decides what they actually get.
+       */
+      const selectedPlan = asPlanId(
+        new URLSearchParams(window.location.search).get('plan')
+      );
+
       // ONLY an explicit ?next= is honoured, for flows that genuinely need to
       // resume a specific page.
       //
@@ -65,7 +79,15 @@ export default function SignupPage() {
       //      rather than by anything in this browser.
       // Everyone lands on the welcome screen, which starts the intake.
       const requestedNext = new URLSearchParams(window.location.search).get('next');
-      const destination = requestedNext || '/onboarding/welcome';
+      /**
+       * Where the confirmation link lands.
+       *
+       * With a plan carried through, go to checkout for it. Otherwise the
+       * welcome hub, which decides for itself whether a trial is running.
+       */
+      const destination =
+        requestedNext ||
+        (selectedPlan ? pathForStep('checkout', selectedPlan) : '/onboarding/welcome');
 
       // 1. Sign up with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({

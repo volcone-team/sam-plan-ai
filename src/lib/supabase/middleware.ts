@@ -305,6 +305,9 @@ export async function updateSession(request: NextRequest) {
   const isPublicRoute =
     request.nextUrl.pathname === '/' ||
     request.nextUrl.pathname.startsWith('/sample-plan') ||
+    // Plan selection BEFORE registering, for the no-trial flow. Public by
+    // necessity: there is no account yet, which is the whole point.
+    request.nextUrl.pathname.startsWith('/get-started') ||
     request.nextUrl.pathname.startsWith('/admin-login');
   const isAdminRoute = request.nextUrl.pathname.startsWith('/admin');
   // Where a paused account is sent. Must be excluded from isAppRoute, or the
@@ -312,9 +315,18 @@ export async function updateSession(request: NextRequest) {
   const isPausedRoute = request.nextUrl.pathname.startsWith('/account-paused');
   // The purchase screen, for the same reason.
   const isChoosePlanRoute = request.nextUrl.pathname.startsWith('/choose-plan');
+  /**
+   * The signup purchase journey. Excluded from isAppRoute so the entitlement
+   * gate cannot block the very pages that resolve a lack of entitlement —
+   * someone registered but not yet paid has no subscription by definition.
+   */
+  const isPurchaseFlowRoute =
+    request.nextUrl.pathname.startsWith('/checkout') ||
+    request.nextUrl.pathname.startsWith('/welcome');
   const isAppRoute =
     !isAuthRoute && !isApiRoute && !isPublicRoute && !isAdminRoute &&
-    !isOnboardingRoute && !isPausedRoute && !isChoosePlanRoute;
+    !isOnboardingRoute && !isPausedRoute && !isChoosePlanRoute &&
+    !isPurchaseFlowRoute;
 
   // Some auth pages must stay reachable EVEN with a session:
   //  - Password-setting pages: an invite or recovery link signs the user in

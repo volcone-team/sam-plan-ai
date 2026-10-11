@@ -1,11 +1,49 @@
 import Link from "next/link";
 import { ArrowRight, Play, BarChart3, Calendar, Target, Zap } from "lucide-react";
+import { createClient } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { GlassButton } from "@/components/ui/glass-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BrandLogo } from "@/components/brand-logo";
+import { loadBillingConfig } from "@/lib/billing/stripe-client";
+import { firstSignupStep, pathForStep } from "@/lib/billing/signup-flow";
 
-export default function LandingPage() {
+// The signup destination depends on the trial setting, which an admin can
+// change at any time, so it is resolved per request rather than at build.
+export const dynamic = "force-dynamic";
+
+/**
+ * Where "Create an Account" goes.
+ *
+ * With a trial running, straight to registration — they get in free, so asking
+ * them to choose a plan first is friction for nothing. With trials off,
+ * nothing is free, so the plan is chosen before the account exists.
+ *
+ * Resolved HERE rather than in each button so the four CTAs cannot drift apart.
+ * Falls back to plain signup if the setting cannot be read: the worst case is
+ * one extra step later, whereas a broken landing CTA costs the signup entirely.
+ */
+async function signupHref(): Promise<string> {
+  try {
+    const db = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    const config = await loadBillingConfig(db);
+    const step = firstSignupStep({
+      trialEnabled: config.trialEnabled,
+      stripeEnabled: config.stripeEnabled,
+    });
+    return step === "choose_plan" ? "/get-started" : pathForStep("register");
+  } catch (err) {
+    console.error("[landing] Could not resolve the signup route:", err);
+    return pathForStep("register");
+  }
+}
+
+export default async function LandingPage() {
+  const signupPath = await signupHref();
+
   return (
     <div className="flex min-h-dvh flex-col">
       {/* Navigation */}
@@ -28,7 +66,7 @@ export default function LandingPage() {
             >
               Login
             </Link>
-            <Link href="/auth/signup">
+            <Link href={signupPath}>
               <Button size="sm">Create an Account</Button>
             </Link>
           </nav>
@@ -37,7 +75,7 @@ export default function LandingPage() {
             <Link href="/auth/login" className="text-sm text-[hsl(var(--foreground-muted))] hover:text-foreground">
               Login
             </Link>
-            <Link href="/auth/signup">
+            <Link href={signupPath}>
               <Button size="sm">Create an Account</Button>
             </Link>
           </div>
@@ -84,7 +122,7 @@ export default function LandingPage() {
 
               {/* CTA Buttons */}
               <div className="mt-10 flex flex-col gap-4 sm:flex-row">
-                <Link href="/auth/signup">
+                <Link href={signupPath}>
                   <GlassButton className="w-full sm:w-auto">
                     Create an Account
                     <ArrowRight className="ml-1 h-4 w-4" />
@@ -161,7 +199,7 @@ export default function LandingPage() {
                 initiatives, projections, and project plans — in minutes.
               </p>
               <div className="mt-8 flex flex-col gap-4 sm:flex-row">
-                <Link href="/auth/signup">
+                <Link href={signupPath}>
                   <Button size="lg">
                     Create an Account
                     <ArrowRight className="ml-1 h-4 w-4" />

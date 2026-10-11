@@ -153,6 +153,21 @@ const ALLOWED_PREFIXES: readonly string[] = [
   "/auth",
   "/api/billing",
   "/api/auth",
+  /*
+   * The no-trial signup flow. A user who has registered but not yet paid is
+   * locked out BY DEFINITION — they have no subscription — so blocking these
+   * would make the purchase journey impossible to complete.
+   *
+   * /welcome is included because Stripe returns there after a successful
+   * payment, and the webhook that records it may not have arrived yet. Being
+   * bounced to a purchase screen seconds after paying is the worst possible
+   * moment to doubt the product. The page evaluates entitlement itself and
+   * redirects if they genuinely have none.
+   */
+  "/checkout",
+  "/welcome",
+  "/api/stripe/checkout",
+  "/api/stripe/portal",
 ];
 
 /**

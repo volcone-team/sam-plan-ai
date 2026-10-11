@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    let body: { planId?: unknown; billingCycle?: unknown } = {};
+    let body: { planId?: unknown; billingCycle?: unknown; returnTo?: unknown } = {};
     try {
       const parsed = await request.json();
       if (parsed && typeof parsed === "object") body = parsed;
@@ -69,6 +69,17 @@ export async function POST(request: Request) {
     const planId = typeof body.planId === "string" ? body.planId : "";
     const billingCycle = body.billingCycle === "annual" ? "annual" : "monthly";
     if (!planId) return NextResponse.json({ error: "planId" }, { status: 400 });
+
+    /**
+     * Where Stripe returns to.
+     *
+     * A FIRST purchase goes to the welcome page; an existing customer changing
+     * plan goes back to settings. Taken from the caller because only the client
+     * knows which journey the user is on — but it is an ENUM, never a URL:
+     * accepting a redirect target from the body would be an open redirect, and
+     * Stripe will happily send the browser wherever this says.
+     */
+    const returnTo = body.returnTo === "welcome" ? "welcome" : "settings";
 
     const db = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -224,10 +235,22 @@ export async function POST(request: Request) {
       subscription_data: {
         metadata: { company_id: companyId, plan_id: planId },
       },
-      // ?checkout=success is a UI hint ONLY. Entitlement is read from the
-      // database, which the webhook writes, so forging this URL grants nothing.
-      success_url: `${baseUrl}/settings?checkout=success`,
-      cancel_url: `${baseUrl}/settings?checkout=cancelled`,
+      /**
+       * ?checkout=success is a UI hint ONLY. Entitlement is read from the
+       * database, which the webhook writes, so forging this URL grants nothing.
+       *
+       * A cancelled first purchase returns to /choose-plan rather than
+       * /settings: that user has no plan, so the entitlement gate would bounce
+       * them off settings immediately and the back-button would look broken.
+       */
+      success_url:
+        returnTo === "welcome"
+          ? `${baseUrl}/welcome?checkout=success`
+          : `${baseUrl}/settings?checkout=success`,
+      cancel_url:
+        returnTo === "welcome"
+          ? `${baseUrl}/choose-plan?checkout=cancelled`
+          : `${baseUrl}/settings?checkout=cancelled`,
       allow_promotion_codes: true,
       /**
        * Stripe works out and remits VAT/sales tax where required. Cheaper to

@@ -107,6 +107,26 @@ describe("isAllowedWhileLockedOut", () => {
     expect(isAllowedWhileLockedOut("/api/billing/reconcile")).toBe(true);
   });
 
+  /**
+   * The no-trial signup journey. Someone who has registered but not paid has
+   * no subscription, so they are locked out by definition — blocking these
+   * would make it impossible to ever complete a purchase.
+   */
+  it("allows the purchase journey itself", () => {
+    expect(isAllowedWhileLockedOut("/checkout")).toBe(true);
+    expect(isAllowedWhileLockedOut("/api/stripe/checkout")).toBe(true);
+    expect(isAllowedWhileLockedOut("/api/stripe/portal")).toBe(true);
+  });
+
+  /**
+   * Stripe returns to /welcome on success, and the webhook recording the
+   * payment may not have landed yet. Bouncing someone to a purchase screen
+   * seconds after they paid is the worst possible moment to doubt the product.
+   */
+  it("allows the welcome page, where Stripe returns after paying", () => {
+    expect(isAllowedWhileLockedOut("/welcome")).toBe(true);
+  });
+
   it("allows sign-out and the 2FA endpoints", () => {
     expect(isAllowedWhileLockedOut("/api/auth/2fa/send")).toBe(true);
     expect(isAllowedWhileLockedOut("/auth/login")).toBe(true);
