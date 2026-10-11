@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Building2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Eye,
@@ -11,8 +12,46 @@ import {
   Loader2,
   Users,
   Trash2,
+  Gift,
+  PauseCircle,
+  PlayCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DateInput } from "@/components/ui/date-input";
+
+/** The subscription half of a row. Null when the company has no subscription. */
+interface CompanySubscription {
+  subscriptionId: string;
+  planId: string | null;
+  planName: string;
+  billingCycle: string;
+  price: number | null;
+  status: string;
+  stripeStatus: string | null;
+  stripeMode: string | null;
+  hasStripeSubscription: boolean;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  pendingPlanName: string | null;
+  isComped: boolean;
+  compedUntil: string | null;
+  compedReason: string | null;
+  trialEndsAt: string | null;
+  pastDueSince: string | null;
+  isPaying: boolean;
+  /** Admin-applied suspension. Outranks comps and trials. */
+  isPaused: boolean;
+  pausedAt: string | null;
+  /** Internal admin note. Shown here, never to the customer. */
+  pauseReason: string | null;
+  pauseResumesAt: string | null;
+  access: {
+    allowed: boolean;
+    reason: string;
+    warn: boolean;
+    daysRemaining: number | null;
+  };
+}
 
 interface AdminCompany {
   id: string;
@@ -29,6 +68,9 @@ interface AdminCompany {
   planStatus: string;
   planYear: number | null;
   createdAt: string;
+  /** Minor units, as stored by Stripe. */
+  lifetimePaid: number;
+  subscription: CompanySubscription | null;
 }
 
 function formatCurrency(amount: number, currency: string = "USD"): string {
@@ -53,6 +95,69 @@ function getPlanStatusClasses(status: string): string {
   }
 }
 
+/** Minor units to a display string. Stripe stores cents. */
+function money(minor: number | null | undefined, currency = "usd"): string {
+  const v = typeof minor === "number" && Number.isFinite(minor) ? minor / 100 : 0;
+  return `${currency.toUpperCase() === "USD" ? "$" : ""}${v.toFixed(2)}`;
+}
+
+function shortDate(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isFinite(d.getTime())
+    ? d.toLocaleDateString("en-US", { dateStyle: "medium" })
+    : "—";
+}
+
+/** One labelled fact in the expanded detail panel. */
+function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
+        {label}
+      </p>
+      <p className="mt-0.5 break-words text-sm text-[hsl(var(--foreground))]">{children}</p>
+    </div>
+  );
+}
+
+/**
+ * Subscription state, coloured by whether the customer can actually use the
+ * product — not by the raw Stripe string. Red means locked out, amber means
+ * about to be, green means fine.
+ */
+function SubscriptionPill({ sub }: { sub: CompanySubscription | null }) {
+  if (!sub) {
+    return (
+      <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+        No subscription
+      </span>
+    );
+  }
+
+  // Paused is checked FIRST because it outranks everything else: a paused
+  // comped account is paused, and labelling it "Comped" would be a lie.
+  const label = sub.isPaused
+    ? "Paused"
+    : sub.isComped
+      ? "Comped"
+      : sub.access.reason === "billing_disabled"
+        ? "Billing off"
+        : (sub.stripeStatus ?? sub.status);
+
+  const tone = !sub.access.allowed
+    ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
+    : sub.access.warn
+      ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+      : "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300";
+
+  return (
+    <span className={cn("inline-flex rounded-full px-2 py-0.5 text-xs font-medium", tone)}>
+      {label}
+    </span>
+  );
+}
+
 /** Rows per page. Server-enforced too: the endpoint caps limit at 100. */
 const PAGE_SIZE = 20;
 
@@ -72,6 +177,147 @@ export function CompanyManagement() {
   const [addForm, setAddForm] = useState({ companyName: "", ownerEmail: "", ownerFirstName: "", ownerLastName: "" });
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  /**
+   * Which row's detail panel is open.
+   *
+   * One at a time, not a set: with several expanded the table becomes a long
+   * scroll of panels and the point of a compact list is lost. Opening another
+   * closes the first.
+   */
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  /* ---- Access grants, moved here from Subscriptions ---- */
+
+  /** Plan catalogue, for choosing which plan a comp grants. */
+  const [plans, setPlans] = useState<{ id: string; name: string }[]>([]);
+  const [compTarget, setCompTarget] = useState<AdminCompany | null>(null);
+  const [compPlanId, setCompPlanId] = useState("");
+  const [compUntil, setCompUntil] = useState("");
+  const [compReason, setCompReason] = useState("");
+  const [accessBusy, setAccessBusy] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
+
+  /**
+   * Grant or revoke complimentary access.
+   *
+   * Posts to /api/admin/subscribers, which is unchanged — it already refuses to
+   * comp an account with a live paid subscription, and that refusal is the
+   * authority here. Moving the BUTTON does not move the rule.
+   */
+  async function runAccessAction(payload: Record<string, unknown>) {
+    setAccessBusy(true);
+    setAccessError(null);
+    try {
+      const res = await fetch("/api/admin/subscribers", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAccessError(body?.message || body?.error || "That did not work.");
+        return false;
+      }
+      // Reload the current page so the pill and actions reflect the change
+      // without losing the admin's search or position.
+      await loadCompanies(search, page);
+      return true;
+    } catch {
+      setAccessError("Could not reach the server.");
+      return false;
+    } finally {
+      setAccessBusy(false);
+    }
+  }
+
+  const grantAccess = async () => {
+    if (!compTarget || !compPlanId) return;
+    const ok = await runAccessAction({
+      action: "comp",
+      companyId: compTarget.id,
+      planId: compPlanId,
+      until: compUntil || null,
+      reason: compReason || undefined,
+    });
+    if (ok) {
+      setCompTarget(null);
+      setCompUntil("");
+      setCompReason("");
+    }
+  };
+
+  const revokeAccess = (company: AdminCompany) =>
+    runAccessAction({ action: "uncomp", companyId: company.id });
+
+  /* ---- Pause billing ---- */
+
+  const [pauseTarget, setPauseTarget] = useState<AdminCompany | null>(null);
+  const [pauseReason, setPauseReason] = useState("");
+  const [pauseResumesAt, setPauseResumesAt] = useState("");
+  /** Set when Stripe could not be updated, so the admin is told billing may still run. */
+  const [pauseWarning, setPauseWarning] = useState<string | null>(null);
+
+  /**
+   * Pause or resume. Separate endpoint from comping because it does something
+   * different: it tells Stripe to stop collecting and locks the customer out,
+   * rather than granting a plan.
+   */
+  async function runPauseAction(payload: Record<string, unknown>) {
+    setAccessBusy(true);
+    setAccessError(null);
+    setPauseWarning(null);
+    try {
+      const res = await fetch("/api/admin/subscribers/pause", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAccessError(body?.message || body?.error || "That did not work.");
+        return false;
+      }
+      /**
+       * The local flag always lands, so access is gated either way — but if
+       * Stripe was not reached, invoicing has NOT stopped. Say so rather than
+       * letting the admin assume billing is paused when it is still running.
+       */
+      if (body?.hasStripeSubscription && !body?.stripeSynced) {
+        setPauseWarning(
+          "Access is blocked, but Stripe could not be updated — invoices may still be issued. " +
+            "Check the subscription in Stripe."
+        );
+      }
+      await loadCompanies(search, page);
+      return true;
+    } catch {
+      setAccessError("Could not reach the server.");
+      return false;
+    } finally {
+      setAccessBusy(false);
+    }
+  }
+
+  const pauseBilling = async () => {
+    if (!pauseTarget) return;
+    const ok = await runPauseAction({
+      action: "pause",
+      companyId: pauseTarget.id,
+      reason: pauseReason || undefined,
+      resumesAt: pauseResumesAt || null,
+    });
+    if (ok) {
+      setPauseTarget(null);
+      setPauseReason("");
+      setPauseResumesAt("");
+    }
+  };
+
+  const resumeBilling = (company: AdminCompany) =>
+    runPauseAction({ action: "resume", companyId: company.id });
 
   async function handleDeleteCompany(id: string) {
     setDeletingId(id);
@@ -146,6 +392,7 @@ export function CompanyManagement() {
 
       setCompanies(data.companies || []);
       setTotal(data.total || 0);
+      setPlans(data.plans || []);
     } catch (err: any) {
       setError(err?.message || "Network error");
       console.error("[CompanyManagement] Fetch error:", err);
@@ -245,100 +492,331 @@ export function CompanyManagement() {
         </div>
       ) : (
         <div className="overflow-hidden rounded-[var(--radius-lg)] border border-border bg-card">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-border bg-[hsl(var(--background-muted))]">
-                  <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">Company</th>
-                  <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">Owner</th>
-                  <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">Members</th>
-                  <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">Target Revenue</th>
-                  <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">Plan Status</th>
-                  <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">Joined</th>
-                  <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {companies.map((company) => (
-                  <tr key={company.id} className="hover:bg-[hsl(var(--background))] transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/30">
-                          <Building2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                        </div>
-                        <div>
-                          <span className="font-medium text-[hsl(var(--foreground))]">{company.name}</span>
-                          {company.description && (
-                            <p className="text-xs text-[hsl(var(--foreground-muted))] truncate max-w-[200px]">{company.description}</p>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div>
-                        <p className="text-[hsl(var(--foreground))]">{company.ownerName || "—"}</p>
-                        <p className="text-xs text-[hsl(var(--foreground-muted))]">{company.ownerEmail || ""}</p>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center gap-1 text-[hsl(var(--foreground))]">
-                        <Users className="h-3.5 w-3.5" />
-                        {company.memberCount}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-[hsl(var(--foreground))]">
-                      {company.targetRevenue > 0 ? formatCurrency(company.targetRevenue, company.currency) : "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize", getPlanStatusClasses(company.planStatus))}>
-                        {company.planStatus}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-[hsl(var(--foreground-muted))]">
-                      {new Date(company.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => router.push(`/admin/companies/${company.id}`)}
-                          className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-[hsl(var(--foreground))] hover:bg-[hsl(var(--background))] transition-colors"
-                          title="View details"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                          View
-                        </button>
-                        {deleteConfirmId === company.id ? (
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => handleDeleteCompany(company.id)}
-                              disabled={deletingId === company.id}
-                              className="rounded-md bg-red-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
-                            >
-                              {deletingId === company.id ? "Deleting..." : "Confirm Delete"}
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirmId(null)}
-                              className="rounded-md border border-border px-2 py-1.5 text-xs font-medium text-[hsl(var(--foreground-muted))]"
-                            >
-                              Cancel
-                            </button>
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-border bg-[hsl(var(--background-muted))]">
+                <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">
+                  Company
+                </th>
+                <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">
+                  Owner
+                </th>
+                <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">
+                  Subscription
+                </th>
+                <th className="px-4 py-3 font-medium text-[hsl(var(--foreground-muted))]">
+                  State
+                </th>
+                {/* Accordion toggle. No header text — the control labels itself. */}
+                <th className="w-10 px-2 py-3" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {companies.map((company) => {
+                const open = expandedId === company.id;
+                const sub = company.subscription;
+
+                return (
+                  <Fragment key={company.id}>
+                    <tr
+                      className={cn(
+                        "transition-colors",
+                        open
+                          ? "bg-[hsl(var(--background-muted))]"
+                          : "hover:bg-[hsl(var(--background))]"
+                      )}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/30">
+                            <Building2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                           </div>
+                          <div className="min-w-0">
+                            <span className="font-medium text-[hsl(var(--foreground))]">
+                              {company.name}
+                            </span>
+                            <p className="text-xs text-[hsl(var(--foreground-muted))]">
+                              <span className="inline-flex items-center gap-1">
+                                <Users className="h-3 w-3" />
+                                {company.memberCount}
+                              </span>
+                              {" · joined "}
+                              {new Date(company.createdAt).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              })}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <p className="text-[hsl(var(--foreground))]">
+                          {company.ownerName || "—"}
+                        </p>
+                        <p className="truncate text-xs text-[hsl(var(--foreground-muted))]">
+                          {company.ownerEmail || ""}
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {sub ? (
+                          <>
+                            <span className="text-[hsl(var(--foreground))]">
+                              {sub.planName}
+                            </span>
+                            <p className="text-xs text-[hsl(var(--foreground-muted))]">
+                              {sub.billingCycle}
+                              {company.lifetimePaid > 0 && ` · ${money(company.lifetimePaid)} paid`}
+                            </p>
+                          </>
                         ) : (
-                          <button
-                            onClick={() => setDeleteConfirmId(company.id)}
-                            className="inline-flex items-center gap-1 rounded-md border border-red-300 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20 transition-colors"
-                            title="Delete company permanently"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          <span className="text-[hsl(var(--foreground-muted))]">—</span>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <SubscriptionPill sub={sub} />
+                        {sub?.cancelAtPeriodEnd && (
+                          <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
+                            Cancelling
+                          </p>
+                        )}
+                        {sub?.pendingPlanName && (
+                          <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
+                            → {sub.pendingPlanName}
+                          </p>
+                        )}
+                      </td>
+
+                      {/*
+                        One toggle per row rather than a row-wide click target:
+                        the row contains its own links and buttons, and making
+                        the whole thing clickable would fight them.
+                      */}
+                      <td className="px-2 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedId(open ? null : company.id)}
+                          aria-expanded={open}
+                          aria-controls={`company-detail-${company.id}`}
+                          aria-label={`${open ? "Hide" : "Show"} details for ${company.name}`}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-[hsl(var(--foreground-muted))] transition-colors hover:bg-[hsl(var(--background))] hover:text-[hsl(var(--foreground))]"
+                        >
+                          <ChevronDown
+                            className={cn(
+                              "h-4 w-4 transition-transform",
+                              open && "rotate-180"
+                            )}
+                          />
+                        </button>
+                      </td>
+                    </tr>
+
+                    {/*
+                      The detail row. Everything that used to be its own column
+                      lives here: eleven columns never fit, so the table showed
+                      four of them crushed and the rest cut off.
+                    */}
+                    {open && (
+                      <tr id={`company-detail-${company.id}`}>
+                        <td
+                          colSpan={5}
+                          className="border-t border-border bg-[hsl(var(--background-muted))] px-4 py-4"
+                        >
+                          <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+                            <Detail label="Renews / ends">
+                              {!sub
+                                ? "—"
+                                : sub.isComped
+                                  ? sub.compedUntil
+                                    ? `Comp ends ${shortDate(sub.compedUntil)}`
+                                    : "No expiry"
+                                  : sub.cancelAtPeriodEnd
+                                    ? `Ends ${shortDate(sub.currentPeriodEnd)}`
+                                    : shortDate(sub.currentPeriodEnd)}
+                            </Detail>
+
+                            <Detail label="Lifetime paid">
+                              {money(company.lifetimePaid)}
+                            </Detail>
+
+                            <Detail label="Target revenue">
+                              {company.targetRevenue > 0
+                                ? formatCurrency(company.targetRevenue, company.currency)
+                                : "—"}
+                            </Detail>
+
+                            <Detail label="Plan status">
+                              <span
+                                className={cn(
+                                  "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize",
+                                  getPlanStatusClasses(company.planStatus)
+                                )}
+                              >
+                                {company.planStatus}
+                                {company.planYear ? ` · ${company.planYear}` : ""}
+                              </span>
+                            </Detail>
+
+                            <Detail label="Baseline / stretch">
+                              {company.baselineRevenue > 0 || company.stretchRevenue > 0
+                                ? `${formatCurrency(company.baselineRevenue, company.currency)} / ${formatCurrency(company.stretchRevenue, company.currency)}`
+                                : "—"}
+                            </Detail>
+
+                            <Detail label="Members">{company.memberCount}</Detail>
+
+                            {sub?.stripeMode && (
+                              <Detail label="Stripe mode">{sub.stripeMode}</Detail>
+                            )}
+
+                            {sub?.compedReason && (
+                              <Detail label="Comp reason">{sub.compedReason}</Detail>
+                            )}
+
+                            {sub?.isPaused && (
+                              <>
+                                <Detail label="Paused since">
+                                  {shortDate(sub.pausedAt)}
+                                </Detail>
+                                <Detail label="Auto-resumes">
+                                  {sub.pauseResumesAt
+                                    ? shortDate(sub.pauseResumesAt)
+                                    : "Not set — resume manually"}
+                                </Detail>
+                                {sub.pauseReason && (
+                                  <Detail label="Pause reason">{sub.pauseReason}</Detail>
+                                )}
+                              </>
+                            )}
+
+                            {company.description && (
+                              <div className="sm:col-span-2 lg:col-span-4">
+                                <Detail label="Description">{company.description}</Detail>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Actions, grouped at the end of the detail panel. */}
+                          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
+                            <button
+                              onClick={() => router.push(`/admin/companies/${company.id}`)}
+                              className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-[hsl(var(--foreground))] transition-colors hover:bg-[hsl(var(--background))]"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              View details
+                            </button>
+
+                            {/*
+                              Grant is offered ONLY to accounts that are not
+                              paying. Comping a live subscriber would hand them
+                              a free plan while Stripe keeps charging their
+                              card, and would corrupt the flag that answers
+                              "who is not paying". The server refuses it too.
+                            */}
+                            {/*
+                              Pause / resume, offered for any account with a
+                              subscription — including comped ones and trials,
+                              which have no Stripe subscription but must still
+                              be lockable.
+                            */}
+                            {sub && (
+                              sub.isPaused ? (
+                                <button
+                                  onClick={() => resumeBilling(company)}
+                                  disabled={accessBusy}
+                                  className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-[hsl(var(--primary))] transition-colors hover:bg-[hsl(var(--background))] disabled:opacity-40"
+                                >
+                                  <PlayCircle className="h-3.5 w-3.5" />
+                                  Resume billing
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setPauseTarget(company);
+                                    setPauseReason("");
+                                    setPauseResumesAt("");
+                                    setAccessError(null);
+                                    setPauseWarning(null);
+                                  }}
+                                  disabled={accessBusy}
+                                  className="inline-flex items-center gap-1 rounded-md border border-amber-300 px-2.5 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-40 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/20"
+                                >
+                                  <PauseCircle className="h-3.5 w-3.5" />
+                                  Pause billing
+                                </button>
+                              )
+                            )}
+
+                            {sub?.isComped ? (
+                              <button
+                                onClick={() => revokeAccess(company)}
+                                disabled={accessBusy}
+                                className="rounded-md border border-red-300 px-2.5 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-800 dark:hover:bg-red-900/20"
+                              >
+                                Revoke access
+                              </button>
+                            ) : sub?.isPaying ? (
+                              <span className="text-xs text-[hsl(var(--foreground-muted))]">
+                                Paying customer — cancel in Stripe before granting a comp
+                              </span>
+                            ) : sub ? (
+                              <button
+                                onClick={() => {
+                                  setCompTarget(company);
+                                  setCompPlanId(sub.planId ?? plans[0]?.id ?? "");
+                                  setAccessError(null);
+                                }}
+                                disabled={accessBusy}
+                                className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-[hsl(var(--primary))] transition-colors hover:bg-[hsl(var(--background))] disabled:opacity-40"
+                              >
+                                <Gift className="h-3.5 w-3.5" />
+                                Grant access
+                              </button>
+                            ) : null}
+
+                            {/* Delete sits last and apart, being irreversible. */}
+                            <div className="ml-auto">
+                              {deleteConfirmId === company.id ? (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => handleDeleteCompany(company.id)}
+                                    disabled={deletingId === company.id}
+                                    className="rounded-md bg-red-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                                  >
+                                    {deletingId === company.id
+                                      ? "Deleting..."
+                                      : "Confirm delete"}
+                                  </button>
+                                  <button
+                                    onClick={() => setDeleteConfirmId(null)}
+                                    className="rounded-md border border-border px-2 py-1.5 text-xs font-medium text-[hsl(var(--foreground-muted))]"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setDeleteConfirmId(company.id)}
+                                  className="inline-flex items-center gap-1 rounded-md border border-red-300 px-2.5 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  Delete company
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+
 
           {/*
             Server-side pager. Shown only when there is more than one page, so a
@@ -377,6 +855,191 @@ export function CompanyManagement() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Grant access dialog, moved from the Subscriptions page. */}
+      {compTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div
+            role="dialog"
+            aria-label="Grant access"
+            className="w-full max-w-md rounded-[var(--radius-lg)] border border-border bg-card p-6"
+          >
+            <h3 className="text-base font-semibold">
+              Grant free access — {compTarget.name || "this account"}
+            </h3>
+            <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">
+              Full use of the chosen plan with no payment. Plan limits still apply, and
+              Stripe is not involved at all.
+            </p>
+
+            <div className="mt-4 space-y-3">
+              <div>
+                <label htmlFor="comp-plan" className="block text-xs font-medium">
+                  Plan
+                </label>
+                <select
+                  id="comp-plan"
+                  value={compPlanId}
+                  onChange={(e) => setCompPlanId(e.target.value)}
+                  className="mt-1 w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm"
+                >
+                  {plans.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="comp-until" className="block text-xs font-medium">
+                  Until (blank = no expiry)
+                </label>
+                {/*
+                  MM/DD/YYYY regardless of the admin's OS locale. A native date
+                  input renders in the browser's locale, so this read
+                  `dd-mm-yyyy` while every date the app prints is month-first —
+                  ambiguous on a value that controls when free access ends.
+                */}
+                <DateInput
+                  id="comp-until"
+                  value={compUntil}
+                  onValueChange={setCompUntil}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <label htmlFor="comp-reason" className="block text-xs font-medium">
+                  Reason
+                </label>
+                <input
+                  id="comp-reason"
+                  type="text"
+                  value={compReason}
+                  placeholder="Partner account, beta tester, etc."
+                  onChange={(e) => setCompReason(e.target.value)}
+                  className="mt-1 w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            {accessError && (
+              <p role="alert" className="mt-3 text-xs text-[hsl(var(--destructive))]">
+                {accessError}
+              </p>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setCompTarget(null)}
+                className="rounded-[var(--radius-md)] border border-border px-3 py-2 text-sm hover:bg-[hsl(var(--background-muted))]"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={accessBusy || !compPlanId}
+                onClick={grantAccess}
+                className="rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+              >
+                Grant access
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pause dialog */}
+      {pauseTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div
+            role="dialog"
+            aria-label="Pause billing"
+            className="w-full max-w-md rounded-[var(--radius-lg)] border border-border bg-card p-6"
+          >
+            <h3 className="text-base font-semibold">
+              Pause billing — {pauseTarget.name || "this account"}
+            </h3>
+            <p className="mt-2 text-xs text-[hsl(var(--foreground-muted))]">
+              Invoicing stops and the customer is locked out of every page until
+              you resume. The subscription is NOT cancelled and nothing is
+              deleted — resuming restores access exactly as it was.
+            </p>
+            <p className="mt-2 text-xs text-[hsl(var(--foreground-muted))]">
+              They will see a page saying their plan is paused, with the contact
+              email from AI Tools. Your reason below is for your records and is
+              never shown to them.
+            </p>
+
+            <div className="mt-4 space-y-3">
+              <div>
+                <label htmlFor="pause-resumes" className="block text-xs font-medium">
+                  Resume automatically on (blank = until you resume it)
+                </label>
+                <DateInput
+                  id="pause-resumes"
+                  value={pauseResumesAt}
+                  onValueChange={setPauseResumesAt}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <label htmlFor="pause-reason" className="block text-xs font-medium">
+                  Reason (internal)
+                </label>
+                <input
+                  id="pause-reason"
+                  type="text"
+                  value={pauseReason}
+                  placeholder="Non-payment, contract on hold, etc."
+                  onChange={(e) => setPauseReason(e.target.value)}
+                  className="mt-1 w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            {accessError && (
+              <p role="alert" className="mt-3 text-xs text-[hsl(var(--destructive))]">
+                {accessError}
+              </p>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setPauseTarget(null)}
+                className="rounded-[var(--radius-md)] border border-border px-3 py-2 text-sm hover:bg-[hsl(var(--background-muted))]"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={accessBusy}
+                onClick={pauseBilling}
+                className="rounded-[var(--radius-md)] bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-40"
+              >
+                Pause billing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/*
+        Stripe did not sync. Access IS blocked, but invoices may still be
+        issued, which the admin needs to know rather than assume.
+      */}
+      {pauseWarning && (
+        <p
+          role="alert"
+          className="rounded-[var(--radius-md)] border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        >
+          {pauseWarning}
+        </p>
+      )}
+
+      {/* A revoke or resume failure has no dialog of its own, so surface it here. */}
+      {accessError && !compTarget && !pauseTarget && (
+        <p role="alert" className="text-sm text-[hsl(var(--destructive))]">
+          {accessError}
+        </p>
       )}
     </div>
   );

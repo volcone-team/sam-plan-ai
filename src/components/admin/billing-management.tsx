@@ -1,18 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   CreditCard,
   RefreshCw,
   TriangleAlert,
   CheckCircle2,
-  Gift,
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LoadingPanel } from "@/components/ui/spinner";
-import { DateInput } from "@/components/ui/date-input";
-import { ServerDataTable, type ServerColumn } from "@/components/ui/server-data-table";
 
 /**
  * Real Stripe billing administration. SUPER-ADMIN ONLY.
@@ -173,129 +171,6 @@ function StatusPill({ sub }: { sub: Subscriber }) {
   );
 }
 
-/**
- * Column definitions for the Accounts table.
- *
- * Outside the component so the array identity is stable — DataTable memoises
- * filtering on `columns`, and a fresh array each render would recompute the
- * filter on every keystroke.
- */
-function subscriberColumns(ctx: {
-  busy: boolean;
-  plans: Plan[];
-  onComp: (sub: Subscriber) => void;
-  onUncomp: (sub: Subscriber) => void;
-}): ServerColumn<Subscriber>[] {
-  return [
-    {
-      key: "company",
-      header: "Company",
-      render: (sub) => (
-        <>
-          {sub.companyName ?? (
-            <span className="text-[hsl(var(--foreground-muted))]">Unnamed</span>
-          )}
-          {sub.compedReason && (
-            <p className="text-xs text-[hsl(var(--foreground-muted))]">{sub.compedReason}</p>
-          )}
-        </>
-      ),
-    },
-    {
-      key: "plan",
-      header: "Plan",
-      render: (sub) => (
-        <>
-          {sub.planName}
-          <span className="text-xs text-[hsl(var(--foreground-muted))]"> / {sub.billingCycle}</span>
-          {sub.pendingPlanName && (
-            <p className="text-xs text-amber-700 dark:text-amber-400">
-              → {sub.pendingPlanName} at period end
-            </p>
-          )}
-        </>
-      ),
-    },
-    {
-      key: "state",
-      header: "State",
-      render: (sub) => (
-        <>
-          <StatusPill sub={sub} />
-          {sub.cancelAtPeriodEnd && (
-            <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">Cancelling</p>
-          )}
-        </>
-      ),
-    },
-    {
-      key: "renews",
-      // Header reflects that the date may be an ending rather than a renewal.
-      header: "Renews / ends",
-      className: "text-xs",
-      render: (sub) => {
-        if (sub.isComped) {
-          return sub.compedUntil ? `Comp ends ${shortDate(sub.compedUntil)}` : "No expiry";
-        }
-        // A cancelling subscription ENDS on this date; calling it a renewal was
-        // the most misleading thing this table said.
-        if (sub.cancelAtPeriodEnd) {
-          return (
-            <span className="text-amber-700 dark:text-amber-400">
-              Ends {shortDate(sub.currentPeriodEnd)}
-            </span>
-          );
-        }
-        return shortDate(sub.currentPeriodEnd);
-      },
-    },
-    {
-      key: "paid",
-      header: "Paid",
-      render: (sub) => money(sub.lifetimePaid),
-    },
-    {
-      key: "actions",
-      header: "",
-      className: "text-right",
-      render: (sub) => {
-        // Grant access is offered ONLY to accounts that are not paying. Comping a
-        // paying customer would hand them a free plan while their card is still
-        // charged, and would corrupt the flag that answers "who is not paying".
-        if (sub.isComped) {
-          return (
-            <button
-              disabled={ctx.busy}
-              onClick={() => ctx.onUncomp(sub)}
-              className="text-xs font-medium text-[hsl(var(--destructive))] hover:underline disabled:opacity-40"
-            >
-              Remove comp
-            </button>
-          );
-        }
-        if (
-          sub.hasStripeSubscription &&
-          ["active", "trialing", "past_due"].includes(sub.stripeStatus ?? "")
-        ) {
-          return (
-            <span className="text-xs text-[hsl(var(--foreground-muted))]">Paying customer</span>
-          );
-        }
-        return (
-          <button
-            disabled={ctx.busy}
-            onClick={() => ctx.onComp(sub)}
-            className="inline-flex items-center gap-1 text-xs font-medium text-[hsl(var(--primary))] hover:underline disabled:opacity-40"
-          >
-            <Gift className="h-3.5 w-3.5" />
-            Grant access
-          </button>
-        );
-      },
-    },
-  ];
-}
-
 export function BillingManagement() {
   const [billing, setBilling] = useState<BillingResponse | null>(null);
   const [data, setData] = useState<SubscribersResponse | null>(null);
@@ -306,41 +181,6 @@ export function BillingManagement() {
 
   const [trialDaysDraft, setTrialDaysDraft] = useState("");
   const [graceDraft, setGraceDraft] = useState("");
-  // Bumped after a mutation so the table reloads its CURRENT page, preserving the
-  // admin's search term and position rather than resetting them.
-  const [reloadToken, setReloadToken] = useState(0);
-  const [compTarget, setCompTarget] = useState<Subscriber | null>(null);
-  const [compPlanId, setCompPlanId] = useState("");
-  const [compUntil, setCompUntil] = useState("");
-  const [compReason, setCompReason] = useState("");
-
-  /**
-   * One page of accounts, straight from the server.
-   *
-   * Stable identity via useCallback with no changing deps: ServerDataTable calls
-   * this inside an effect keyed on the function, so a new reference each render
-   * would re-fetch in a loop.
-   */
-  const fetchSubscriberPage = useCallback(
-    async ({ search, limit, offset }: { search: string; limit: number; offset: number }) => {
-      const params = new URLSearchParams({
-        limit: String(limit),
-        offset: String(offset),
-      });
-      if (search) params.set("search", search);
-
-      const res = await fetch(`/api/admin/subscribers?${params}`, {
-        credentials: "same-origin",
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body?.error || "Could not load accounts");
-      }
-      const body = (await res.json()) as SubscribersResponse;
-      return { rows: body.subscribers, total: body.total ?? body.subscribers.length };
-    },
-    []
-  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -486,61 +326,6 @@ export function BillingManagement() {
       await load();
     } catch {
       setError("Could not reach the server.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const comp = async () => {
-    if (!compTarget || !compPlanId) return;
-    setBusy(true);
-    try {
-      const res = await fetch("/api/admin/subscribers", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "comp",
-          companyId: compTarget.companyId,
-          planId: compPlanId,
-          until: compUntil || null,
-          reason: compReason || null,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setError(`Could not comp: ${body?.error ?? "unknown"}`);
-        return;
-      }
-      setCompTarget(null);
-      setCompUntil("");
-      setCompReason("");
-      // Refresh totals, and nudge the table to reload its current page.
-      await load();
-      setReloadToken((n) => n + 1);
-      flash("Access granted.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const uncomp = async (s: Subscriber) => {
-    setBusy(true);
-    try {
-      const res = await fetch("/api/admin/subscribers", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "uncomp", companyId: s.companyId }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setError(`Could not remove comp: ${body?.error ?? "unknown"}`);
-        return;
-      }
-      await load();
-      setReloadToken((n) => n + 1);
-      flash("Comp removed.");
     } finally {
       setBusy(false);
     }
@@ -867,32 +652,32 @@ export function BillingManagement() {
         </section>
       )}
 
-      {/* Subscribers */}
+      {/*
+        The Accounts table used to sit here. It listed the same companies as
+        Company Management with a different subset of their data, so answering
+        "what is going on with this account" meant opening both pages. It now
+        lives on Company Management as one merged table, together with the
+        grant and revoke controls.
+
+        This page keeps what is genuinely billing-wide: Stripe configuration,
+        plan sync, the headline totals, and payment history.
+      */}
       {data && (
-        <section aria-label="Subscribers" className="space-y-3">
+        <section
+          aria-label="Accounts"
+          className="rounded-[var(--radius-lg)] border border-border bg-card p-5"
+        >
           <h2 className="text-lg font-semibold">Accounts</h2>
-          {/*
-            Server-paged: search and paging happen in the query, so the response
-            stays the size of one page however many accounts exist.
-            `reloadToken` is bumped after comp/uncomp so the visible page
-            refreshes without resetting the admin's search or position.
-          */}
-          <ServerDataTable
-            fetchPage={fetchSubscriberPage}
-            rowKey={(sub) => sub.subscriptionId}
-            searchPlaceholder="Search accounts by company name..."
-            emptyMessage="No accounts yet."
-            reloadToken={reloadToken}
-            columns={subscriberColumns({
-              busy,
-              plans: billing?.plans ?? [],
-              onComp: (sub) => {
-                setCompTarget(sub);
-                setCompPlanId(sub.planId ?? billing?.plans[0]?.id ?? "");
-              },
-              onUncomp: uncomp,
-            })}
-          />
+          <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">
+            Per-account subscriptions, access grants and plan changes now live on{" "}
+            <Link
+              href="/admin/companies"
+              className="font-medium text-[hsl(var(--primary))] hover:underline"
+            >
+              Company Management
+            </Link>
+            , alongside the rest of each company&apos;s data.
+          </p>
         </section>
       )}
 
@@ -962,80 +747,6 @@ export function BillingManagement() {
         </section>
       )}
 
-      {/* Comp dialog */}
-      {compTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div role="dialog" aria-label="Grant access" className="w-full max-w-md rounded-[var(--radius-lg)] border border-border bg-card p-6">
-            <h3 className="text-base font-semibold">
-              Grant free access — {compTarget.companyName ?? "this account"}
-            </h3>
-            <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">
-              Full use of the chosen plan with no payment. Plan limits still apply, and
-              Stripe is not involved at all.
-            </p>
-
-            <div className="mt-4 space-y-3">
-              <div>
-                <label htmlFor="comp-plan" className="block text-xs font-medium">Plan</label>
-                <select
-                  id="comp-plan"
-                  value={compPlanId}
-                  onChange={(e) => setCompPlanId(e.target.value)}
-                  className="mt-1 w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm"
-                >
-                  {(billing?.plans ?? []).map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="comp-until" className="block text-xs font-medium">
-                  Until (blank = no expiry)
-                </label>
-                {/*
-                  MM/DD/YYYY regardless of the admin's OS locale. A native date
-                  input renders in the browser's locale, so this read
-                  `dd-mm-yyyy` while every date the app prints is month-first —
-                  ambiguous on a value that controls when free access ends.
-                */}
-                <DateInput
-                  id="comp-until"
-                  value={compUntil}
-                  onValueChange={setCompUntil}
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <label htmlFor="comp-reason" className="block text-xs font-medium">Reason</label>
-                <input
-                  id="comp-reason"
-                  type="text"
-                  value={compReason}
-                  placeholder="Partner account, beta tester, etc."
-                  onChange={(e) => setCompReason(e.target.value)}
-                  className="mt-1 w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                onClick={() => setCompTarget(null)}
-                className="rounded-[var(--radius-md)] border border-border px-3 py-2 text-sm hover:bg-[hsl(var(--background-muted))]"
-              >
-                Cancel
-              </button>
-              <button
-                disabled={busy || !compPlanId}
-                onClick={comp}
-                className="rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
-              >
-                Grant access
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

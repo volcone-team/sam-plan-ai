@@ -2,12 +2,24 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { loadBillingConfig } from "@/lib/billing/stripe-client";
+import { evaluateAccess } from "@/lib/billing/entitlement";
 
 /**
  * GET /api/admin/companies
  *
- * Returns all companies with owner info, member count, and plan status.
+ * Every company with its owner, member count, plan status AND SUBSCRIPTION.
  * Admin-only: requires is_admin = true on the requesting user's profile.
+ *
+ * The subscription half used to live on a separate Accounts table under
+ * Subscriptions, which listed the same companies again with a different subset
+ * of their data. Two tables of the same rows meant answering "what is going on
+ * with this account" needed both pages open. This endpoint is now the single
+ * source for the merged table.
+ *
+ * Access state is computed with `evaluateAccess` — the same function that gates
+ * features for customers — so the admin view cannot disagree with what the
+ * customer actually experiences.
  *
  * Query params:
  *   ?search=text  — filters by company name (case-insensitive)
@@ -96,6 +108,75 @@ export async function GET(request: Request) {
       .in("company_id", companyIds.length > 0 ? companyIds : ["__none__"])
       .order("year", { ascending: false });
 
+    /**
+     * 5b. Subscription, plan catalogue and lifetime payments.
+     *
+     * Batched by the ids on this page rather than one query per row, and loaded
+     * in parallel with the billing config that `evaluateAccess` needs.
+     */
+    const [config, subsRes, plansCatalogRes, paymentsRes] = await Promise.all([
+      loadBillingConfig(adminClient),
+      companyIds.length
+        ? adminClient
+            .from("subscriptions")
+            .select(
+              "id, company_id, plan_id, tier, status, stripe_status, billing_cycle, " +
+              "stripe_subscription_id, stripe_mode, current_period_end, " +
+              "cancel_at_period_end, pending_plan_id, is_comped, comped_until, " +
+              "comped_reason, trial_ends_at, past_due_since, " +
+              "is_paused, paused_at, pause_reason, pause_resumes_at"
+            )
+            .in("company_id", companyIds)
+        : Promise.resolve({ data: [] }),
+      adminClient
+        .from("subscription_plans")
+        .select("id, name, monthly_price, annual_price"),
+      // Lifetime paid per company. Unattributed invoices are excluded: they are
+      // not any company's spend.
+      companyIds.length
+        ? adminClient
+            .from("billing_invoices")
+            .select("company_id, amount_paid, status")
+            .in("company_id", companyIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    type SubRow = {
+      id: string; company_id: string; plan_id: string | null; tier: string;
+      status: string; stripe_status: string | null; billing_cycle: string;
+      stripe_subscription_id: string | null; stripe_mode: string | null;
+      current_period_end: string | null; cancel_at_period_end: boolean;
+      pending_plan_id: string | null; is_comped: boolean;
+      comped_until: string | null; comped_reason: string | null;
+      trial_ends_at: string | null; past_due_since: string | null;
+      is_paused: boolean | null; paused_at: string | null;
+      pause_reason: string | null; pause_resumes_at: string | null;
+    };
+
+    // Via `unknown`: supabase-js cannot infer a row shape from a concatenated
+    // select string and falls back to a union including an error type.
+    const subByCompany = new Map<string, SubRow>();
+    for (const row of ((subsRes.data ?? []) as unknown as SubRow[])) {
+      if (row.company_id) subByCompany.set(row.company_id, row);
+    }
+
+    const planById = new Map(
+      ((plansCatalogRes.data ?? []) as {
+        id: string; name: string; monthly_price: number; annual_price: number;
+      }[]).map((p) => [p.id, p])
+    );
+
+    const paidByCompany = new Map<string, number>();
+    for (const inv of ((paymentsRes.data ?? []) as {
+      company_id: string | null; amount_paid: number | null; status: string | null;
+    }[])) {
+      if (!inv.company_id || inv.status !== "paid") continue;
+      paidByCompany.set(
+        inv.company_id,
+        (paidByCompany.get(inv.company_id) ?? 0) + (inv.amount_paid ?? 0)
+      );
+    }
+
     // Group profiles and plans by company
     const profilesByCompany = new Map<string, typeof profiles>();
     for (const p of profiles || []) {
@@ -116,6 +197,85 @@ export async function GET(request: Request) {
       const members = profilesByCompany.get(company.id) || [];
       const owner = members.find((m) => m.role === "owner");
       const latestPlan = plansByCompany.get(company.id);
+      const sub = subByCompany.get(company.id) ?? null;
+      const subPlan = sub?.plan_id ? planById.get(sub.plan_id) ?? null : null;
+
+      /**
+       * A company with NO subscription row is reported as null rather than
+       * invented defaults. "No subscription" and "subscription on the free
+       * tier" are different states, and a default would hide accounts that
+       * never got one.
+       */
+      const subscription = sub
+        ? {
+            subscriptionId: sub.id,
+            planId: sub.plan_id,
+            planName: subPlan?.name ?? sub.tier,
+            billingCycle: sub.billing_cycle,
+            price: subPlan
+              ? sub.billing_cycle === "annual"
+                ? subPlan.annual_price
+                : subPlan.monthly_price
+              : null,
+            status: sub.status,
+            stripeStatus: sub.stripe_status,
+            stripeMode: sub.stripe_mode,
+            hasStripeSubscription: !!sub.stripe_subscription_id,
+            currentPeriodEnd: sub.current_period_end,
+            cancelAtPeriodEnd: sub.cancel_at_period_end,
+            pendingPlanName: sub.pending_plan_id
+              ? planById.get(sub.pending_plan_id)?.name ?? null
+              : null,
+            isComped: sub.is_comped,
+            compedUntil: sub.comped_until,
+            compedReason: sub.comped_reason,
+            trialEndsAt: sub.trial_ends_at,
+            pastDueSince: sub.past_due_since,
+            // The admin table DOES show the pause reason — it is the audience
+            // the note was written for.
+            isPaused: sub.is_paused ?? false,
+            pausedAt: sub.paused_at,
+            pauseReason: sub.pause_reason,
+            pauseResumesAt: sub.pause_resumes_at,
+            /**
+             * Is this account actually paying RIGHT NOW?
+             *
+             * A live Stripe subscription, not merely a plan_id — a trial
+             * mirrors the default plan onto that column, so plan_id alone
+             * reports trial users as paying customers.
+             */
+            isPaying:
+              !!sub.stripe_subscription_id &&
+              ["active", "trialing", "past_due"].includes(sub.stripe_status ?? ""),
+            access: (() => {
+              const access = evaluateAccess(
+                {
+                  stripeEnabled: config.stripeEnabled,
+                  trialEnabled: config.trialEnabled,
+                  trialDays: config.trialDays,
+                  dunningGraceDays: config.dunningGraceDays,
+                },
+                {
+                  status: (sub.stripe_status ?? sub.status) as never,
+                  isComped: sub.is_comped,
+                  compedUntil: sub.comped_until,
+                  trialEndsAt: sub.trial_ends_at,
+                  currentPeriodEnd: sub.current_period_end,
+                  pastDueSince: sub.past_due_since,
+                  cancelAtPeriodEnd: sub.cancel_at_period_end,
+                  isPaused: sub.is_paused ?? false,
+                  pauseResumesAt: sub.pause_resumes_at,
+                }
+              );
+              return {
+                allowed: access.allowed,
+                reason: access.reason,
+                warn: access.warn,
+                daysRemaining: access.daysRemaining,
+              };
+            })(),
+          }
+        : null;
 
       return {
         id: company.id,
@@ -135,6 +295,9 @@ export async function GET(request: Request) {
         ownerName: owner ? `${owner.first_name} ${owner.last_name}`.trim() : null,
         planStatus: latestPlan?.status || "none",
         planYear: latestPlan?.year || null,
+        // Minor units, as stored by Stripe.
+        lifetimePaid: paidByCompany.get(company.id) ?? 0,
+        subscription,
       };
     });
 
@@ -145,6 +308,10 @@ export async function GET(request: Request) {
       total: count || 0,
       limit,
       offset,
+      // The comp controls need the plan list to offer a choice, and whether
+      // Stripe is on at all changes what the subscription columns mean.
+      stripeEnabled: config.stripeEnabled,
+      plans: [...planById.values()].map((p) => ({ id: p.id, name: p.name })),
     });
   } catch (err: any) {
     console.error("[admin/companies] Error:", err?.message || err);
