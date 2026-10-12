@@ -7,6 +7,7 @@ import { Loader2, Eye, EyeOff } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { BrandLogo } from '@/components/brand-logo';
+import { ResendConfirmation } from '@/components/auth/resend-confirmation';
 
 function LoginForm() {
   const router = useRouter();
@@ -25,10 +26,21 @@ function LoginForm() {
       ? 'Authentication failed. Please try again.'
       : null
   );
+  /**
+   * Set when sign-in failed specifically because the address is unconfirmed.
+   *
+   * This is the ONLY branch that may reveal confirmation state, and it is safe
+   * because reaching it requires the correct password — the person already
+   * knows the account exists. It is tracked separately from `error` so the
+   * resend button appears only here and never on a wrong-password attempt,
+   * which would leak whether an address is registered.
+   */
+  const [needsConfirmation, setNeedsConfirmation] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setNeedsConfirmation(false);
     setLoading(true);
 
     try {
@@ -43,7 +55,16 @@ function LoginForm() {
         if (signInError.message.includes('Invalid login credentials')) {
           setError('Invalid email or password.');
         } else if (signInError.message.includes('Email not confirmed')) {
-          setError('Please confirm your email before signing in.');
+          /*
+           * The password was right but the address was never confirmed —
+           * usually an expired link. Previously this was a dead end: correct
+           * credentials, no way in, and no way to get a fresh link.
+           */
+          setNeedsConfirmation(true);
+          setError(
+            'Your email address has not been confirmed yet. If your link has ' +
+              'expired, send yourself a new one below.'
+          );
         } else {
           setError(signInError.message);
         }
@@ -85,6 +106,15 @@ function LoginForm() {
         {error && (
           <div className="rounded-[var(--radius-md)] border border-[hsl(var(--destructive)_/_0.3)] bg-[hsl(var(--destructive)_/_0.05)] px-4 py-3 text-sm text-[hsl(var(--destructive))]">
             {error}
+
+            {/*
+              Shown only for an unconfirmed address, which requires the right
+              password to reach — so it cannot be used to probe whether an
+              email is registered.
+            */}
+            {needsConfirmation && (
+              <ResendConfirmation email={email} className="mt-3" />
+            )}
           </div>
         )}
 

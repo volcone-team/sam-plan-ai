@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { BrandLogo } from '@/components/brand-logo';
+import { ResendConfirmation } from '@/components/auth/resend-confirmation';
 
 /**
  * /auth/confirmed — where signup confirmation emails land.
@@ -133,6 +134,21 @@ function ConfirmedContent() {
               in — if your account was already confirmed, you are good to go.
             </p>
           </div>
+
+          {/*
+            THE DEAD END THIS FIXES. A dead token identifies nobody, so the
+            address has to be asked for. Without this the only route out of an
+            expired link was an admin deleting the account: signing in fails
+            ("email not confirmed") and registering again fails too, because
+            Supabase will not accept a second signup for the same address.
+          */}
+          <div className="rounded-[var(--radius-lg)] border border-border bg-card p-4 text-left">
+            <p className="text-sm font-medium text-foreground">
+              Need a new link?
+            </p>
+            <ResendConfirmation className="mt-3" />
+          </div>
+
           <div className="space-y-3">
             <Link href="/auth/login" className="block">
               <Button className="w-full">Go to sign in</Button>

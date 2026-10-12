@@ -156,7 +156,13 @@ export function ChoosePlanClient({
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planId, billingCycle: cycle }),
+        /*
+         * returnTo: "welcome" — everyone on this screen is locked out, so this
+         * is always a first purchase (or a re-purchase), never a plan change.
+         * Omitting it fell back to the server default, /settings, which is
+         * meant for existing customers changing plan.
+         */
+        body: JSON.stringify({ planId, billingCycle: cycle, returnTo: "welcome" }),
       });
       const body = await res.json().catch(() => ({}));
 
@@ -290,7 +296,13 @@ export function ChoosePlanClient({
                   support and we will sort it out.
                 </p>
               ) : (
-                <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                /*
+                  Flex-wrap rather than grid: a grid places a partial row in
+                  its leftmost columns, so one or two plans sat left-aligned.
+                  Fixed-width cards in a centred wrapping row keep any count
+                  centred, including the last row of a larger set.
+                */
+                <div className="mt-8 flex flex-wrap justify-center gap-5">
                   {plans.map((plan) => {
                     const price =
                       cycle === "annual" ? plan.annualPrice : plan.monthlyPrice;
@@ -303,7 +315,7 @@ export function ChoosePlanClient({
                       <div
                         key={plan.id}
                         className={cn(
-                          "flex flex-col rounded-[var(--radius-lg)] border bg-card p-5",
+                          "flex w-full flex-col rounded-[var(--radius-lg)] border bg-card p-5 sm:w-[320px]",
                           plan.isDefault
                             ? "border-[hsl(var(--primary))] shadow-sm"
                             : "border-border"

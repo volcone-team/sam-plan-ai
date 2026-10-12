@@ -1,70 +1,82 @@
 "use client";
 
+import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowRight,
+  Award,
+  CalendarCheck,
   CalendarDays,
   Check,
-  ClipboardList,
-  PlayCircle,
+  ClipboardCheck,
+  Play,
+  Presentation,
   Users,
-  BadgeCheck,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { BrandLogo } from "@/components/brand-logo";
 
 /**
- * Founding-member welcome screen.
+ * Founding-member welcome screen, built to the "Welcome Page.png" mockup.
  *
- * COPY IS PLACEHOLDER and marked as such: the wording, the video and the
- * booking links are all to be replaced. Everything that will need swapping is
- * pulled into the constants below rather than buried in markup, so changing
- * the pitch later does not mean re-reading the layout.
+ * ALWAYS DARK, deliberately independent of the app theme: the design is a
+ * dark navy page with a blue glow, and following the user's light/dark
+ * preference would produce a page that matches neither the mockup nor itself.
  *
- * Shown to every new customer for now.
+ * Copy is the mockup's, verbatim. The bracketed values ([X] months, [day],
+ * [time]) are unfilled in the design too, so they live in constants below
+ * rather than being invented.
  */
 
-/** Perks. Replace wholesale when the real offer is settled. */
-const PERKS: { icon: typeof Users; title: string; body: string }[] = [
-  {
-    icon: CalendarDays,
-    title: "A 1:1 onboarding call with a co-founder",
-    body:
-      "We'll walk through your plan together and make sure the numbers reflect " +
-      "how your business actually works.",
-  },
-  {
-    icon: Users,
-    title: "Weekly group coaching",
-    body:
-      "Bring questions, hear what is working for other founders, and get " +
-      "direct feedback on your plan.",
-  },
-  {
-    icon: BadgeCheck,
-    title: "Founding-member pricing, locked",
-    body:
-      "Your rate stays as it is for as long as you keep your subscription, " +
-      "whatever we charge later.",
-  },
-];
-
-/**
- * Where the booking links point.
- *
- * Empty for now. An empty value renders explanatory text instead of a dead
- * link — a button that goes nowhere is worse than one that is honestly absent.
- */
-const BOOKING_URL = "";
+/** Everything still to be supplied. Empty values render honest fallbacks. */
 const VIDEO_URL = "";
+const BOOKING_URL = ""; // GHL calendar embed URL
 const SUPPORT_EMAIL = "support@samplan.ai";
+const COACHING_MONTHS = "[X]";
+const COACHING_DAY = "[day]";
+const COACHING_TIME = "[time]";
+
+/**
+ * Artwork from the design, served from /public/welcome. Every image falls back
+ * to a matching icon if its file is missing, so a missing asset degrades the
+ * look rather than showing a broken-image box.
+ */
+const ART = {
+  perkOnboarding: "/welcome/perk-onboarding.png",
+  perkCoaching: "/welcome/perk-coaching.png",
+  perkPricing: "/welcome/perk-pricing.png",
+  stepIntake: "/welcome/step-intake.png",
+  stepCoaching: "/welcome/step-coaching.png",
+} as const;
+
+const PERKS = [
+  {
+    art: ART.perkOnboarding,
+    icon: Presentation,
+    title: "A 1:1 onboarding call with a co-founder.",
+    body:
+      "You'll meet with Pete Vargas or Rachel Stivers, the co-founders of " +
+      "SAM Plan AI. Future members will onboard with our team.",
+  },
+  {
+    art: ART.perkCoaching,
+    icon: Users,
+    title: "Weekly group coaching led by the co-founders.",
+    body:
+      `For ${COACHING_MONTHS} months, Pete or Rachel will lead your coaching ` +
+      "calls personally. Future coaching will be led by our team.",
+  },
+  {
+    art: ART.perkPricing,
+    icon: Award,
+    title: "Our best pricing, ever.",
+    body:
+      "Your Founding Member rate is grandfathered in for as long as you're a " +
+      "member. It will never be this low again.",
+  },
+] as const;
 
 export function WelcomeClient({
-  firstName,
-  planName,
   intakeDone,
-  isTrial,
-  trialDaysRemaining,
 }: {
   firstName: string | null;
   planName: string | null;
@@ -72,230 +84,345 @@ export function WelcomeClient({
   isTrial: boolean;
   trialDaysRemaining: number | null;
 }) {
-  const greeting = firstName?.trim() ? `Welcome, ${firstName.trim()}!` : "Welcome!";
-
   return (
-    <div className="flex min-h-dvh flex-col bg-[hsl(var(--background-subtle))]">
-      <header className="border-b border-border bg-background">
-        <div className="mx-auto flex h-14 max-w-3xl items-center justify-center px-4 sm:px-6">
-          <BrandLogo width={120} height={40} />
+    <div className="relative min-h-dvh overflow-hidden bg-[#060b16] text-white">
+      {/* Blue spotlight behind the hero, as in the mockup. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-[900px] bg-[radial-gradient(ellipse_55%_60%_at_50%_0%,rgba(37,99,235,0.45),rgba(6,11,22,0)_70%)]"
+      />
+
+      <main className="relative mx-auto max-w-5xl px-5 pb-16 pt-10 sm:px-8">
+        {/* Logo */}
+        <div className="flex justify-center">
+          <Image
+            src="/logo-dark.png"
+            alt="SAM Plan AI"
+            width={130}
+            height={44}
+            priority
+          />
         </div>
-      </header>
 
-      <main className="flex-1 px-4 py-10 sm:px-6">
-        <div className="mx-auto max-w-3xl space-y-10">
-          {/* Hero */}
-          <section className="rounded-[var(--radius-lg)] border border-border bg-card p-6 text-center sm:p-10">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-              {greeting}
-            </h1>
-            <p className="mx-auto mt-3 max-w-xl text-sm text-[hsl(var(--foreground-muted))]">
-              You&apos;re one of the first people to use SAM Plan AI. You are a
-              few minutes away from having a real revenue operating system for
-              your business.
-            </p>
+        {/* Hero */}
+        <section className="mt-10 text-center">
+          <h1 className="text-3xl font-bold tracking-tight text-white/90 sm:text-5xl">
+            Welcome, Founding Member!
+          </h1>
+          <p className="mx-auto mt-6 max-w-2xl text-sm leading-relaxed text-white/80 sm:text-base">
+            You&apos;re one of the first people to get SAM Plan AI, and
+            you&apos;re just a few minutes away from having a consistent revenue
+            operating system in your business.
+          </p>
 
-            {/*
-              Plan or trial state, stated plainly. A trial user especially
-              needs to know this is time-boxed before they invest effort.
-            */}
-            {isTrial ? (
-              <p className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-                Free trial
-                {typeof trialDaysRemaining === "number"
-                  ? ` · ${trialDaysRemaining} day${trialDaysRemaining === 1 ? "" : "s"} left`
-                  : ""}
-              </p>
+          <div className="mx-auto mt-10 max-w-3xl overflow-hidden rounded-xl border border-white/10 bg-black/60 shadow-[0_0_80px_rgba(37,99,235,0.25)]">
+            {VIDEO_URL ? (
+              <div className="aspect-video">
+                <iframe
+                  src={VIDEO_URL}
+                  title="Welcome to SAM Plan AI"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture"
+                  allowFullScreen
+                  className="h-full w-full"
+                />
+              </div>
             ) : (
-              planName && (
-                <p className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--primary)_/_0.1)] px-3 py-1 text-xs font-medium text-[hsl(var(--primary))]">
-                  <Check className="h-3 w-3" />
-                  {planName} active
-                </p>
-              )
+              <div className="relative flex aspect-video items-center justify-center bg-[radial-gradient(ellipse_at_center,rgba(59,130,246,0.25),rgba(0,0,0,0.9)_70%)]">
+                <span className="flex h-20 w-20 items-center justify-center rounded-full border-2 border-white/80 sm:h-24 sm:w-24">
+                  <Play className="ml-1 h-9 w-9 fill-white text-white" aria-hidden="true" />
+                </span>
+                <span className="sr-only">Welcome video coming soon</span>
+              </div>
             )}
+          </div>
+        </section>
 
-            {/* Video. Placeholder until a real URL exists. */}
-            <div className="mt-6 overflow-hidden rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))]">
-              {VIDEO_URL ? (
-                <div className="aspect-video">
-                  <iframe
-                    src={VIDEO_URL}
-                    title="Welcome to SAM Plan AI"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture"
-                    allowFullScreen
-                    className="h-full w-full"
-                  />
-                </div>
+        {/* Perks */}
+        <section className="mt-20 text-center">
+          <h2 className="text-2xl font-bold text-white/85 sm:text-4xl">
+            Your Founding Member Perks
+          </h2>
+          <p className="mx-auto mt-4 max-w-md text-sm text-white/80 sm:text-base">
+            Because you&apos;re one of our Founding Members, you&apos;re getting
+            perks no one else will get:
+          </p>
+
+          <div className="mx-auto mt-10 grid max-w-4xl gap-6 sm:grid-cols-3">
+            {PERKS.map((perk) => (
+              <div
+                key={perk.title}
+                className="rounded-2xl border border-teal-300/40 bg-gradient-to-b from-[#0f1a2e] to-[#0a1222] p-6 shadow-[0_0_30px_rgba(45,212,191,0.12)]"
+              >
+                <Art
+                  src={perk.art}
+                  fallback={perk.icon}
+                  size={72}
+                  className="mx-auto h-[72px] w-auto"
+                />
+                <h3 className="mx-auto mt-5 max-w-[14rem] text-sm font-semibold text-white">
+                  {perk.title}
+                </h3>
+                <p className="mt-4 text-xs leading-relaxed text-white/70">
+                  {perk.body}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Next steps */}
+        <section className="mt-20">
+          <h2 className="text-center text-2xl font-bold text-white/85 sm:text-4xl">
+            Here Are Your Next Steps
+          </h2>
+
+          {/* Step 1 — calendar left, copy right */}
+          <div className="mt-12 grid items-center gap-8 md:grid-cols-2">
+            <div className="order-2 md:order-1">
+              {BOOKING_URL ? (
+                <iframe
+                  src={BOOKING_URL}
+                  title="Book your onboarding call"
+                  className="h-[520px] w-full rounded-xl bg-white"
+                />
               ) : (
-                <div className="flex aspect-video flex-col items-center justify-center gap-2">
-                  <PlayCircle
-                    className="h-10 w-10 text-[hsl(var(--foreground-subtle))]"
-                    aria-hidden="true"
-                  />
-                  <p className="text-xs text-[hsl(var(--foreground-subtle))]">
-                    Welcome video coming soon
+                <>
+                  <MiniCalendar />
+                  <p className="mt-2 text-center text-xs text-white/50">
+                    Booking calendar coming soon
                   </p>
-                </div>
+                </>
               )}
             </div>
-          </section>
-
-          {/* Perks */}
-          <section>
-            <h2 className="text-center text-lg font-semibold text-foreground">
-              Your founding member perks
-            </h2>
-            <p className="mx-auto mt-1 max-w-lg text-center text-sm text-[hsl(var(--foreground-muted))]">
-              Because you are one of our first customers, these are yours and
-              will not be offered again.
-            </p>
-
-            <div className="mt-6 grid gap-4 sm:grid-cols-3">
-              {PERKS.map((perk) => (
-                <div
-                  key={perk.title}
-                  className="rounded-[var(--radius-lg)] border border-border bg-card p-5"
-                >
-                  <perk.icon
-                    className="h-5 w-5 text-[hsl(var(--primary))]"
-                    aria-hidden="true"
-                  />
-                  <h3 className="mt-3 text-sm font-semibold text-foreground">
-                    {perk.title}
-                  </h3>
-                  <p className="mt-1.5 text-xs text-[hsl(var(--foreground-muted))]">
-                    {perk.body}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Next steps */}
-          <section>
-            <h2 className="text-center text-lg font-semibold text-foreground">
-              Here are your next steps
-            </h2>
-
-            <div className="mt-6 space-y-4">
-              <Step
-                n={1}
-                title="Book your onboarding call"
-                body={
-                  BOOKING_URL
-                    ? "Pick a time that suits you. We'll review your plan together and get you set up."
-                    : "We'll email you a booking link shortly so you can pick a time that suits you."
-                }
-                action={
-                  BOOKING_URL ? (
-                    <a
-                      href={BOOKING_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[hsl(var(--background-muted))]"
-                    >
-                      Book a time
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </a>
-                  ) : null
-                }
-              />
-
-              {/*
-                THE STEP THAT MATTERS. Everything the product does depends on
-                the intake, so it is the only one with a primary button — and
-                it reads as done once initiatives exist.
-              */}
-              <Step
-                n={2}
-                title="Complete your intake"
-                body={
-                  intakeDone
-                    ? "Done. Your plan is built and waiting on your dashboard."
-                    : "About 15 minutes. This is what SAM uses to build your plan, so it is worth doing properly."
-                }
-                done={intakeDone}
-                action={
-                  intakeDone ? null : (
-                    <Link
-                      href="/intake/start"
-                      className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
-                    >
-                      Start my intake
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </Link>
-                  )
-                }
-              />
-
-              <Step
-                n={3}
-                title="Add your coaching calls to the calendar"
-                body="Join the weekly group session whenever you have questions — there is no need to book."
-              />
-            </div>
-          </section>
-
-          <div className="text-center">
-            <Link
-              href="/year-at-a-glance"
-              className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border bg-card px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-[hsl(var(--background-muted))]"
-            >
-              Go to my dashboard
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-            <p className="mt-4 text-xs text-[hsl(var(--foreground-subtle))]">
-              Questions? Email {SUPPORT_EMAIL}. Welcome aboard — we are glad you
-              are here.
-            </p>
+            <StepCopy
+              className="order-1 md:order-2"
+              step={1}
+              title={<>Book your onboarding call<br />with a co-founder</>}
+              body={
+                "Pick a time to meet 1:1 with Pete or Rachel. Together you'll " +
+                "review your plan and get you up and running. This call is " +
+                "only available to Founding Members, so book it now while " +
+                "times are open."
+              }
+            />
           </div>
-        </div>
+
+          {/* Step 2 — copy left, illustration right */}
+          <div className="mt-16 grid items-center gap-8 md:grid-cols-2">
+            <StepCopy
+              step={2}
+              title={
+                <>
+                  Complete your intake
+                  <br />
+                  <em className="font-semibold">(about 15 minutes)</em>
+                </>
+              }
+              body={
+                "Do this before your onboarding call. SAM Plan will build your " +
+                "first draft plan, so your time with Pete or Rachel goes to " +
+                "refining your strategy, not filling out forms."
+              }
+              action={
+                intakeDone ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-300">
+                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                    Intake complete
+                  </span>
+                ) : (
+                  <Link
+                    href="/intake/start"
+                    className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-400"
+                  >
+                    Click to complete
+                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                  </Link>
+                )
+              }
+            />
+            <Illustration src={ART.stepIntake} icon={ClipboardCheck} />
+          </div>
+
+          {/* Step 3 — illustration left, copy right */}
+          <div className="mt-16 grid items-center gap-8 md:grid-cols-2">
+            <Illustration
+              src={ART.stepCoaching}
+              icon={CalendarCheck}
+              className="order-2 md:order-1"
+            />
+            <StepCopy
+              className="order-1 md:order-2"
+              step={3}
+              title={<>Add your Founding Member<br />coaching calls to your calendar</>}
+              body={
+                `Join Pete or Rachel every ${COACHING_DAY} at ${COACHING_TIME} ` +
+                "for weekly group coaching, a Founding Member exclusive for " +
+                `${COACHING_MONTHS} months.`
+              }
+            />
+          </div>
+        </section>
+
+        {/* CTA */}
+        <section className="mt-20 text-center">
+          <Link
+            href="/year-at-a-glance"
+            className="mx-auto flex max-w-3xl items-center justify-center gap-2 rounded-md bg-gradient-to-r from-blue-600 via-sky-500 to-teal-400 px-6 py-3.5 text-sm font-semibold uppercase tracking-wide text-white shadow-[0_0_30px_rgba(56,189,248,0.3)] transition-opacity hover:opacity-90"
+          >
+            Access your SAM Plan dashboard
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+          <p className="mt-10 text-sm font-semibold text-white">
+            Questions? Email{" "}
+            <a href={`mailto:${SUPPORT_EMAIL}`} className="hover:underline">
+              {SUPPORT_EMAIL}
+            </a>
+            .
+          </p>
+          <p className="mt-5 text-sm font-semibold text-white">
+            Welcome to the founding group, we&apos;re so glad you&apos;re here.
+          </p>
+        </section>
       </main>
+
+      <footer className="relative border-t border-white/10">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-5 py-8 sm:px-8">
+          <Image src="/logo-dark.png" alt="SAM Plan AI" width={110} height={37} />
+          <p className="text-xs text-white/80 sm:text-sm">
+            The Revenue Operating System
+          </p>
+        </div>
+      </footer>
     </div>
   );
 }
 
-function Step({
-  n,
+function StepCopy({
+  step,
   title,
   body,
   action,
-  done,
+  className,
 }: {
-  n: number;
-  title: string;
+  step: number;
+  title: React.ReactNode;
   body: string;
   action?: React.ReactNode;
-  done?: boolean;
+  className?: string;
 }) {
   return (
-    <div
-      className={cn(
-        "flex gap-4 rounded-[var(--radius-lg)] border bg-card p-5",
-        done ? "border-border" : "border-border"
-      )}
-    >
-      <div
-        className={cn(
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
-          done
-            ? "bg-[hsl(var(--primary))] text-white"
-            : "bg-[hsl(var(--background-muted))] text-[hsl(var(--foreground-muted))]"
-        )}
-      >
-        {done ? <Check className="h-4 w-4" aria-hidden="true" /> : n}
-      </div>
+    <div className={className}>
+      <p className="text-3xl font-bold text-white sm:text-4xl">Step {step}</p>
+      <h3 className="mt-3 text-lg font-bold leading-snug text-white sm:text-xl">
+        {title}
+      </h3>
+      <p className="mt-5 max-w-md text-sm leading-relaxed text-white/80">
+        {body}
+      </p>
+      {action && <div className="mt-5">{action}</div>}
+    </div>
+  );
+}
 
-      <div className="min-w-0 flex-1">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          {n === 2 && !done && (
-            <ClipboardList className="h-4 w-4 text-[hsl(var(--primary))]" aria-hidden="true" />
-          )}
-          {title}
-        </h3>
-        <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">{body}</p>
-        {action && <div className="mt-3">{action}</div>}
+/**
+ * Design artwork, falling back to an icon if the file is missing.
+ *
+ * A plain <img> rather than next/image: these are fixed decorative assets, and
+ * next/image offers no clean way to react to a 404 without a broken frame
+ * flashing first. `onError` swaps in the icon instead.
+ *
+ * The artwork ships on a BLACK background, not transparency. `mix-blend-screen`
+ * drops pure black out against the dark page, so the glow sits on the page
+ * rather than inside a visible black square.
+ *
+ * Decorative only (`alt=""`): every image sits beside text that says the same
+ * thing, so a screen reader announcing it would be noise.
+ */
+function Art({
+  src,
+  fallback: Icon,
+  size,
+  className,
+}: {
+  src: string;
+  fallback: typeof CalendarDays;
+  size: number;
+  className?: string;
+}) {
+  const [missing, setMissing] = useState(false);
+
+  if (missing) {
+    return (
+      <Icon
+        aria-hidden="true"
+        strokeWidth={1.25}
+        style={{ width: size, height: size }}
+        className="mx-auto text-teal-300 drop-shadow-[0_0_12px_rgba(45,212,191,0.6)]"
+      />
+    );
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      aria-hidden="true"
+      onError={() => setMissing(true)}
+      className={`mix-blend-screen ${className ?? ""}`}
+    />
+  );
+}
+
+function Illustration({
+  src,
+  icon,
+  className,
+}: {
+  src: string;
+  icon: typeof CalendarDays;
+  className?: string;
+}) {
+  return (
+    <div className={`flex justify-center ${className ?? ""}`}>
+      <Art
+        src={src}
+        fallback={icon}
+        size={128}
+        className="w-full max-w-[340px]"
+      />
+    </div>
+  );
+}
+
+/** Static month view standing in for the GHL booking embed. */
+function MiniCalendar() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const firstWeekday = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const label = now.toLocaleString("en-US", { month: "long", year: "numeric" });
+
+  const cells: (number | null)[] = [
+    ...Array.from({ length: firstWeekday }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+
+  return (
+    <div className="mx-auto max-w-sm rounded-xl bg-white p-5 text-neutral-800 shadow-lg">
+      <div className="flex items-center justify-between text-sm font-semibold">
+        <span aria-hidden="true" className="text-neutral-400">‹</span>
+        <span suppressHydrationWarning>{label}</span>
+        <span aria-hidden="true" className="text-neutral-400">›</span>
+      </div>
+      <div className="mt-4 grid grid-cols-7 gap-y-3 text-center text-[11px]">
+        {["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].map((d) => (
+          <span key={d} className="font-medium text-neutral-400">{d}</span>
+        ))}
+        {cells.map((day, i) => (
+          <span key={i} suppressHydrationWarning>{day ?? ""}</span>
+        ))}
       </div>
     </div>
   );

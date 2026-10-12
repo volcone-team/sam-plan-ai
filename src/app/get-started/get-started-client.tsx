@@ -129,7 +129,8 @@ export function GetStartedClient({ plans }: { plans: SignupPlan[] }) {
               support@samplan.ai and we will get you set up.
             </p>
           ) : (
-            <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            // Flex-wrap so one or two plans centre instead of hugging the left.
+            <div className="mt-8 flex flex-wrap justify-center gap-5">
               {plans.map((plan) => {
                 const price = cycle === "annual" ? plan.annualPrice : plan.monthlyPrice;
                 const buyable =
@@ -142,7 +143,7 @@ export function GetStartedClient({ plans }: { plans: SignupPlan[] }) {
                   <div
                     key={plan.id}
                     className={cn(
-                      "flex flex-col rounded-[var(--radius-lg)] border bg-card p-5",
+                      "flex w-full flex-col rounded-[var(--radius-lg)] border bg-card p-5 sm:w-[320px]",
                       plan.isDefault
                         ? "border-[hsl(var(--primary))] shadow-sm"
                         : "border-border"

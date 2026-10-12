@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { BrandLogo } from '@/components/brand-logo';
 import { getAppUrl } from '@/lib/app-url';
 import { asPlanId, pathForStep } from '@/lib/billing/signup-flow';
+import { ResendConfirmation } from '@/components/auth/resend-confirmation';
 
 /**
  * Does this signup need a plan chosen first?
@@ -91,6 +92,12 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  /**
+   * Where the confirmation link should land, kept so a resend rebuilds the
+   * SAME destination. Without it a resent link would drop the chosen plan and
+   * ask for it again after confirming.
+   */
+  const [confirmDestination, setConfirmDestination] = useState('/onboarding/welcome');
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -150,6 +157,8 @@ export default function SignupPage() {
       const destination =
         requestedNext ||
         (selectedPlan ? pathForStep('checkout', selectedPlan) : '/onboarding/welcome');
+
+      setConfirmDestination(destination);
 
       // 1. Sign up with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -247,9 +256,24 @@ export default function SignupPage() {
             <h1 className="text-2xl font-bold tracking-tight">Check your email</h1>
             <p className="text-sm text-[hsl(var(--foreground-muted))]">
               We sent a confirmation link to <strong>{formData.email}</strong>.
-              Click the link to activate your account.
+              Click the link to activate your account. It expires after 24
+              hours.
             </p>
           </div>
+
+          {/*
+            Email delivery is not guaranteed, and the link can expire before
+            it is used. Offering the resend here means a missing first email
+            does not strand someone on a screen telling them to check an inbox
+            that has nothing in it.
+          */}
+          <ResendConfirmation
+            email={formData.email}
+            destination={confirmDestination}
+            initialCooldownSeconds={60}
+            className="flex flex-col items-center"
+          />
+
           <Link href="/auth/login">
             <Button variant="outline" className="w-full mt-4">
               Back to Login
