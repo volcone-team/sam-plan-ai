@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { getStripe, loadBillingConfig, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client";
+import { ensurePortalConfiguration } from "@/lib/billing/portal-configuration";
 import { getAppUrl } from "@/lib/app-url";
 
 export const runtime = "nodejs";
@@ -12,13 +13,18 @@ export const runtime = "nodejs";
  *
  * Returns a Stripe Billing Portal URL for the caller's company.
  *
- * Stripe hosts card updates, invoice history and cancellation. Building those
- * ourselves would mean handling card data, reimplementing dunning UI, and
- * keeping cancellation semantics in sync with Stripe's — all of which the portal
- * already does correctly and for free.
+ * Stripe hosts card updates and invoice history. Building those ourselves
+ * would mean handling card data and reimplementing dunning UI, both of which
+ * the portal already does correctly and for free.
  *
- * Owner-only: the portal can cancel the subscription and change payment methods,
- * which is not something any team member should be able to do.
+ * CANCELLATION IS NOT PART OF IT. The portal's default configuration offers a
+ * one-click cancel that skips the in-app retention flow entirely — no reason
+ * recorded, no save offer, nothing for the admin to read afterwards. The
+ * session below is created against our own configuration, which switches that
+ * off. See src/lib/billing/portal-configuration.ts.
+ *
+ * Owner-only: the portal changes payment methods and billing details, which is
+ * not something any team member should be able to do.
  *
  * Responses:
  *   200 { url }
@@ -78,8 +84,24 @@ export async function POST() {
       return NextResponse.json({ error: "no_customer" }, { status: 404 });
     }
 
+    /**
+     * OUR configuration, not Stripe's default.
+     *
+     * The default includes "Cancel subscription", which bypasses the whole
+     * retention flow: no reason captured, no save offer, no feedback row, and
+     * nothing in the admin's cancellation note. See portal-configuration.ts.
+     *
+     * Deliberately NOT wrapped in a fallback to an unconfigured session. A
+     * fallback would restore the cancel button exactly when something is
+     * misconfigured, which is the worst moment to do it — so a portal that
+     * cannot be configured correctly does not open. The customer keeps their
+     * in-app invoice list either way.
+     */
+    const configuration = await ensurePortalConfiguration();
+
     const session = await getStripe().billingPortal.sessions.create({
       customer: sub.stripe_customer_id,
+      configuration,
       return_url: `${getAppUrl()}/settings`,
     });
 

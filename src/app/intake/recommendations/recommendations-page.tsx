@@ -80,8 +80,6 @@ export function RecommendationsPage() {
   const [buildError, setBuildError] = React.useState<string | null>(null);
   const [path, setPath] = React.useState<PlanPath | null>(null);
 
-  /** The visible shortlist. Swaps replace entries in place. */
-  const [shortlist, setShortlist] = React.useState<ApiRecommendation[]>([]);
   const [accepted, setAccepted] = React.useState<Set<string>>(new Set());
   const [dismissed, setDismissed] = React.useState<Set<string>>(new Set());
   /**
@@ -108,8 +106,51 @@ export function RecommendationsPage() {
    * it describes.
    */
   const [capacityNotice, setCapacityNotice] = React.useState<string | null>(null);
-  /** Everything the user has seen, so a swap never repeats (D3). */
-  const [seen, setSeen] = React.useState<Set<string>>(new Set());
+  /**
+   * One CAROUSEL per card slot, and where each slot currently sits.
+   *
+   * WHY RINGS RATHER THAN A ONE-WAY LIST. Swap used to consume from a shared
+   * pool of alternatives and mark each as seen, so it ran out after one or two
+   * clicks and — worse — the card you started from was gone for good. A user
+   * shown Dinners, who swapped to see what else there was, could not get back
+   * to Dinners. That makes the button a gamble rather than a browse.
+   *
+   * Each slot now owns a ring: its original recommendation first, then the
+   * alternatives dealt to it. Swapping advances the position and WRAPS, so the
+   * original always comes back round and the number of swaps is unlimited.
+   *
+   * Alternatives are dealt ROUND-ROBIN across slots rather than shared, so two
+   * slots can never show the same initiative — which a shared pool with
+   * independent positions would eventually do.
+   */
+  const [slotRings, setSlotRings] = React.useState<ApiRecommendation[][]>([]);
+  const [slotPositions, setSlotPositions] = React.useState<number[]>([]);
+  /**
+   * Keys already counted for the REQ-14.1 "shown" event.
+   *
+   * A ref, not state: it must not cause a re-render, and cycling back to a
+   * card the user has already seen should not log a second impression.
+   */
+  const shownOnce = React.useRef<Set<string>>(new Set());
+
+  /**
+   * The visible shortlist: whatever each slot's ring currently points at.
+   *
+   * DERIVED, not stored. It used to be its own state that swaps mutated, which
+   * meant the displayed list and the swap history were two sources of truth
+   * that could disagree. Computing it from the rings makes that impossible.
+   *
+   * Declared after the rings deliberately — a useMemo reads its dependencies
+   * immediately, so referencing them above their own declaration is a temporal
+   * dead zone error at runtime rather than a compile error.
+   */
+  const shortlist = React.useMemo(
+    () =>
+      slotRings
+        .map((ring, index) => ring[(slotPositions[index] ?? 0) % ring.length])
+        .filter((entry): entry is ApiRecommendation => Boolean(entry)),
+    [slotRings, slotPositions]
+  );
 
   React.useEffect(() => {
     let cancelled = false;
@@ -134,12 +175,29 @@ export function RecommendationsPage() {
         if (cancelled) return;
 
         setData(body);
-        setShortlist(body.recommended);
-        setSeen(new Set(body.recommended.map((r) => r.key)));
+
+        /**
+         * Deal the alternatives round-robin into one ring per slot.
+         *
+         * Round-robin rather than in blocks so the best alternatives are
+         * spread across the slots instead of all landing behind the first
+         * card: `alternatives` is ranked, so chunking would give slot 1 the
+         * three strongest and slot 3 the three weakest.
+         */
+        const rings: ApiRecommendation[][] = body.recommended.map((r) => [r]);
+        if (rings.length > 0) {
+          body.alternatives.forEach((alternative, index) => {
+            rings[index % rings.length].push(alternative);
+          });
+        }
+
+        setSlotRings(rings);
+        setSlotPositions(rings.map(() => 0));
 
         // REQ-14.1 — one event per card shown, with where it came from.
         const source = sourceFor(body.aiUnavailable);
         for (const recommendation of body.recommended) {
+          shownOnce.current.add(recommendation.key);
           void trackIntakeEvent(recommendationShown(recommendation.key, source, null));
         }
       } catch (err) {
@@ -307,39 +365,57 @@ export function RecommendationsPage() {
   };
 
   /**
-   * Swap auto-replaces with the next unseen alternative (D3).
+   * Show the next initiative in this slot's ring, wrapping at the end.
    *
    * The replacement takes the outgoing card's POSITION, because the list is
    * ranked and appending would reorder the screen under the user mid-decision.
-   * The server has already filtered `alternatives` through the eligibility
-   * rules, so anything here is a valid substitution.
+   * Every entry in the ring came from the server's eligible, already-filtered
+   * set, so each is a valid substitution.
+   *
+   * WRAPPING IS THE POINT. Reaching the end of the ring returns to the
+   * original recommendation rather than disabling the button, which is what
+   * makes a swap reversible: keep clicking and Dinners comes back.
    */
-  const swap = (key: string) => {
+  const swapSlot = (slotIndex: number) => {
     if (!data) return;
 
-    const replacement = data.alternatives.find((entry) => !seen.has(entry.key));
-    if (!replacement) return;
+    const ring = slotRings[slotIndex];
+    if (!ring || ring.length < 2) return;
 
-    void trackIntakeEvent(recommendationDismissed(key, "swap", path));
+    const current = ring[slotPositions[slotIndex] % ring.length];
+    const nextPosition = (slotPositions[slotIndex] + 1) % ring.length;
+    const incoming = ring[nextPosition];
 
-    setShortlist((prev) =>
-      prev.map((entry) => (entry.key === key ? replacement : entry))
-    );
-    setSeen((prev) => new Set(prev).add(replacement.key));
-    setAccepted((prev) => {
-      const next = new Set(prev);
-      next.delete(key);
+    void trackIntakeEvent(recommendationDismissed(current.key, "swap", path));
+
+    setSlotPositions((prev) => {
+      const next = [...prev];
+      next[slotIndex] = nextPosition;
       return next;
     });
 
-    void trackIntakeEvent(
-      recommendationShown(replacement.key, sourceFor(data.aiUnavailable), path)
-    );
-  };
+    /**
+     * The outgoing card loses its acceptance.
+     *
+     * Selection follows what is on screen: leaving a swapped-away initiative
+     * in the accepted set would build a plan containing something the user can
+     * no longer see. Cycling back to it shows it unaccepted, ready to add
+     * again.
+     */
+    setAccepted((prev) => {
+      const next = new Set(prev);
+      next.delete(current.key);
+      return next;
+    });
 
-  const swapAvailable = Boolean(
-    data?.alternatives.some((entry) => !seen.has(entry.key))
-  );
+    // Only the first sighting is an impression; coming back round is not.
+    if (!shownOnce.current.has(incoming.key)) {
+      shownOnce.current.add(incoming.key);
+      void trackIntakeEvent(
+        recommendationShown(incoming.key, sourceFor(data.aiUnavailable), path)
+      );
+    }
+  };
 
   const build = async () => {
     if (!data || !gap) return;
@@ -542,18 +618,25 @@ export function RecommendationsPage() {
           </h2>
 
           <div className="space-y-3">
-            {shortlist.map((recommendation) => (
+            {shortlist.map((recommendation, slotIndex) => (
               <RecommendationCard
                 key={recommendation.key}
                 data={toCardData(recommendation)}
                 badge={badge}
                 accepted={accepted.has(recommendation.key)}
                 dismissed={dismissed.has(recommendation.key)}
-                canSwap={swapAvailable}
+                /*
+                  PER SLOT, not global. Swap used to share one pool across every
+                  card, so exhausting it disabled the button everywhere at once.
+                  A slot with more than one entry in its ring can always swap,
+                  and because the ring wraps it can always get back to where it
+                  started.
+                */
+                canSwap={(slotRings[slotIndex]?.length ?? 0) > 1}
                 onAccept={() => toggleAccept(recommendation.key)}
                 onDismiss={() => dismiss(recommendation.key)}
                 onRestore={() => restore(recommendation.key)}
-                onSwap={() => swap(recommendation.key)}
+                onSwap={() => swapSlot(slotIndex)}
               />
             ))}
           </div>

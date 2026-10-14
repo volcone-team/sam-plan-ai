@@ -34,7 +34,14 @@ export interface RecommendationCardProps {
   badge?: string | null;
   accepted: boolean;
   dismissed: boolean;
-  /** False once the eligible pool is exhausted, which disables swap (D3). */
+  /**
+   * Whether this card's slot has any alternative to cycle to.
+   *
+   * PER SLOT, not a global "pool exhausted" flag. Swapping now walks a ring
+   * that wraps back to the original, so this is false only when the slot has
+   * nothing but its original recommendation — never because earlier swaps used
+   * something up.
+   */
   canSwap: boolean;
   onAccept: () => void;
   onDismiss: () => void;
@@ -161,8 +168,8 @@ export function RecommendationCard({
           disabled={!canSwap}
           title={
             canSwap
-              ? "Show me a different initiative"
-              : "No other initiatives fit your answers"
+              ? "Show me a different initiative — keep clicking to cycle back to this one"
+              : "No other initiative fits your answers for this slot"
           }
           className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-input px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-[hsl(var(--background-muted))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45"
         >

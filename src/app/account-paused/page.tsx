@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
@@ -6,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { PauseCircle, Mail } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
 import { ResumePlanButton } from "@/components/billing/resume-plan-button";
+import { SwitchAccountLink } from "@/components/auth/switch-account-link";
 
 export const metadata = {
   title: "Account paused | SAM Plan AI",
@@ -268,14 +268,15 @@ export default async function AccountPausedPage() {
           {/*
             Sign out stays reachable. Someone with access to two accounts needs
             a way off this page, and without it a paused session is a dead end.
+
+            A BUTTON THAT SIGNS OUT, not a link to /auth/login. The link looked
+            right and did nothing: the session was still valid, so the user
+            arrived at login already authenticated and the lockout gate
+            returned them here. Signing out has to happen before the
+            navigation, which needs a client component.
           */}
           <p className="mt-6 text-xs text-[hsl(var(--foreground-subtle))]">
-            <Link
-              href="/auth/login"
-              className="underline underline-offset-2 hover:text-[hsl(var(--foreground-muted))]"
-            >
-              Sign in with a different account
-            </Link>
+            <SwitchAccountLink />
           </p>
         </div>
       </main>

@@ -17,7 +17,7 @@ import { ScreenAudience } from "@/components/intake/screens/screen-audience";
 import { ScreenObstacles } from "@/components/intake/screens/screen-obstacles";
 import { useLibrary } from "@/components/intake/use-library";
 import { FormError } from "@/components/intake/fields/field";
-import type { ScreenId } from "@/lib/intake/flow";
+import { isFinalScreen, type ScreenId } from "@/lib/intake/flow";
 import {
   validateScreen,
   type ValidationResult,
@@ -53,18 +53,38 @@ export function IntakePage({ screen }: { screen: ScreenId }) {
   const library = useLibrary();
 
   /**
-   * Resume where the user left off.
+   * Resume where the user left off — ONCE, and never from a finished intake.
    *
-   * Only redirects when they land on screen 0 with a saved position — arriving
-   * at a specific screen is a deliberate act (Back, a bookmark, a link) and
-   * overriding it would make the flow impossible to navigate backwards.
+   * Only fires on screen 0 with a saved position: arriving at a specific screen
+   * is a deliberate act (Back, a bookmark, a link) and overriding it would make
+   * the flow impossible to navigate backwards.
+   *
+   * TWO GUARDS, both from real failures.
+   *
+   * `redirectedRef` — the effect used to re-run whenever its dependencies
+   * settled, so walking Back to screen 1 was immediately undone: the user was
+   * thrown forward again before they could read the page. Resuming is a
+   * one-time courtesy on arrival, not a rule that re-asserts itself.
+   *
+   * `isFinalScreen` — `resume_screen` holds the screen last SAVED, and the last
+   * screen saved before completion is the final one. So a user who had
+   * finished the intake carried `resume_screen = "obstacles"` forever, and
+   * "Start from Scratch" dropped them on screen 10 of 10 with no way back to
+   * the beginning. There is nothing to resume at the end of a flow.
    */
+  const redirectedRef = React.useRef(false);
+
   React.useEffect(() => {
     if (draft.loading) return;
     if (screen !== "start") return;
+    if (redirectedRef.current) return;
     if (!draft.resumeScreen || draft.resumeScreen === "start") return;
+    // Finished, or as good as: send them to the start they asked for.
+    if (isFinalScreen(draft.path, draft.resumeScreen)) return;
+
+    redirectedRef.current = true;
     router.replace(`/intake/${draft.resumeScreen}`);
-  }, [draft.loading, draft.resumeScreen, screen, router]);
+  }, [draft.loading, draft.resumeScreen, draft.path, screen, router]);
 
   /**
    * Screen 3 needs one product card to exist before it can be filled in.

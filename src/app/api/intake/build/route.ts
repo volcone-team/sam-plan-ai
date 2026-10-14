@@ -219,10 +219,68 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    /* ---- Clear what a previous build left behind ---- */
+
+    /**
+     * REBUILDING REPLACES; IT DOES NOT ADD.
+     *
+     * This route used to be purely additive, and running the intake twice
+     * stacked a second plan on top of the first. One account ended up with the
+     * same product four times over and ten initiatives in a five-initiative
+     * plan, with `webinar` appearing three times — because "Start from
+     * Scratch" never called a reset and this endpoint never pruned.
+     *
+     * Done HERE rather than when the user clicks Regenerate, because this is
+     * the single commit point. Clearing on the click would destroy a working
+     * plan the moment someone opened the intake and then abandoned it halfway.
+     *
+     * Everything is snapshotted first, so a rebuild is recoverable from
+     * Plan History rather than being a one-way door.
+     */
+    const planStart = str(input.plan_start_month) ?? todayIso();
+    const wiped = await clearPreviousPlan(db, companyId, planStart);
+
+    if (!wiped.ok) {
+      return NextResponse.json(
+        {
+          error:
+            "We could not clear your previous plan, so nothing has been " +
+            "changed. Please try again.",
+          detail: wiped.error,
+        },
+        { status: 500 }
+      );
+    }
+
     /* ---- Products ---- */
 
-    const planStart = str(input.plan_start_month) ?? todayIso();
+    /**
+     * REUSED BY NAME, never blindly re-inserted.
+     *
+     * `initiatives.product_id` is `NOT NULL REFERENCES products(id) ON DELETE
+     * RESTRICT`, so products cannot simply be deleted and recreated — any
+     * initiative we keep still points at the existing row. Matching on name and
+     * updating is what `generate-plan` already does, for the same reason, and
+     * this route never received that fix.
+     *
+     * Case- and whitespace-insensitive, because "Executive Coaching" and
+     * "executive coaching " are the same product to everyone except a string
+     * comparison.
+     */
     const productIdByIntakeId = new Map<string, string>();
+
+    const { data: existingProducts } = await db
+      .from("products")
+      .select("id, name")
+      .eq("company_id", companyId);
+
+    const productIdByName = new Map<string, string>();
+    for (const row of (existingProducts ?? []) as { id: string; name: string }[]) {
+      const key = row.name.trim().toLowerCase();
+      // First wins, so an account that already accumulated duplicates settles
+      // on one of them instead of picking a different row on every rebuild.
+      if (!productIdByName.has(key)) productIdByName.set(key, row.id);
+    }
 
     for (const [index, product] of intakeProducts.entries()) {
       const name = str(product.name);
@@ -230,33 +288,56 @@ export async function POST(request: NextRequest) {
       // put "Product 3" in the customer's live product list.
       if (!name) continue;
 
-      const { data: created, error } = await db
-        .from("products")
-        .insert({
-          company_id: companyId,
-          name,
-          price: num(product.average_price) ?? 0,
-          // Both of these are TRANSLATED, not passed through: `products` has
-          // CHECK constraints from migration 001 with a different vocabulary to
-          // the intake's, so a raw value is rejected by the database.
-          revenue_type: toRevenueType(product.payment_type),
-          ticket_tier: toTicketTier(product.price_level),
-          display_order: index,
-          is_active: true,
-        })
-        .select("id")
-        .single();
+      const fields = {
+        name,
+        price: num(product.average_price) ?? 0,
+        // Both of these are TRANSLATED, not passed through: `products` has
+        // CHECK constraints from migration 001 with a different vocabulary to
+        // the intake's, so a raw value is rejected by the database.
+        revenue_type: toRevenueType(product.payment_type),
+        ticket_tier: toTicketTier(product.price_level),
+        display_order: index,
+        is_active: true,
+      };
 
-      if (error || !created) {
-        console.error("[intake/build] product insert failed:", error?.message);
-        return NextResponse.json(
-          { error: error?.message || "Could not create your products." },
-          { status: 500 }
-        );
+      const existingId = productIdByName.get(name.trim().toLowerCase());
+      let liveId: string | null = null;
+
+      if (existingId) {
+        const { error } = await db
+          .from("products")
+          .update(fields)
+          .eq("id", existingId)
+          .eq("company_id", companyId);
+
+        if (error) {
+          console.error("[intake/build] product update failed:", error.message);
+          return NextResponse.json(
+            { error: error.message || "Could not update your products." },
+            { status: 500 }
+          );
+        }
+        liveId = existingId;
+      } else {
+        const { data: created, error } = await db
+          .from("products")
+          .insert({ company_id: companyId, ...fields })
+          .select("id")
+          .single();
+
+        if (error || !created) {
+          console.error("[intake/build] product insert failed:", error?.message);
+          return NextResponse.json(
+            { error: error?.message || "Could not create your products." },
+            { status: 500 }
+          );
+        }
+        liveId = created.id as string;
+        productIdByName.set(name.trim().toLowerCase(), liveId);
       }
 
       const intakeId = str(product.id);
-      if (intakeId) productIdByIntakeId.set(intakeId, created.id as string);
+      if (intakeId && liveId) productIdByIntakeId.set(intakeId, liveId);
     }
 
     /* ---- Initiatives ---- */
@@ -544,6 +625,139 @@ export async function POST(request: NextRequest) {
     console.error("[intake/build] failed:", message);
     return NextResponse.json({ error: message || "Internal error" }, { status: 500 });
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Clearing a previous build
+ * ------------------------------------------------------------------ */
+
+/**
+ * Remove the initiatives a previous build created for the plan year, so a
+ * rebuild REPLACES rather than stacks.
+ *
+ * WHY THE WHOLE YEAR AND NOT JUST `planned` ROWS. The owner's instruction was
+ * to clear existing initiatives on regenerate, and a half-clear is what
+ * produced the reported state in the first place: `reset-scratch` pruned only
+ * untouched rows, so anything the user had started survived and the new set
+ * landed beside it. Scoped to the plan year, so a rebuild of next year cannot
+ * touch this year's work.
+ *
+ * SNAPSHOT FIRST, ALWAYS. This deletes initiatives together with their tasks,
+ * results and expenses — real execution history, not just scaffolding. The
+ * snapshot is written before anything is removed and is the documented way
+ * back, exactly as `/api/plan/reset` does it. If the snapshot cannot be
+ * written the whole operation aborts and nothing is deleted.
+ *
+ * PRODUCTS ARE DELIBERATELY NOT TOUCHED. `initiatives.product_id` is
+ * `ON DELETE RESTRICT`, and the caller reuses products by name instead — see
+ * the products section above.
+ */
+async function clearPreviousPlan(
+  db: SupabaseClient,
+  companyId: string,
+  planStart: string
+): Promise<{ ok: true; deleted: number } | { ok: false; error: string }> {
+  const year = Number(planStart.slice(0, 4)) || new Date().getUTCFullYear();
+
+  const { data: plan } = await db
+    .from("annual_plans")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .maybeSingle();
+
+  // No plan row yet means this is a first build: nothing to clear.
+  if (!plan?.id) return { ok: true, deleted: 0 };
+
+  const planId = plan.id as string;
+
+  const { data: existing, error: loadError } = await db
+    .from("initiatives")
+    .select("id")
+    .eq("annual_plan_id", planId);
+
+  if (loadError) {
+    return { ok: false, error: `could not read existing initiatives: ${loadError.message}` };
+  }
+
+  const ids = (existing ?? []).map((row) => row.id as string);
+  if (ids.length === 0) return { ok: true, deleted: 0 };
+
+  /* ---- Snapshot, before anything is destroyed ---- */
+
+  try {
+    const [
+      { data: initiativesFull },
+      { data: tasksFull },
+      { data: projectionsFull },
+      { data: resultsFull },
+      { data: expensesFull },
+      { data: annualPlanFull },
+    ] = await Promise.all([
+      db.from("initiatives").select("*").eq("annual_plan_id", planId),
+      db.from("tasks").select("*").in("initiative_id", ids),
+      db.from("projections").select("*").eq("annual_plan_id", planId),
+      db.from("results").select("*").in("initiative_id", ids),
+      db.from("expenses").select("*").in("initiative_id", ids),
+      db.from("annual_plans").select("*").eq("id", planId).maybeSingle(),
+    ]);
+
+    const { count } = await db
+      .from("plan_snapshots")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId);
+
+    const { error: snapshotError } = await db.from("plan_snapshots").insert({
+      company_id: companyId,
+      label: `Plan v${(count ?? 0) + 1} (before rebuilding ${year} from the intake)`,
+      snapshot: {
+        annualPlan: annualPlanFull ?? null,
+        initiatives: initiativesFull ?? [],
+        tasks: tasksFull ?? [],
+        projections: projectionsFull ?? [],
+        results: resultsFull ?? [],
+        expenses: expensesFull ?? [],
+        snapshotDate: new Date().toISOString(),
+      },
+    });
+
+    /**
+     * ABORTS on a failed snapshot, unlike reset-scratch which treats it as
+     * non-fatal. That route only ever deleted untouched work; this one can
+     * remove results, so losing the only copy is not an acceptable outcome of
+     * a button labelled "regenerate".
+     */
+    if (snapshotError) {
+      return { ok: false, error: `snapshot failed: ${snapshotError.message}` };
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `snapshot failed: ${message}` };
+  }
+
+  /* ---- Delete children first, then the initiatives ---- */
+
+  // `tasks` cascades on initiative delete, but results and expenses also
+  // reference initiatives; clearing them explicitly keeps the order obvious
+  // rather than relying on which constraints happen to cascade.
+  for (const table of ["results", "expenses", "tasks"] as const) {
+    const { error } = await db.from(table).delete().in("initiative_id", ids);
+    if (error) {
+      return { ok: false, error: `could not clear ${table}: ${error.message}` };
+    }
+  }
+
+  const { error: deleteError } = await db.from("initiatives").delete().in("id", ids);
+  if (deleteError) {
+    return { ok: false, error: `could not clear initiatives: ${deleteError.message}` };
+  }
+
+  console.log(
+    "[intake/build] cleared", ids.length,
+    "initiative(s) from the", year, "plan before rebuilding (snapshot taken)"
+  );
+
+  return { ok: true, deleted: ids.length };
 }
 
 /* ------------------------------------------------------------------ *
