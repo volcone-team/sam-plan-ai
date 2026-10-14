@@ -8,6 +8,8 @@ import {
 import { cn } from '@/lib/utils';
 import { Spinner, LoadingPanel } from '@/components/ui/spinner';
 import { PlanChangeModal } from './plan-change-modal';
+import { CancelSubscriptionModal } from './cancel-subscription-modal';
+import { canCancel, canReactivate } from '@/lib/billing/cancellation';
 
 /**
  * Customer-facing billing panel: current plan, usage this period, plan changes,
@@ -50,9 +52,19 @@ interface BillingMe {
     trialEndsAt: string | null; currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean; pendingPlanName: string | null;
     pendingBillingCycle: string | null; hasStripeSubscription: boolean;
+    isPaused: boolean;
+    // Cancellation flow inputs. See /api/billing/me for how each is resolved.
+    currentPriceMinor: number | null; standardPriceMinor: number | null;
+    priceCurrency: string; onLegacyPrice: boolean;
+    planFeatures: PlanFeature[];
+    discountOfferAvailable: boolean;
+    pauseOfferAvailable: boolean;
+    resetCallUrl: string | null;
+    strategyCallUrl: string | null;
   } | null;
   access: { allowed: boolean; reason: string; warn: boolean; daysRemaining: number | null };
   usage: UsageRow[];
+  counts: { initiatives: number };
   periodEnd: string;
   invoices: {
     stripe_invoice_id: string; status: string | null; amount_paid: number | null;
@@ -142,6 +154,8 @@ export function BillingPanel() {
    * confirmation showing what will be billed.
    */
   const [confirming, setConfirming] = useState<Plan | null>(null);
+  /** Whether the multi-step cancellation flow is open. */
+  const [cancelling, setCancelling] = useState(false);
 
   const load = useCallback(async (opts?: { reconcile?: boolean }) => {
     setLoading(true);
@@ -310,6 +324,49 @@ export function BillingPanel() {
     }
   };
 
+  /**
+   * Undo a pending cancellation.
+   *
+   * Lives here rather than in the cancellation modal because it is reached from
+   * the panel itself: once a subscription is ending, the Cancel button is
+   * replaced by this one and the modal is not involved at all.
+   *
+   * A lapsed subscription cannot be resumed — Stripe has cancelled it for real
+   * — so the route answers `requiresCheckout` and the customer buys again
+   * through the normal plan cards below.
+   */
+  const reactivate = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/billing/reactivate', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      const body = await res.json().catch(() => ({}));
+
+      if (res.ok && body?.requiresCheckout) {
+        setError('Your subscription has already ended. Choose a plan below to start again.');
+        return;
+      }
+      if (!res.ok || !body?.reactivated) {
+        setError(
+          body?.error === 'not_permitted'
+            ? 'Only the account owner can manage billing.'
+            : body?.error === 'cannot_reactivate'
+              ? 'There is no pending cancellation to undo.'
+              : 'Could not reactivate your plan. Please try again.'
+        );
+        return;
+      }
+      await load();
+    } catch {
+      setError('Could not reach the server.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // Shared LoadingPanel, matching every other panel in the app.
   if (loading) {
     return <LoadingPanel />;
@@ -339,6 +396,27 @@ export function BillingPanel() {
   }
 
   const notice = accessNotice(me);
+
+  /**
+   * Whether cancelling and reactivating are possible, decided by the SAME
+   * tested functions the API uses.
+   *
+   * Sharing them is the point: a button the server would reject is worse than
+   * no button, and duplicating the precedence here (pause above comp above
+   * status) is exactly how the two would drift apart.
+   */
+  const subState = me.subscription
+    ? {
+        status: me.subscription.status,
+        isComped: me.subscription.isComped,
+        isPaused: me.subscription.isPaused,
+        cancelAtPeriodEnd: me.subscription.cancelAtPeriodEnd,
+        hasStripeSubscription: me.subscription.hasStripeSubscription,
+        currentPeriodEnd: me.subscription.currentPeriodEnd,
+      }
+    : null;
+  const cancelState = canCancel(subState);
+  const reactivateState = canReactivate(subState);
 
   return (
     <div className="space-y-6">
@@ -459,8 +537,46 @@ export function BillingPanel() {
                   <ExternalLink className="h-3.5 w-3.5" />
                 </button>
               )}
+
+              {/*
+                Reactivate replaces Cancel once a subscription is ending.
+                Showing both would be a contradiction, and a customer who has
+                just cancelled is the one most likely to want this — it is a
+                single flag flip with no charge while the period is still
+                running.
+              */}
+              {me.canManage && reactivateState.allowed && reactivateState.kind === 'resume' && (
+                <button
+                  onClick={reactivate}
+                  disabled={busy}
+                  className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40"
+                >
+                  Reactivate my plan
+                </button>
+              )}
             </div>
           </div>
+
+          {/*
+            CANCEL SITS HERE, LOW EMPHASIS AND LAST.
+            Deliberately a quiet text button under the card rather than a
+            peer of the others: it is the one irreversible action on this
+            screen, and the flow behind it is where the retention conversation
+            happens. Rendered only when cancelling is actually possible, so a
+            comped, trialing or paused account is never shown a button that
+            would only explain why it cannot be used.
+          */}
+          {me.canManage && cancelState.allowed && (
+            <div className="mt-4 border-t border-border pt-3">
+              <button
+                onClick={() => setCancelling(true)}
+                disabled={busy}
+                className="text-sm font-medium text-[hsl(var(--foreground-muted))] underline hover:text-[hsl(var(--destructive))] hover:no-underline disabled:opacity-40"
+              >
+                Cancel my subscription
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -702,6 +818,45 @@ export function BillingPanel() {
           pending={busy}
           onConfirm={() => changePlan(confirming.id)}
           onClose={() => setConfirming(null)}
+        />
+      )}
+
+      {/*
+        The cancellation flow. Gated on cancelState so it cannot be opened for
+        an account the server would refuse, which keeps the modal free of
+        "you can't do this" states.
+      */}
+      {me.subscription && (
+        <CancelSubscriptionModal
+          open={cancelling && cancelState.allowed}
+          onClose={() => setCancelling(false)}
+          onCancelled={() => load()}
+          planName={me.subscription.planName}
+          billingCycle={me.subscription.billingCycle}
+          status={me.subscription.status}
+          /*
+            Not in /api/billing/me's payload, and not worth adding there: the
+            only screen that needs it is the confirmation, and the cancel
+            response carries the address the receipt was actually sent to —
+            which is the one worth showing.
+          */
+          email={null}
+          accessEndsAt={me.subscription.currentPeriodEnd}
+          initiativeCount={me.counts?.initiatives ?? 0}
+          planFeatures={me.subscription.planFeatures ?? []}
+          onLegacyPrice={me.subscription.onLegacyPrice}
+          /*
+            Defaults to false if a cached bundle meets an older API response:
+            hiding an offer that might have been available is recoverable, while
+            showing one that cannot be granted is the bug this replaced.
+          */
+          discountOfferAvailable={me.subscription.discountOfferAvailable ?? false}
+          pauseOfferAvailable={me.subscription.pauseOfferAvailable ?? false}
+          resetCallUrl={me.subscription.resetCallUrl ?? null}
+          strategyCallUrl={me.subscription.strategyCallUrl ?? null}
+          currentPriceMinor={me.subscription.currentPriceMinor}
+          standardPriceMinor={me.subscription.standardPriceMinor}
+          priceCurrency={me.subscription.priceCurrency}
         />
       )}
     </div>

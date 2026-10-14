@@ -61,7 +61,145 @@ export function normalizeKey(name: unknown): string {
 }
 
 const cell = (row: string[] | undefined, i: number): string =>
-  String(row?.[i] ?? '').replace(/\s+/g, ' ').trim();
+  i < 0 ? '' : String(row?.[i] ?? '').replace(/\s+/g, ' ').trim();
+
+/* ------------------------------------------------------------------ *
+ * Library columns, located by HEADER NAME
+ * ------------------------------------------------------------------ */
+
+/**
+ * Which column holds what on the Initiative Library sheet.
+ *
+ * WHY THIS IS NOT JUST POSITIONS. The library sheet gained a "Cost to Run"
+ * column at index 5, which shifted every field after it by one. Read
+ * positionally, that stored the one-liner as blank (Cost to Run is empty for
+ * every row), the long description as the one-liner, "POSSIBLY" as the price
+ * tier and "Mid → High" as Own/Ops — silently, with no parse warning, because
+ * every cell still contained *something*.
+ *
+ * The damage was not cosmetic: `needs_sales_team` feeds the sales-call
+ * eligibility filter and `own_or_ops` feeds the platform split, so both were
+ * deciding recommendations from the wrong column.
+ *
+ * Resolving by header name means the client can insert, reorder or rename
+ * columns without silently corrupting the library again.
+ */
+export interface LibraryColumns {
+  category: number;
+  workbookId: number;
+  name: number;
+  difficulty: number;
+  speedToResults: number;
+  oneLiner: number;
+  description: number;
+  needsSalesTeam: number;
+  priceTier: number;
+  ownOrOps: number;
+}
+
+/**
+ * The layout BEFORE "Cost to Run" existed.
+ *
+ * Used per-field when a header cannot be matched, so an older workbook — or one
+ * stored without a headers array at all — parses exactly as it used to instead
+ * of losing the column entirely.
+ */
+const LIBRARY_FALLBACK: LibraryColumns = {
+  category: 0,
+  workbookId: 1,
+  name: 2,
+  difficulty: 3,
+  speedToResults: 4,
+  oneLiner: 5,
+  description: 6,
+  needsSalesTeam: 7,
+  priceTier: 8,
+  ownOrOps: 9,
+};
+
+/**
+ * Collapse a header for comparison.
+ *
+ * Real headers carry newlines ("Difficulty \n1 easy - 5 very hard"), trailing
+ * question marks and parenthetical notes ("Own / Ops (future)"), none of which
+ * are stable enough to match on.
+ */
+function normalizeHeader(value: unknown): string {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[?.:]+$/g, '')
+    .replace(/\s*\([^)]*\)\s*/g, ' ')
+    .replace(/[^a-z0-9/ ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Candidate header names per field, most specific first.
+ *
+ * ORDER MATTERS between oneLiner and description: both headers end in
+ * "description", so a loose contains-match would resolve whichever came first
+ * in the sheet. Each is matched on its distinguishing word instead.
+ */
+const LIBRARY_HEADERS: Record<keyof LibraryColumns, readonly string[]> = {
+  category: ['initiative category', 'category'],
+  // Exact only: "id" as a substring appears in unrelated words.
+  workbookId: ['id', 'initiative id'],
+  name: ['initiative name', 'name'],
+  difficulty: ['difficulty'],
+  speedToResults: ['speed to revenue', 'speed to results', 'speed'],
+  oneLiner: ['one line description', 'one liner', 'short description'],
+  description: ['longer description', 'long description', 'full description'],
+  needsSalesTeam: ['do you need a sales team', 'needs sales team', 'sales team'],
+  priceTier: ['primary product price tier it feeds', 'price tier', 'product price tier'],
+  ownOrOps: ['own / ops', 'own ops', 'own or ops'],
+};
+
+/**
+ * Map the library sheet's headers onto field positions.
+ *
+ * Matching is exact first, then prefix, then substring — so "difficulty" finds
+ * "Difficulty 1 easy - 5 very hard" by prefix, while "id" only ever matches a
+ * cell that IS "id". A field whose header is absent keeps its historical
+ * position from LIBRARY_FALLBACK.
+ *
+ * A column already claimed by an earlier field is not reused, which stops a
+ * loose synonym ("name", "category") from stealing a column that a more
+ * specific header already matched.
+ */
+export function resolveLibraryColumns(headers?: readonly string[]): LibraryColumns {
+  const normalized = (headers ?? []).map(normalizeHeader);
+  const resolved = { ...LIBRARY_FALLBACK };
+  const taken = new Set<number>();
+
+  // Deterministic order: the declaration order of LIBRARY_HEADERS, which runs
+  // most-specific-header first within each field.
+  for (const field of Object.keys(LIBRARY_HEADERS) as (keyof LibraryColumns)[]) {
+    const candidates = LIBRARY_HEADERS[field];
+    let found = -1;
+
+    for (const candidate of candidates) {
+      found = normalized.findIndex((h, i) => !taken.has(i) && h === candidate);
+      if (found >= 0) break;
+      found = normalized.findIndex((h, i) => !taken.has(i) && h.startsWith(candidate));
+      if (found >= 0) break;
+      // Substring is the last resort, and never for very short candidates
+      // where it would match almost anything.
+      if (candidate.length >= 5) {
+        found = normalized.findIndex((h, i) => !taken.has(i) && h.includes(candidate));
+        if (found >= 0) break;
+      }
+    }
+
+    if (found >= 0) {
+      resolved[field] = found;
+      taken.add(found);
+    }
+  }
+
+  return resolved;
+}
 
 const orNull = (v: string): string | null => (v === '' ? null : v);
 
@@ -162,7 +300,16 @@ const KEY_ALIASES: Record<string, string> = {
   // template/benchmark name -> library name
   'live-webinar': 'webinar',
   'hybrid-event': 'hybrid-events',
-  'dinner': 'dinners',
+  /*
+   * The library row is "Dinners/Lunches" -> `dinners-lunches`, but the task
+   * template sheet is "5.7 Task Template Dinners" -> `dinners`. The old alias
+   * mapped `dinner` onto `dinners`, which is not a library key either, so the
+   * template never joined and Dinners generated a plan with ZERO tasks. Both
+   * spellings now point at the row that actually exists.
+   */
+  'dinner': 'dinners-lunches',
+  'dinners': 'dinners-lunches',
+  'dinners-lunches': 'dinners-lunches',
   'other-peoples-stages-ops': 'ops-in-person-other-peoples-stages',
   'sales-call': 'sales-calls',
   'direct-message': 'direct-message-reach-out',
@@ -189,6 +336,27 @@ export function parseWorkbook(sheets: RawSheet[]): ParsedWorkbook {
   const lib = findSheet(sheets, /initiative\s*library/i);
   if (!lib) warnings.push('No "Initiative Library" sheet found.');
   else {
+    /**
+     * Columns by HEADER NAME, not position — see resolveLibraryColumns. The
+     * sheet gained a "Cost to Run" column which shifted five fields by one and
+     * corrupted the library silently.
+     */
+    const col = resolveLibraryColumns(lib.headers);
+
+    // Say so when the sheet does not look like the library at all, rather than
+    // parsing 22 rows of nothing from fallback positions.
+    if ((lib.headers?.length ?? 0) > 0) {
+      const unmatched = (Object.keys(LIBRARY_HEADERS) as (keyof LibraryColumns)[])
+        .filter((field) => !lib.headers?.[col[field]]);
+      if (unmatched.length > 0) {
+        warnings.push(
+          `Initiative Library: could not find a header for ${unmatched.join(', ')} — ` +
+          `read from the historical column position instead. Headers seen: ` +
+          `${(lib.headers ?? []).join(' | ')}`
+        );
+      }
+    }
+
     let category: string | null = null;
     let order = 0;
     for (const row of contentRows(lib)) {
@@ -196,26 +364,26 @@ export function parseWorkbook(sheets: RawSheet[]): ParsedWorkbook {
         category = cell(row, 0).replace(/^category\s*:\s*/i, '');
         continue;
       }
-      const name = cell(row, 2);
+      const name = cell(row, col.name);
       if (!name) continue;                       // header repeats / stray rows
       if (/^initiative\s*name$/i.test(name)) continue;
-      const rowCategory = orNull(cell(row, 0)) || category;
-      const difficulty = parseNumeric(cell(row, 3));
+      const rowCategory = orNull(cell(row, col.category)) || category;
+      const difficulty = parseNumeric(cell(row, col.difficulty));
       if (difficulty !== null && (difficulty < 1 || difficulty > 5)) {
         warnings.push(`Library "${name}": difficulty ${difficulty} outside 1-5, stored as null.`);
       }
       out.library.push({
         initiativeKey: canonicalKey(name),
-        workbookId: orNull(cell(row, 1)),
+        workbookId: orNull(cell(row, col.workbookId)),
         name,
         category: rowCategory,
         difficulty: difficulty !== null && difficulty >= 1 && difficulty <= 5 ? Math.round(difficulty) : null,
-        speedToResults: orNull(cell(row, 4)),
-        oneLiner: orNull(cell(row, 5)),
-        description: orNull(cell(row, 6)),
-        needsSalesTeam: orNull(cell(row, 7)),
-        priceTier: orNull(cell(row, 8)),
-        ownOrOps: orNull(cell(row, 9)),
+        speedToResults: orNull(cell(row, col.speedToResults)),
+        oneLiner: orNull(cell(row, col.oneLiner)),
+        description: orNull(cell(row, col.description)),
+        needsSalesTeam: orNull(cell(row, col.needsSalesTeam)),
+        priceTier: orNull(cell(row, col.priceTier)),
+        ownOrOps: orNull(cell(row, col.ownOrOps)),
         displayOrder: order++,
       });
     }

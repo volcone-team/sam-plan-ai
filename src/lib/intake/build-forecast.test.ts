@@ -4,6 +4,7 @@ import {
   toFrequency,
   toFunnelStages,
   forecastForStoredInitiative,
+  initiativeKindForCadence,
   scenariosFor,
   planTargets,
   GOOD_MULTIPLIER,
@@ -180,5 +181,68 @@ describe("planTargets", () => {
   it("is zero when no goal was given", () => {
     expect(planTargets(null)).toEqual({ baseline: 0, stretch: 0 });
     expect(planTargets(0)).toEqual({ baseline: 0, stretch: 0 });
+  });
+});
+
+describe("initiativeKindForCadence", () => {
+  it("maps each intake cadence to the plan's kind", () => {
+    expect(initiativeKindForCadence("once")).toBe("one-time");
+    expect(initiativeKindForCadence("repeat")).toBe("recurring");
+    expect(initiativeKindForCadence("always_on")).toBe("evergreen");
+  });
+
+  /**
+   * The hyphen/underscore mismatch this module exists to absorb. The intake
+   * stores 'always_on' to satisfy its CHECK constraint; the forecast model
+   * uses 'always-on'.
+   */
+  it("accepts the hyphenated spelling too", () => {
+    expect(initiativeKindForCadence("always-on")).toBe("evergreen");
+  });
+
+  /**
+   * ALWAYS-ON IS NOT RECURRING, and the difference is behavioural rather than
+   * cosmetic: the weekly planner shows an evergreen initiative for every week
+   * after its activation instead of keying off one event date, and
+   * generate-plan's scheduler treats it as non-exclusive.
+   */
+  it("does not collapse always-on into recurring", () => {
+    expect(initiativeKindForCadence("always_on")).not.toBe("recurring");
+  });
+
+  it("falls back to one-time when the question was skipped", () => {
+    for (const value of [null, undefined, "", "nonsense", 7, {}]) {
+      expect(initiativeKindForCadence(value)).toBe("one-time");
+    }
+  });
+
+  it("covers every cadence the intake can store", () => {
+    for (const option of CADENCE_OPTIONS) {
+      const kind = initiativeKindForCadence(option.value);
+      expect(["one-time", "recurring", "evergreen"]).toContain(kind);
+    }
+  });
+
+  /**
+   * THE CONTRADICTION THIS CLOSES.
+   *
+   * The revenue written to an initiative is already multiplied by the number
+   * of runs its cadence implies, so a repeating initiative stored as
+   * 'one-time' claimed many runs' revenue for a single dated event. Asserted
+   * together so neither half can be changed without the other being seen to
+   * disagree.
+   */
+  it("marks an initiative recurring exactly when its forecast assumes repetition", () => {
+    const monthly = { ...webinar, cadence: "repeat", repeat_frequency: "monthly" };
+    const once = { ...webinar, cadence: "once", repeat_frequency: null };
+
+    const monthlyRevenue = forecastForStoredInitiative(monthly, 12)!;
+    const onceRevenue = forecastForStoredInitiative(once, 12)!;
+
+    // The forecast really does scale with the cadence.
+    expect(monthlyRevenue).toBeGreaterThan(onceRevenue);
+    // ...and the stored kind now says so.
+    expect(initiativeKindForCadence(monthly.cadence)).toBe("recurring");
+    expect(initiativeKindForCadence(once.cadence)).toBe("one-time");
   });
 });

@@ -4,6 +4,10 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { loadBillingConfig } from "@/lib/billing/stripe-client";
 import { evaluateAccess } from "@/lib/billing/entitlement";
+import {
+  latestCancellationByCompany,
+  type CancellationFeedbackRowLike,
+} from "@/lib/billing/cancellation-history";
 
 /**
  * GET /api/admin/companies
@@ -114,7 +118,7 @@ export async function GET(request: Request) {
      * Batched by the ids on this page rather than one query per row, and loaded
      * in parallel with the billing config that `evaluateAccess` needs.
      */
-    const [config, subsRes, plansCatalogRes, paymentsRes] = await Promise.all([
+    const [config, subsRes, plansCatalogRes, paymentsRes, cancellationsRes] = await Promise.all([
       loadBillingConfig(adminClient),
       companyIds.length
         ? adminClient
@@ -142,7 +146,48 @@ export async function GET(request: Request) {
             .select("company_id, amount_paid, status")
             .in("company_id", companyIds)
         : Promise.resolve({ data: [] }),
+      /**
+       * Why each company LEFT, for the "Reason for plan cancellation" note.
+       *
+       * FILTERED TO `cancelled` IN SQL. Migration 030 writes a row for every
+       * pass through the cancellation flow, including everyone who stayed, and
+       * on the live database those are the large majority. Fetching them all
+       * and discarding them in JS would move far more rows than the note needs.
+       * `latestCancellationByCompany` re-checks the outcome regardless, so this
+       * filter is an optimisation rather than the guarantee.
+       *
+       * Ordered to match idx_cancellation_feedback_company (company_id,
+       * created_at DESC), though the reduction compares timestamps itself and
+       * does not rely on it.
+       */
+      companyIds.length
+        ? adminClient
+            .from("cancellation_feedback")
+            .select("company_id, reason, reason_detail, outcome, created_at, access_ends_at")
+            .eq("outcome", "cancelled")
+            .in("company_id", companyIds)
+            .order("created_at", { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
     ]);
+
+    /**
+     * Logged rather than failed on.
+     *
+     * The usual cause is migration 030 not being applied on whichever database
+     * this is pointed at. An absent churn note is a missing nicety; refusing
+     * the whole company list over it would take out the page admins use to
+     * grant access and pause billing.
+     */
+    if ("error" in cancellationsRes && cancellationsRes.error) {
+      console.error(
+        "[admin/companies] Could not read cancellation feedback:",
+        cancellationsRes.error.message
+      );
+    }
+
+    const cancellationByCompany = latestCancellationByCompany(
+      (cancellationsRes.data ?? []) as unknown as CancellationFeedbackRowLike[]
+    );
 
     type SubRow = {
       id: string; company_id: string; plan_id: string | null; tier: string;
@@ -304,6 +349,20 @@ export async function GET(request: Request) {
         // Minor units, as stored by Stripe.
         lifetimePaid: paidByCompany.get(company.id) ?? 0,
         subscription,
+        /**
+         * The last time this company actually cancelled, or null if never.
+         *
+         * SEPARATE FROM `subscription` ON PURPOSE. It outlives the
+         * subscription it describes: a customer who cancels and later
+         * resubscribes gets a new Stripe subscription, and a company whose
+         * subscription row is gone entirely still has a reason worth reading.
+         * Nesting it under `subscription` would hide it in exactly those two
+         * cases.
+         *
+         * Also survives reactivation. Clearing `cancel_at_period_end` does not
+         * unmake the cancellation, so the note stays and the UI dates it.
+         */
+        cancellation: cancellationByCompany.get(company.id) ?? null,
       };
     });
 

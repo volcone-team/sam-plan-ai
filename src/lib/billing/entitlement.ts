@@ -56,7 +56,13 @@ export interface SubscriptionState {
    * compiling and behaves exactly as before when it is absent.
    */
   isPaused?: boolean;
-  /** Auto-resume date, if one was set. Informational only. */
+  /**
+   * Auto-resume date, if one was set.
+   *
+   * NOT informational, despite how it started life: once this moment passes
+   * Stripe resumes collecting on its own, so the pause has genuinely ended and
+   * this function stops honouring it. See the pause branch below.
+   */
   pauseResumesAt?: string | null;
 }
 
@@ -126,12 +132,41 @@ export function evaluateAccess(
    */
   if (sub.isPaused) {
     const resumes = parseTime(sub.pauseResumesAt ?? null);
-    return {
-      allowed: false,
-      reason: "paused",
-      warn: false,
-      daysRemaining: resumes !== null && resumes > now ? daysBetween(now, resumes) : null,
-    };
+
+    /**
+     * AN ELAPSED RESUME DATE MEANS THE PAUSE IS OVER.
+     *
+     * This closes a live bug. `pause_resumes_at` is handed to Stripe as
+     * `pause_collection.resumes_at`, so when that moment arrives STRIPE STARTS
+     * CHARGING AGAIN by itself. Nothing in the app ever cleared `is_paused` —
+     * there was no job to do it, and this function treated the date as
+     * display-only — so from that moment the customer was being billed AND
+     * locked out, indefinitely, until an admin happened to notice.
+     *
+     * Falling through rather than returning `allowed: true` is deliberate: the
+     * subscription is then judged on its own merits below, so a cancelled or
+     * expired one underneath an elapsed pause stays denied.
+     *
+     * A pause with NO resume date never elapses. That is an open-ended admin
+     * suspension, and a suspension for non-payment or abuse must not lift
+     * itself. An unparseable date is treated the same way — fail closed.
+     *
+     * The cron at /api/cron/resume-paused tidies the flag; this is what makes
+     * the outcome correct in between runs, and correct at all if the cron is
+     * never configured. Mirrors pauseHasElapsed in lib/billing/pause.ts, kept
+     * inline because this module is loaded by the Edge middleware on every
+     * request and has deliberately no imports.
+     */
+    const pauseElapsed = resumes !== null && resumes <= now;
+
+    if (!pauseElapsed) {
+      return {
+        allowed: false,
+        reason: "paused",
+        warn: false,
+        daysRemaining: resumes !== null && resumes > now ? daysBetween(now, resumes) : null,
+      };
+    }
   }
 
   // 3. Comped: full access with no payment. Checked before status because a

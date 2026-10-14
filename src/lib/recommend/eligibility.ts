@@ -29,6 +29,16 @@ export interface EligibilityContext {
   whoCloses: string | null;
   /** `planning_inputs.growth_stage`. */
   stage: string | null;
+  /**
+   * Initiative keys the admin has switched off (migration 034).
+   *
+   * The DISABLED set rather than the allowed one, so a key with no settings row
+   * stays eligible — a freshly uploaded workbook must work before anyone has
+   * visited the admin screen. Undefined means no allowlist is in force, which
+   * is also what happens when the settings table cannot be read: the AI gets
+   * too many options rather than none.
+   */
+  inactiveKeys?: ReadonlySet<string>;
 }
 
 export interface EligibilityVerdict {
@@ -216,7 +226,42 @@ function readIdealIndustries(initiative: LibraryInitiative): string[] {
  * ------------------------------------------------------------------ */
 
 /** The rules, in the order they are applied. */
+/* ------------------------------------------------------------------ *
+ * Admin allowlist — the initiative must be switched on
+ * ------------------------------------------------------------------ */
+
+/**
+ * Is this initiative one the admin has allowed the AI to use?
+ *
+ * `loadLibrary` already filters the candidate pool to the active set, so in the
+ * normal path this rule never fires. It exists as the BACKSTOP, in the same
+ * spirit as the rest of this module: the pool and the prompt are not
+ * enforcement. An initiative key can reach the server from places that never
+ * touched the filtered pool —
+ *
+ *   - a model response naming a key it remembered from an earlier prompt,
+ *   - a retried or cached completion built before the admin changed a toggle,
+ *   - a client posting a key directly.
+ *
+ * Checked FIRST, because "we do not offer this" outranks every other reason:
+ * telling someone a disabled initiative is outside their industry invites them
+ * to argue about their industry.
+ *
+ * `inactiveKeys` is undefined when the caller has no settings to apply, which
+ * leaves behaviour exactly as it was before the allowlist existed.
+ */
+export function passesActiveAllowlist(
+  initiative: LibraryInitiative,
+  ctx: EligibilityContext
+): EligibilityVerdict {
+  if (!ctx.inactiveKeys || ctx.inactiveKeys.size === 0) return ELIGIBLE;
+  return ctx.inactiveKeys.has(initiative.key)
+    ? reject("This initiative isn't currently offered.")
+    : ELIGIBLE;
+}
+
 const RULES = [
+  passesActiveAllowlist,
   passesDidntWork,
   passesSalesModel,
   passesCapacity,

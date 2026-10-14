@@ -3,13 +3,21 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Loader2, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Eye, EyeOff, ChevronDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { BrandLogo } from '@/components/brand-logo';
 import { getAppUrl } from '@/lib/app-url';
 import { asPlanId, pathForStep } from '@/lib/billing/signup-flow';
 import { ResendConfirmation } from '@/components/auth/resend-confirmation';
+import {
+  DIAL_CODES,
+  DEFAULT_COUNTRY,
+  findCountry,
+  flagEmoji,
+  composeE164,
+  describeNationalNumberProblem,
+} from '@/lib/phone';
 
 /**
  * Does this signup need a plan chosen first?
@@ -60,6 +68,7 @@ export default function SignupPage() {
     lastName: '',
     companyName: '',
     email: '',
+    phone: '',
     password: '',
     confirmPassword: '',
   });
@@ -68,6 +77,34 @@ export default function SignupPage() {
    * consent, and the stored value has to reflect a deliberate action.
    */
   const [marketingConsent, setMarketingConsent] = useState(false);
+
+  /**
+   * The chosen country, held apart from `formData`.
+   *
+   * Not in `formData` because `handleChange` is typed for
+   * ChangeEvent<HTMLInputElement> and this is a <select>. Widening that handler
+   * to satisfy one field would loosen the typing of all seven others.
+   *
+   * Stored as an ISO code, not a dialling code: +1 is shared by the US and
+   * Canada, so the code alone cannot say which flag to show.
+   */
+  const [phoneCountry, setPhoneCountry] = useState(DEFAULT_COUNTRY);
+
+  const selectedCountry = findCountry(phoneCountry);
+  const phoneCode = selectedCountry?.code ?? '';
+
+  /**
+   * The expected length for the country currently selected, as hint text.
+   *
+   * Derived from the same table the validator uses, so the hint and the rule
+   * cannot drift. Shown up front because being told "needs 10 digits" only
+   * after a rejected submit is a worse experience than being told before.
+   */
+  const expectedPhoneLength = selectedCountry
+    ? selectedCountry.min === selectedCountry.max
+      ? `${selectedCountry.min} digits`
+      : `${selectedCountry.min} to ${selectedCountry.max} digits`
+    : 'Digits only, no spaces needed';
 
   const requiresPlanFirst = useRequiresPlanFirst();
 
@@ -112,6 +149,23 @@ export default function SignupPage() {
       // Validate passwords match
       if (formData.password !== formData.confirmPassword) {
         setError('Passwords do not match.');
+        return;
+      }
+
+      /**
+       * Phone, checked before the Supabase call rather than after.
+       *
+       * `required` on the input catches an empty field but not a half-typed
+       * number — and once signUp() succeeds the account exists, so rejecting at
+       * that point would strand someone with an account they must confirm
+       * before they could fix a typo.
+       *
+       * The rule depends on the chosen dialling code: exactly 10 digits for
+       * +1, 9 or 10 for +44, and so on. See src/lib/phone.ts.
+       */
+      const phoneProblem = describeNationalNumberProblem(phoneCode, formData.phone);
+      if (phoneProblem) {
+        setError(phoneProblem);
         return;
       }
 
@@ -170,6 +224,21 @@ export default function SignupPage() {
             first_name: formData.firstName,
             last_name: formData.lastName,
             company_name: formData.companyName,
+            /**
+             * ONE CANONICAL STRING, built from the two boxes: "+442079460958".
+             *
+             * Composed rather than sent raw. The trigger stores whatever
+             * arrives here verbatim, so passing "020 7946 0958" would persist
+             * the spaces, lose the country entirely, and keep a trunk prefix
+             * that makes the number undialable.
+             *
+             * Read by handle_new_user (migration 035) into profiles.phone. If
+             * that migration is not applied the value lands in
+             * raw_user_meta_data and is silently never read — which is why
+             * scripts/verify-profile-phone.mjs checks the trigger as well as
+             * the column.
+             */
+            phone: composeE164(phoneCode, formData.phone),
             /**
              * Sent as a STRING because raw_user_meta_data is JSON read with
              * ->> in the trigger, which yields text. Always sent, so the
@@ -378,6 +447,135 @@ export default function SignupPage() {
               className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
               placeholder="sarah@company.com"
             />
+          </div>
+
+          {/*
+            Phone, grouped with email as the other way we reach them.
+
+            TWO BOXES, ONE STORED VALUE. The country code is a <select> rather
+            than free text so the stored value cannot be "001", "+ 1" or
+            "0044", and so the national number has a known expected length —
+            exactly 10 digits for +1. In a single field there is no way to tell
+            a country code from an area code, which is why the length could not
+            be checked at all before.
+
+            REQUIRED, matching every other identity field on this form. The
+            product books onboarding and coaching calls, so a number we may or
+            may not have is of limited use.
+
+            type="tel" + inputMode="tel" raise the phone keypad on mobile while
+            still accepting the spaces and brackets people type. No input mask:
+            one built for (555) 123-4567 mangles 020 7946 0958 as it is typed.
+            The value is normalised on submit instead, trunk zero and all.
+          */}
+          <div className="space-y-1.5">
+            <label htmlFor="phone" className="text-sm font-medium">
+              Phone number
+            </label>
+            {/*
+              ONE ROW: a compact country picker, then the number taking the rest.
+
+              A TRANSPARENT NATIVE <select> OVER A BOX WE DRAW.
+
+              The requirement is that the collapsed control shows only the flag
+              and the code while the open list names the country — and a native
+              select cannot do that on its own, because collapsed it renders
+              the selected option's own text and nothing shorter. The usual
+              answer is a custom listbox, which means re-implementing keyboard
+              navigation, type-ahead, focus management, ARIA roles and the
+              mobile picker, and getting any one of them wrong makes the field
+              unusable for somebody.
+
+              So the real <select> stays, stretched over the box at opacity 0.
+              It keeps every native behaviour — arrow keys, type-ahead, the
+              full-screen picker on iOS and Android, screen reader support —
+              and its option text names the country. The visible box underneath
+              is ours to draw, so it shows just the flag and the code.
+
+              The two layers must not fight over clicks: the select sits on top
+              with `z-10`, and the visual layer is `pointer-events-none` so
+              every click and tap reaches the select.
+
+              `peer` on the select drives the focus ring on the box below it,
+              since the element that actually receives focus is invisible.
+            */}
+            <div className="flex gap-2">
+              <label htmlFor="phoneCountry" className="sr-only">
+                Country dialling code
+              </label>
+              <div className="relative w-[6.25rem] shrink-0">
+                <select
+                  id="phoneCountry"
+                  name="phoneCountry"
+                  value={phoneCountry}
+                  onChange={(e) => setPhoneCountry(e.target.value)}
+                  className="peer absolute inset-0 z-10 h-full w-full cursor-pointer appearance-none bg-transparent text-sm opacity-0"
+                >
+                  {DIAL_CODES.map((entry) => (
+                    /*
+                      Keyed and valued on ISO: +1 is shared by the US and
+                      Canada, so the dialling code is neither a unique key nor
+                      enough to know which flag to show.
+
+                      The flag is included in the option text as well. Native
+                      option rendering cannot be styled, so the emoji is the
+                      only way a flag appears in the open list.
+                    */
+                    <option key={entry.iso} value={entry.iso}>
+                      {flagEmoji(entry.iso)} {entry.country} (+{entry.code})
+                    </option>
+                  ))}
+                </select>
+
+                {/*
+                  WHAT THE USER SEES when the control is closed. Hidden from
+                  assistive technology because the select above already
+                  announces the same thing properly.
+                */}
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none flex items-center gap-1 rounded-[var(--radius-md)] border border-border bg-background px-2 py-2 text-sm transition-colors peer-focus:border-primary peer-focus:ring-2 peer-focus:ring-primary/20"
+                >
+                  {/*
+                    The flag renders as two letters ("US") on Windows, which
+                    ships no flag glyphs — see flagEmoji. The code beside it
+                    carries the meaning either way, so nothing is lost.
+                  */}
+                  <span className="text-base leading-none">
+                    {flagEmoji(phoneCountry)}
+                  </span>
+                  <span className="tabular-nums">+{phoneCode}</span>
+                  <ChevronDown className="ml-auto h-3.5 w-3.5 shrink-0 text-[hsl(var(--foreground-muted))]" />
+                </div>
+              </div>
+              <input
+                id="phone"
+                name="phone"
+                type="tel"
+                inputMode="tel"
+                /*
+                  tel-national, not tel: the browser must fill the number
+                  WITHOUT a country code, since the code is its own control.
+                  Autofilling a full +1... string here would double it.
+                */
+                autoComplete="tel-national"
+                required
+                value={formData.phone}
+                onChange={handleChange}
+                className="min-w-0 flex-1 rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
+                placeholder="555 123 4567"
+              />
+            </div>
+            <p className="text-xs text-[hsl(var(--foreground-muted))]">
+              {/*
+                States the expected length for the SELECTED country, so the
+                requirement is known before submitting rather than after being
+                refused. Nothing is hardcoded to 10 — the copy follows the
+                dropdown.
+              */}
+              {expectedPhoneLength}. So we can reach you about your plan and
+              onboarding call.
+            </p>
           </div>
 
           <div className="space-y-1.5">

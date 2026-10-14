@@ -48,7 +48,13 @@ const navItems: NavItem[] = [
    * looking exactly as though it had. The route still exists and explains this;
    * it is simply no longer presented as a working tool.
    */
-  { label: "Initiative Library", href: "/admin/initiatives", icon: Rocket },
+  /*
+   * "Initiative Types", not "Initiative Library" — the AI's library lives on
+   * the AI Workbook page below. Two entries called a library, only one of
+   * which the AI reads, is how this page's toggles came to look as though they
+   * controlled recommendations.
+   */
+  { label: "Initiative Types", href: "/admin/initiatives", icon: Rocket },
   { label: "AI Workbook", href: "/admin/ai-workbook", icon: Sparkles },
   { label: "Benchmarks", href: "/admin/benchmarks", icon: BarChart3 },
   { label: "Content", href: "/admin/content", icon: BookOpen },

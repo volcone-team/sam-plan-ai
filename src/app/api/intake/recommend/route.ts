@@ -3,11 +3,16 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import Anthropic from "@anthropic-ai/sdk";
-import { loadLibrary, loadAiContext, renderLibraryForPrompt } from "@/lib/workbook/read";
+import {
+  loadLibrary,
+  loadAiContext,
+  renderLibraryForPrompt,
+  loadInactiveInitiativeKeys,
+} from "@/lib/workbook/read";
 import { classifyAiFailure, aiFailureLogDetail } from "@/lib/ai-errors";
 import { EXCLUDED_PICKER_CATEGORIES } from "@/lib/intake/schema";
 import { filterEligible, isEligible, type EligibilityContext } from "@/lib/recommend/eligibility";
-import { recommendationCount } from "@/lib/recommend/sizing";
+import { recommendationCount, recommendationCapacity } from "@/lib/recommend/sizing";
 import type { LibraryInitiative } from "@/lib/intake/library";
 import {
   forecastForInitiative,
@@ -113,6 +118,16 @@ export async function POST() {
     const planned = initiatives.filter((row) => (row.source ?? "planned") === "planned");
 
     const yours = planned.map((row) => ({
+      /**
+       * The `intake_initiatives` row id.
+       *
+       * Carried so the recommendations screen can tell the build step WHICH of
+       * the user's own initiatives to drop. Keys will not do: two of the
+       * user's initiatives can share an initiative_key (two webinars for
+       * different products), and an index would break the moment the draft is
+       * re-read in a different order.
+       */
+      id: str(row.id) ?? "",
       key: str(row.initiative_key) ?? "",
       name: str(row.initiative_label) ?? str(row.custom_label) ?? "Initiative",
       forecast:
@@ -138,6 +153,16 @@ export async function POST() {
       .map((row) => str(row.initiative_key))
       .filter((key): key is string => key !== null);
 
+    /**
+     * The admin allowlist, passed into eligibility as the BACKSTOP.
+     *
+     * loadLibrary below already filters the pool to the active set, so this is
+     * belt-and-braces — but the pool is not the only way a key can reach the
+     * server. A model can name an initiative it saw in an earlier prompt, and a
+     * cached completion can predate a toggle change.
+     */
+    const inactiveKeys = (await loadInactiveInitiativeKeys(db)) ?? undefined;
+
     const ctx: EligibilityContext = {
       industry: str(input.industry),
       didntWork,
@@ -145,6 +170,7 @@ export async function POST() {
       hoursPerWeek: num(input.weekly_hours),
       whoCloses: str(input.sales_owner),
       stage: str(input.growth_stage),
+      inactiveKeys,
     };
 
     /* ---- The candidate pool ---- */
@@ -171,17 +197,42 @@ export async function POST() {
       (entry) => !alreadyPlanned.has(entry.key)
     );
 
-    /* ---- How many to add ---- */
+    /* ---- How many to offer, and how many they may keep ---- */
 
-    const yoursTotal = yours.reduce((sum, y) => sum + (y.forecast ?? 0), 0);
+    // `yoursTotal` used to feed a gapToGoal argument here. Recommendations no
+    // longer depend on whether the goal is covered, so it has gone with it —
+    // the gap is still computed below for the GapBar.
     const planLimit = await loadInitiativeLimit(db, companyId);
 
-    const wanted = recommendationCount({
-      stage: ctx.stage,
-      existingCount: yours.length,
-      gapToGoal: Math.max(0, revenueGoal - yoursTotal),
-      planLimit,
-    });
+    /**
+     * How many ALTERNATIVES to put in front of them, and the cap on what they
+     * may keep.
+     *
+     * These used to be the same question with one answer: "how many to add on
+     * top of the user's own". They are now separate. `wanted` sizes the pool of
+     * contenders — independent of how many initiatives the user already has,
+     * and no longer suppressed when their plan already covers the revenue goal,
+     * because a covered plan can still be a worse plan. `capacity` is the
+     * number they may finish with, counting their own.
+     */
+    /**
+     * `poolSize` is what makes Swap work.
+     *
+     * Alternatives are whatever the shortlist leaves behind, so asking for
+     * `capacity` cards out of a pool of `capacity` leaves none and disables
+     * Swap on every card before the user has done anything. Telling the sizing
+     * function how much is actually available lets it hold a reserve back —
+     * see SWAP_RESERVE.
+     */
+    const wanted = recommendationCount({ planLimit, poolSize: pool.length });
+    const capacity = recommendationCapacity({ planLimit });
+
+    console.log(
+      "[intake/recommend] pool:", pool.length,
+      "| shortlist:", wanted,
+      "| reserved for swaps:", Math.max(0, pool.length - wanted),
+      "| selection cap:", capacity
+    );
 
     /* ---- Ask the model to rank, then filter its answer ---- */
 
@@ -258,6 +309,13 @@ export async function POST() {
         productIds: benchmarkRevenue.productIds,
       })),
       planLimit,
+      /**
+       * The most initiatives this plan may end up with, counting the user's
+       * OWN. The screen uses it for the "N of 5 selected" counter and to block
+       * selection past the cap; /api/intake/build re-derives it server-side
+       * rather than trusting this number back.
+       */
+      capacity,
       aiUnavailable,
     });
   } catch (err: unknown) {

@@ -121,6 +121,91 @@ describe("evaluateAccess — admin pause", () => {
     expect(evaluateAccess(ON, sub({ isPaused: false }), NOW).reason).toBe("active");
     expect(evaluateAccess(ON, sub(), NOW).reason).toBe("active");
   });
+
+  /**
+   * THE AUTO-RESUME BUG.
+   *
+   * `pause_resumes_at` is passed to Stripe as `pause_collection.resumes_at`, so
+   * when that moment arrives STRIPE STARTS CHARGING AGAIN on its own. Nothing
+   * in the app ever cleared `is_paused` — no cron existed, and this function
+   * treated the date as display-only — so the customer was billed and locked
+   * out at the same time, indefinitely, until an admin happened to notice.
+   *
+   * An elapsed resume date therefore means the pause is over, whether or not a
+   * job has got round to tidying the flag.
+   */
+  it("stops locking out a pause whose resume date has passed", () => {
+    const d = evaluateAccess(
+      ON,
+      sub({ isPaused: true, pauseResumesAt: new Date(NOW - DAY).toISOString() }),
+      NOW
+    );
+    expect(d.allowed).toBe(true);
+    expect(d.reason).toBe("active");
+  });
+
+  it("releases exactly on the boundary, not a day late", () => {
+    const d = evaluateAccess(
+      ON,
+      sub({ isPaused: true, pauseResumesAt: new Date(NOW).toISOString() }),
+      NOW
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  it("still locks out right up to the resume moment", () => {
+    const d = evaluateAccess(
+      ON,
+      sub({ isPaused: true, pauseResumesAt: new Date(NOW + 1000).toISOString() }),
+      NOW
+    );
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("paused");
+  });
+
+  /**
+   * An open-ended pause is an ADMIN SUSPENSION with no end date. It must never
+   * expire by itself, or a suspension for non-payment or abuse would quietly
+   * lift itself.
+   */
+  it("never auto-releases a pause with no resume date", () => {
+    const d = evaluateAccess(ON, sub({ isPaused: true, pauseResumesAt: null }), NOW);
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("paused");
+  });
+
+  it("fails closed on an unparseable resume date", () => {
+    // A corrupt value must not be read as "the pause is over".
+    const d = evaluateAccess(ON, sub({ isPaused: true, pauseResumesAt: "garbage" }), NOW);
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("paused");
+  });
+
+  /**
+   * Releasing the pause means falling through to NORMAL evaluation, not
+   * granting access unconditionally. A subscription that is cancelled or
+   * expired underneath an elapsed pause stays denied — on its own merits.
+   */
+  it("evaluates the subscription on its merits once the pause elapses", () => {
+    const elapsed = { isPaused: true, pauseResumesAt: new Date(NOW - DAY).toISOString() };
+
+    const cancelled = evaluateAccess(ON, sub({ ...elapsed, status: "canceled" }), NOW);
+    expect(cancelled.allowed).toBe(false);
+    expect(cancelled.reason).toBe("canceled");
+
+    const expiredTrial = evaluateAccess(
+      ON,
+      sub({ ...elapsed, status: "trialing", trialEndsAt: new Date(NOW - 5 * DAY).toISOString() }),
+      NOW
+    );
+    expect(expiredTrial.allowed).toBe(false);
+    expect(expiredTrial.reason).toBe("trial_expired");
+
+    // And a comp underneath an elapsed pause is honoured again.
+    const comped = evaluateAccess(ON, sub({ ...elapsed, isComped: true, status: null }), NOW);
+    expect(comped.allowed).toBe(true);
+    expect(comped.reason).toBe("comped");
+  });
 });
 
 describe("evaluateAccess — comped", () => {

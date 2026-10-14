@@ -5,6 +5,7 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { PauseCircle, Mail } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
+import { ResumePlanButton } from "@/components/billing/resume-plan-button";
 
 export const metadata = {
   title: "Account paused | SAM Plan AI",
@@ -63,7 +64,24 @@ async function loadContactEmail(): Promise<string | null> {
  * Checked server-side on every request (the page is force-dynamic), so the
  * answer cannot be cached from when the pause was real.
  */
-async function isCallerPaused(): Promise<boolean> {
+interface PauseState {
+  paused: boolean;
+  /** 'customer' when they paused themselves, 'admin' for a suspension. */
+  origin: string | null;
+  resumesAt: string | null;
+  /** Only an owner may restart billing, matching the resume route. */
+  isOwner: boolean;
+}
+
+/**
+ * Returns the whole pause state rather than a boolean, because the page now has
+ * to answer three questions, not one: is this account paused, did the CUSTOMER
+ * pause it, and may this particular person restart it. Two of those decide
+ * whether a "restart my plan" button appears at all.
+ */
+async function loadPauseState(): Promise<PauseState> {
+  const DENIED: PauseState = { paused: true, origin: null, resumesAt: null, isOwner: false };
+
   try {
     const cookieStore = await cookies();
     const supabase = createServerClient(
@@ -85,7 +103,7 @@ async function isCallerPaused(): Promise<boolean> {
     } = await supabase.auth.getUser();
 
     // Not signed in: there is no account to be paused, so nothing to show.
-    if (!user) return false;
+    if (!user) return { ...DENIED, paused: false };
 
     const db = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -94,37 +112,68 @@ async function isCallerPaused(): Promise<boolean> {
 
     const { data: profile } = await db
       .from("profiles")
-      .select("company_id")
+      .select("company_id, role")
       .eq("id", user.id)
       .maybeSingle();
 
-    const companyId = (profile as { company_id?: string | null } | null)?.company_id;
-    if (!companyId) return false;
+    const me = profile as { company_id?: string | null; role?: string | null } | null;
+    const companyId = me?.company_id;
+    if (!companyId) return { ...DENIED, paused: false };
 
     const { data: sub } = await db
       .from("subscriptions")
-      .select("is_paused")
+      .select("is_paused, pause_origin, pause_resumes_at")
       .eq("company_id", companyId)
       .maybeSingle();
 
-    return (sub as { is_paused?: boolean | null } | null)?.is_paused === true;
+    const row = sub as {
+      is_paused?: boolean | null;
+      pause_origin?: string | null;
+      pause_resumes_at?: string | null;
+    } | null;
+
+    return {
+      paused: row?.is_paused === true,
+      origin: row?.pause_origin ?? null,
+      resumesAt: row?.pause_resumes_at ?? null,
+      // Same rule as /api/billing/resume: a missing role means sole owner.
+      isOwner: !me?.role || me.role === "owner",
+    };
   } catch (err) {
     /*
      * Fails CLOSED on the redirect, OPEN on the message: a read failure shows
      * the paused page rather than bouncing someone into an app they may not be
      * entitled to. Being told to contact an admin is recoverable; silently
      * granting access is not.
+     *
+     * The restart button is withheld in this case too — offering a button that
+     * cannot know whether it is allowed is worse than the generic message.
      */
     console.error("[account-paused] Could not verify pause state:", err);
-    return true;
+    return DENIED;
   }
 }
 
 export default async function AccountPausedPage() {
+  const pause = await loadPauseState();
+
   // Anyone not actually paused has no business here.
-  if (!(await isCallerPaused())) {
+  if (!pause.paused) {
     redirect("/year-at-a-glance");
   }
+
+  /**
+   * A pause the customer chose is theirs to end. An admin suspension is not —
+   * it exists for non-payment, contract disputes and abuse, and a customer who
+   * could lift it would make the control decorative. canResumeSelf on the route
+   * enforces the same rule, so this only decides what to RENDER.
+   */
+  const selfPaused = pause.origin === "customer";
+  const canRestart = selfPaused && pause.isOwner;
+
+  const resumesOnLabel = pause.resumesAt
+    ? new Date(pause.resumesAt).toLocaleDateString("en-US", { dateStyle: "medium" })
+    : null;
 
   const contactEmail = await loadContactEmail();
 
@@ -155,11 +204,47 @@ export default async function AccountPausedPage() {
             exactly as you left it once access is restored.
           </p>
 
-          <p className="mt-4 text-sm font-medium text-foreground">
-            To continue, please contact your administrator.
-          </p>
+          {/*
+            A SELF-PAUSED CUSTOMER IS NOT SENT TO AN ADMINISTRATOR.
+            They have one and it is them. Telling someone who paused their own
+            billing to "contact your administrator" was a dead end with no way
+            out of the product, which is why this page now branches.
+          */}
+          {selfPaused ? (
+            <>
+              <p className="mt-4 text-sm text-foreground">
+                {resumesOnLabel ? (
+                  <>
+                    You paused this yourself. Billing and access restart
+                    automatically on{" "}
+                    <span className="font-semibold">{resumesOnLabel}</span>.
+                  </>
+                ) : (
+                  <>You paused this yourself.</>
+                )}
+              </p>
 
-          {contactEmail ? (
+              {canRestart ? (
+                <ResumePlanButton resumesOnLabel={resumesOnLabel} />
+              ) : (
+                /*
+                  Paused by the customer, but this person is not the owner. Only
+                  an owner may restart billing, so pointing them at a button
+                  that would 403 would be worse than saying who can.
+                */
+                <p className="mt-5 rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))] px-4 py-3 text-sm text-[hsl(var(--foreground-muted))]">
+                  The account owner can restart the plan at any time from this
+                  page.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="mt-4 text-sm font-medium text-foreground">
+              To continue, please contact your administrator.
+            </p>
+          )}
+
+          {!selfPaused && contactEmail ? (
             <a
               href={`mailto:${contactEmail}?subject=${encodeURIComponent(
                 "Paused account — request to restore access"
@@ -169,7 +254,7 @@ export default async function AccountPausedPage() {
               <Mail className="h-4 w-4" aria-hidden="true" />
               {contactEmail}
             </a>
-          ) : (
+          ) : !selfPaused ? (
             /*
               No address configured. Say so plainly rather than rendering a
               dead mailto: link, which would look like the page is broken.
@@ -178,7 +263,7 @@ export default async function AccountPausedPage() {
               Please get in touch with the person who manages your SAM Plan AI
               account.
             </p>
-          )}
+          ) : null}
 
           {/*
             Sign out stays reachable. Someone with access to two accounts needs

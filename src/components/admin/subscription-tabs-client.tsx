@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { CreditCard, Settings, Zap } from 'lucide-react';
+import { CreditCard, Settings, Zap, HeartHandshake } from 'lucide-react';
 import { SubscriptionOverview } from './subscription-overview';
 import { SubscriptionPlanEditor } from './subscription-plan-editor';
 import { BillingManagement } from './billing-management';
+import { RetentionSettings } from './retention-settings';
 
-type SubTab = 'overview' | 'billing' | 'manage-plans';
+type SubTab = 'overview' | 'billing' | 'manage-plans' | 'retention';
 
 /**
  * Overview now shows REAL revenue aggregates (it was a hardcoded mock), so it is
@@ -19,6 +20,8 @@ export function SubscriptionTabsClient() {
     { key: 'overview' as const, label: 'Overview', icon: CreditCard },
     { key: 'billing' as const, label: 'Billing & Stripe', icon: Zap },
     { key: 'manage-plans' as const, label: 'Manage Plans', icon: Settings },
+    // Controls what a customer is offered when they start to cancel.
+    { key: 'retention' as const, label: 'Retention', icon: HeartHandshake },
   ];
 
   return (
@@ -43,6 +46,7 @@ export function SubscriptionTabsClient() {
       {activeTab === 'overview' && <SubscriptionOverview />}
       {activeTab === 'billing' && <BillingManagement />}
       {activeTab === 'manage-plans' && <SubscriptionPlanEditor />}
+      {activeTab === 'retention' && <RetentionSettings />}
     </div>
   );
 }

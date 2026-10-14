@@ -5,6 +5,9 @@ import { cookies } from "next/headers";
 import { loadBillingConfig, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client";
 import { evaluateAccess } from "@/lib/billing/entitlement";
 import { resolveUsagePeriod, checkLimit } from "@/lib/billing/limits";
+import { canCancel, canOfferDiscount } from "@/lib/billing/cancellation";
+import { canPauseSelf } from "@/lib/billing/pause";
+import { resolveBookingUrls } from "@/lib/billing/booking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -95,14 +98,19 @@ export async function GET() {
     // for the active mode cannot go through checkout, so the UI must not offer it.
     const { data: prices } = await db
       .from("stripe_prices")
-      .select("plan_id, billing_cycle")
+      // unit_amount and currency are selected so the cancellation flow can say
+      // what the standard rate for a plan IS, which it needs in order to tell a
+      // grandfathered subscriber what they would pay on coming back.
+      .select("plan_id, billing_cycle, unit_amount, currency")
       .eq("stripe_mode", STRIPE_MODE_TAG)
       .eq("is_current", true);
 
+    const currentPrices = (prices ?? []) as {
+      plan_id: string; billing_cycle: string; unit_amount: number; currency: string;
+    }[];
+
     const purchasable = new Set(
-      ((prices ?? []) as { plan_id: string; billing_cycle: string }[]).map(
-        (p) => `${p.plan_id}:${p.billing_cycle}`
-      )
+      currentPrices.map((p) => `${p.plan_id}:${p.billing_cycle}`)
     );
 
     // Plan limits and features for display on the pricing cards.
@@ -141,7 +149,8 @@ export async function GET() {
             "plan_id, tier, status, stripe_status, billing_cycle, is_comped, comped_until, " +
             "comped_reason, trial_ends_at, current_period_start, current_period_end, " +
             "cancel_at_period_end, past_due_since, pending_plan_id, pending_billing_cycle, " +
-            "stripe_subscription_id, stripe_mode, is_paused, paused_at, pause_resumes_at"
+            "stripe_subscription_id, stripe_price_id, stripe_mode, is_paused, paused_at, " +
+            "pause_resumes_at"
           )
           .eq("company_id", companyId)
           .maybeSingle()
@@ -154,10 +163,173 @@ export async function GET() {
       current_period_start: string | null; current_period_end: string | null;
       cancel_at_period_end: boolean; past_due_since: string | null;
       pending_plan_id: string | null; pending_billing_cycle: string | null;
-      stripe_subscription_id: string | null; stripe_mode: string | null;
+      stripe_subscription_id: string | null; stripe_price_id: string | null;
+      stripe_mode: string | null;
       is_paused: boolean | null; paused_at: string | null;
       pause_resumes_at: string | null;
     } | null;
+
+    /**
+     * What this customer actually pays, versus what the plan costs today.
+     *
+     * Needed by the cancellation flow's "what you'd lose" step, which warns a
+     * grandfathered subscriber that their rate goes away if they leave. That
+     * warning must only appear when it is TRUE — telling someone already on the
+     * standard rate that they will lose a discount is an invented claim, and the
+     * mockup's founding-rate callout would do exactly that if rendered
+     * unconditionally.
+     *
+     * The paid price is looked up WITHOUT `is_current`, because being on a
+     * superseded row is the whole point: sync-prices retains old rows precisely
+     * so grandfathered subscribers still resolve.
+     */
+    const { data: paidPriceRow } = sub?.stripe_price_id
+      ? await db
+          .from("stripe_prices")
+          .select("unit_amount, currency")
+          .eq("stripe_mode", STRIPE_MODE_TAG)
+          .eq("stripe_price_id", sub.stripe_price_id)
+          .maybeSingle()
+      : { data: null };
+
+    const paidPrice = paidPriceRow as { unit_amount: number; currency: string } | null;
+
+    const standardPrice =
+      sub?.plan_id
+        ? currentPrices.find(
+            (p) => p.plan_id === sub.plan_id && p.billing_cycle === sub.billing_cycle
+          ) ?? null
+        : null;
+
+    /**
+     * Features for the caller's OWN plan, even when that plan is retired.
+     *
+     * The map above is built only for ACTIVE plans, so a subscriber on a retired
+     * plan had no feature list at all. Harmless for the pricing cards, which do
+     * not show retired plans — but the cancellation screen lists what the
+     * customer is giving up, and showing them an empty list would understate it.
+     */
+    if (sub?.plan_id && !featuresByPlan.has(sub.plan_id)) {
+      const { data: ownFeatures } = await db
+        .from("plan_features")
+        .select("feature_key, feature_label, enabled")
+        .eq("plan_id", sub.plan_id);
+
+      featuresByPlan.set(
+        sub.plan_id,
+        ((ownFeatures ?? []) as {
+          feature_key: string; feature_label: string; enabled: boolean;
+        }[]).map((f) => ({ key: f.feature_key, label: f.feature_label, enabled: f.enabled }))
+      );
+    }
+
+    /**
+     * How much work is in the account, for the cancellation screen's "here is
+     * what gets locked" list. A head-count query, so it costs nothing and
+     * returns no customer data.
+     */
+    const { count: initiativeCount } = companyId
+      ? await db
+          .from("initiatives")
+          .select("id", { count: "exact", head: true })
+          .eq("company_id", companyId)
+      : { count: 0 };
+
+    /**
+     * Can this customer be offered a retention discount?
+     *
+     * Resolved HERE, not in the modal, so the cancellation flow can skip the
+     * budget screen entirely for someone who cannot claim anything. Without
+     * this an annual subscriber was shown two offer cards whose buttons both
+     * failed — the screen was rendered purely because the reason had an offer,
+     * with no reference to whether that offer could actually be granted.
+     *
+     * ONE CHECK IS DELIBERATELY OMITTED: whether Stripe already has a discount
+     * on the subscription. Answering that needs a Stripe API call, and this
+     * endpoint loads on every visit to Settings. The claim route re-runs the
+     * full set including that one, and refuses with a specific
+     * "already discounted" message — so the rare case fails late with accurate
+     * wording rather than making every settings page load slower.
+     */
+    const { count: redemptionCount, error: redemptionError } = companyId
+      ? await db
+          .from("retention_offer_redemptions")
+          .select("id", { count: "exact", head: true })
+          .eq("company_id", companyId)
+      : { count: 0, error: null };
+
+    if (redemptionError) {
+      // Table missing or unreadable. Treated as "already redeemed" so the
+      // screen is hidden: offering something that cannot be recorded is worse
+      // than not offering it.
+      console.error("[billing/me] Could not read redemptions:", redemptionError.message);
+    }
+
+    const cancelEligibility = canCancel(
+      sub
+        ? {
+            status: (sub.stripe_status ?? sub.status) as string,
+            isComped: sub.is_comped,
+            isPaused: sub.is_paused ?? false,
+            cancelAtPeriodEnd: sub.cancel_at_period_end,
+            hasStripeSubscription:
+              !!sub.stripe_subscription_id && sub.stripe_mode === STRIPE_MODE_TAG,
+            currentPeriodEnd: sub.current_period_end,
+          }
+        : null
+    );
+
+    const discountEligibility = canOfferDiscount({
+      cancelEligible: cancelEligibility.allowed,
+      billingCycle: sub?.billing_cycle ?? null,
+      hasExistingDiscount: false,
+      alreadyRedeemed: !!redemptionError || (redemptionCount ?? 0) > 0,
+      priceMinor: paidPrice?.unit_amount ?? null,
+    });
+
+    /**
+     * Can this customer pause instead of cancelling?
+     *
+     * Resolved here for the same reason as the discount: the flow must not
+     * render an offer screen whose button the server would refuse. Pausing is
+     * monthly-only — `pause_collection` suppresses invoices raised during the
+     * window but does not move a renewal date, so pausing an annual subscriber
+     * whose renewal is months away would cost them access and save them
+     * nothing.
+     */
+    const pauseEligibility = canPauseSelf({
+      cancelEligible: cancelEligibility.allowed,
+      billingCycle: sub?.billing_cycle ?? null,
+    });
+
+    /**
+     * Booking links for the two coaching-call offers.
+     *
+     * Sent to the client because those screens are nothing BUT a booking
+     * button: with no URL the offer cannot function, so the flow drops the
+     * screen rather than showing a dead button. Read tolerantly — if migration
+     * 033 has not been applied the select errors, and the right outcome is
+     * "those screens are off", not a broken billing page.
+     */
+    const { data: bookingRow, error: bookingError } = await db
+      .from("app_settings")
+      .select("retention_reset_call_url, retention_strategy_call_url")
+      .eq("id", "global")
+      .maybeSingle();
+
+    if (bookingError) {
+      console.error(
+        "[billing/me] Could not read retention booking URLs:",
+        bookingError.message
+      );
+    }
+
+    const booking = resolveBookingUrls({
+      resetCallUrl: (bookingRow as { retention_reset_call_url?: unknown } | null)
+        ?.retention_reset_call_url,
+      strategyCallUrl: (bookingRow as { retention_strategy_call_url?: unknown } | null)
+        ?.retention_strategy_call_url,
+    });
 
     /**
      * Is there a plan the company has actually been GIVEN, as opposed to one it
@@ -312,8 +484,45 @@ export async function GET() {
             // the active mode means there is nothing for the portal to manage.
             hasStripeSubscription:
               !!sub.stripe_subscription_id && sub.stripe_mode === STRIPE_MODE_TAG,
+            /**
+             * Minor units, as Stripe reports them. Both nullable: a comped or
+             * trialing account has no Stripe price, and the cancellation screen
+             * must render without inventing a figure.
+             */
+            currentPriceMinor: paidPrice?.unit_amount ?? null,
+            standardPriceMinor: standardPrice?.unit_amount ?? null,
+            priceCurrency: paidPrice?.currency ?? standardPrice?.currency ?? "usd",
+            /**
+             * True only when they genuinely pay less than today's rate. This is
+             * what gates the "your rate goes away" warning, so it is computed
+             * from two real figures rather than inferred from planRetired — a
+             * plan can be retired while its price is unchanged, and a price can
+             * be superseded while the plan is still sold.
+             */
+            onLegacyPrice:
+              typeof paidPrice?.unit_amount === "number" &&
+              typeof standardPrice?.unit_amount === "number" &&
+              paidPrice.unit_amount < standardPrice.unit_amount,
+            // What the customer keeps or loses, resolved even for a retired plan.
+            planFeatures: sub.plan_id ? featuresByPlan.get(sub.plan_id) ?? [] : [],
+            /**
+             * Whether the cancellation flow should show its budget screen.
+             * False for annual subscribers, anyone who already used their one
+             * offer, and anyone who could not cancel anyway.
+             */
+            discountOfferAvailable: discountEligibility.allowed,
+            /** Whether the cancellation flow should offer a pause. */
+            pauseOfferAvailable: pauseEligibility.allowed,
+            /**
+             * Booking links, null when unset. Null hides the matching screen,
+             * which is how an operator switches those offers off.
+             */
+            resetCallUrl: booking.resetCall,
+            strategyCallUrl: booking.strategyCall,
           }
         : null,
+      // Account contents, for the cancellation screen's "what gets locked" list.
+      counts: { initiatives: initiativeCount ?? 0 },
       access: {
         allowed: access.allowed,
         reason: access.reason,

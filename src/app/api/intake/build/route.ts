@@ -11,9 +11,14 @@ import {
   forecastForStoredInitiative,
   scenariosFor,
   planTargets,
+  initiativeKindForCadence,
+  toFrequency,
   type RevenueScenarios,
 } from "@/lib/intake/build-forecast";
+import type { RepeatFrequency } from "@/lib/intake-forecast";
+import type { InitiativeKind } from "@/types";
 import { productGoal } from "@/lib/intake-forecast";
+import { MAX_RECOMMENDED_INITIATIVES } from "@/lib/recommend/sizing";
 import { loadTaskTemplates } from "@/lib/workbook/read";
 import {
   materialiseTasks,
@@ -58,6 +63,17 @@ export const dynamic = "force-dynamic";
 interface BuildBody {
   /** Library keys the user accepted from the recommendations screen. */
   acceptedKeys?: unknown;
+  /**
+   * `intake_initiatives` row ids the user DESELECTED on the recommendations
+   * screen.
+   *
+   * The screen is now one pool of the user's own initiatives plus our
+   * alternatives, capped at MAX_RECOMMENDED_INITIATIVES in total — so choosing a
+   * recommendation can mean dropping one of their own. Identified by row id
+   * rather than key, because two of a user's initiatives can share a library
+   * key and an index would break if the draft were re-read in another order.
+   */
+  droppedOwnIds?: unknown;
 }
 
 export async function POST(request: NextRequest) {
@@ -73,6 +89,12 @@ export async function POST(request: NextRequest) {
       // An empty body is legitimate: Path A users may accept nothing and build
       // only what they entered themselves.
     }
+
+    const droppedOwnIds = new Set(
+      Array.isArray(body.droppedOwnIds)
+        ? body.droppedOwnIds.filter((id): id is string => typeof id === "string")
+        : []
+    );
 
     const acceptedKeys = Array.isArray(body.acceptedKeys)
       ? body.acceptedKeys.filter((k): k is string => typeof k === "string")
@@ -108,9 +130,50 @@ export async function POST(request: NextRequest) {
     ]);
 
     const intakeProducts = (productRows ?? []) as Record<string, unknown>[];
-    const plannedInitiatives = (initiativeRows ?? []) as Record<string, unknown>[];
+
+    /**
+     * The user's own initiatives, MINUS the ones they deselected.
+     *
+     * The recommendations screen is a single pool capped at five, so dropping
+     * one of their own is how they make room for an alternative. Filtered here
+     * rather than trusted from a count, so the plan contains exactly what they
+     * chose.
+     */
+    const allPlanned = (initiativeRows ?? []) as Record<string, unknown>[];
+    const plannedInitiatives = allPlanned.filter(
+      (row) => !droppedOwnIds.has(String(row.id ?? ""))
+    );
+
+    if (droppedOwnIds.size > 0) {
+      console.log(
+        "[intake/build] dropped", allPlanned.length - plannedInitiatives.length,
+        "of", allPlanned.length, "own initiatives at the user's request"
+      );
+    }
 
     const totalInitiatives = plannedInitiatives.length + acceptedKeys.length;
+
+    /**
+     * THE HARD CEILING, enforced server-side.
+     *
+     * The screen blocks selection past the cap, but the screen is not
+     * enforcement — a stale client or a direct post could exceed it. 422
+     * rather than 403 for the same reason as the plan-limit check below: the
+     * request is well formed and the account is fine, there are simply too
+     * many initiatives in it.
+     */
+    if (totalInitiatives > MAX_RECOMMENDED_INITIATIVES) {
+      return NextResponse.json(
+        {
+          error:
+            `A plan can hold at most ${MAX_RECOMMENDED_INITIATIVES} initiatives, and this ` +
+            `one has ${totalInitiatives}. Deselect ` +
+            `${totalInitiatives - MAX_RECOMMENDED_INITIATIVES} to continue.`,
+          limit: MAX_RECOMMENDED_INITIATIVES,
+        },
+        { status: 422 }
+      );
+    }
 
     /* ---- REQ-13.15: the real limit check ---- */
 
@@ -240,6 +303,17 @@ export async function POST(request: NextRequest) {
       displayOrder: number;
       /** good/better/best, so the dashboard has revenue to show. */
       revenue: RevenueScenarios;
+      /**
+       * one-time / recurring / evergreen, from the user's own cadence answer.
+       *
+       * ONE INITIATIVE, HOWEVER MANY RUNS. A business doing monthly webinars
+       * has one webinar initiative marked recurring, not twelve initiatives —
+       * which is what makes a cap of five initiatives per plan compatible with
+       * running something every month.
+       */
+      kind: InitiativeKind;
+      /** weekly / monthly / quarterly, or null when it does not repeat. */
+      repeatFrequency: RepeatFrequency | null;
     }[] = [];
 
     // The horizon the funnel figures are projected over. Defaults to 12 so a
@@ -290,6 +364,16 @@ export async function POST(request: NextRequest) {
         revenue: scenariosFor(
           forecastForStoredInitiative(initiative, horizonMonths)
         ),
+        /**
+         * The cadence the user chose, carried through instead of discarded.
+         *
+         * These two lines are what stop the plan contradicting itself. The
+         * revenue above is ALREADY multiplied by the number of runs the
+         * cadence implies, so writing 'one-time' here claimed twelve monthly
+         * webinars' revenue for a single dated webinar.
+         */
+        kind: initiativeKindForCadence(initiative.cadence),
+        repeatFrequency: toFrequency(initiative.repeat_frequency),
       });
     }
 
@@ -313,6 +397,18 @@ export async function POST(request: NextRequest) {
         productIds: largestProductId ? [largestProductId] : [],
         displayOrder: plannedInitiatives.length + offset,
         revenue: scenariosFor(benchmarkRevenue),
+        /**
+         * A RECOMMENDATION STARTS AS ONE-TIME, and that is honest rather than
+         * lazy: the user has never run it and was never asked how often they
+         * would. Its benchmark forecast is a single run's worth too, so
+         * marking it recurring would promise a cadence nobody chose and a
+         * revenue figure that does not match it.
+         *
+         * They can change it to recurring on the initiative itself once the
+         * plan exists.
+         */
+        kind: "one-time",
+        repeatFrequency: null,
       });
     }
 
@@ -372,6 +468,8 @@ export async function POST(request: NextRequest) {
         productIds: item.productIds,
         displayOrder: item.displayOrder,
         revenue: item.revenue,
+        kind: item.kind,
+        repeatFrequency: item.repeatFrequency,
         // Same date handling as generate-plan: counted back from the event,
         // floored at today.
         tasks:
@@ -474,6 +572,10 @@ async function insertInitiative(
     displayOrder: number;
     revenue: RevenueScenarios;
     tasks: readonly MaterialisedTask[];
+    /** one-time / recurring / evergreen, from the user's cadence answer. */
+    kind: InitiativeKind;
+    /** weekly / monthly / quarterly, or null when it does not repeat. */
+    repeatFrequency: RepeatFrequency | null;
   }
 ): Promise<boolean> {
   // Filed under the EVENT's year, not the activation year: an initiative
@@ -522,7 +624,17 @@ async function insertInitiative(
         initiative_type_id: typeId,
         name: args.name,
         description: "",
-        kind: "one-time",
+        kind: args.kind,
+        /**
+         * Migration 036. Recorded so "recurring" means something actionable —
+         * without a frequency it is a word, not a schedule.
+         *
+         * `event_date` below is still a SINGLE date: this marks the initiative
+         * as repeating and says how often, but does not generate a row per
+         * occurrence. See recurring_templates (migration 001) for the
+         * occurrence model, which is specified but not implemented.
+         */
+        repeat_frequency: args.repeatFrequency,
         status: "planned",
         activation_date: args.activationDate,
         event_date: args.eventDate,
@@ -637,12 +749,26 @@ async function resolveInitiativeType(
   db: SupabaseClient,
   libraryKey: string
 ): Promise<string | null> {
-  const { data: existing } = await db
+  /**
+   * ORDER + LIMIT, NOT maybeSingle().
+   *
+   * `maybeSingle()` returns an error when more than one row matches, and
+   * duplicates exist: the old generate-plan lookup filtered on `is_active`, so
+   * a deactivated type was never found and an active clone was inserted
+   * instead — eleven of them accumulated under the `custom` channel. Resolving
+   * a type here would have failed outright for any channel that had collected
+   * one.
+   *
+   * Oldest first, so the row other plans already point at is the one reused.
+   */
+  const { data: existingRows } = await db
     .from("initiative_types")
     .select("id")
     .eq("channel", libraryKey)
-    .maybeSingle();
+    .order("created_at", { ascending: true })
+    .limit(1);
 
+  const existing = existingRows?.[0];
   if (existing?.id) return existing.id as string;
 
   const { data: entry } = await db

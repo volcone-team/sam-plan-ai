@@ -536,15 +536,36 @@ Generate a complete revenue plan as JSON.`;
       if (newProd?.id) productIdByName.set(key, newProd.id);
     }
 
-    // 7c. Get or create initiative types for each channel
+    /**
+     * 7c. Get or create initiative types for each channel.
+     *
+     * NOT FILTERED ON `is_active`, and that is a bug fix.
+     *
+     * It used to select only active rows, so when an admin deactivated a type
+     * the lookup missed and the insert below created a NEW ACTIVE DUPLICATE of
+     * the row they had just switched off — defeating the toggle and quietly
+     * growing the table every time a plan was generated. (There are 32 rows for
+     * 22 library initiatives today, which is how.)
+     *
+     * Reusing the deactivated row is the right behaviour now that
+     * `initiative_settings` is the real control over what the AI may reference:
+     * `initiative_types.is_active` no longer needs to gate anything here, and
+     * the library has already been filtered to the active set upstream by
+     * loadLibrary. So anything reaching this point is something the admin has
+     * allowed, and it should map onto the existing row rather than a clone.
+     *
+     * Ordered so that if duplicates already exist, the OLDEST wins — the one
+     * other plans are most likely already pointing at.
+     */
     const channelTypeMap = new Map<string, string>();
     const { data: existingTypes } = await supabase
       .from("initiative_types")
-      .select("id, channel")
-      .eq("is_active", true);
+      .select("id, channel, is_active, created_at")
+      .order("created_at", { ascending: true });
 
     for (const t of existingTypes || []) {
-      channelTypeMap.set(t.channel, t.id);
+      // First write wins, which with the ordering above is the oldest row.
+      if (!channelTypeMap.has(t.channel)) channelTypeMap.set(t.channel, t.id);
     }
 
     // 7d. Insert initiatives and their tasks

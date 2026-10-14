@@ -25,6 +25,7 @@ import {
   type FunnelStage,
   type RepeatFrequency,
 } from "@/lib/intake-forecast";
+import type { InitiativeKind } from "@/types";
 
 /** The three scenarios `initiatives` stores. */
 export interface RevenueScenarios {
@@ -59,6 +60,37 @@ export function toCadence(value: unknown): InitiativeCadence {
       return "always-on";
     default:
       return "once";
+  }
+}
+
+/**
+ * `intake_initiatives.cadence` -> `initiatives.kind`.
+ *
+ * THE MISSING HALF OF THE FORECAST. `forecastForStoredInitiative` below already
+ * multiplies revenue by the number of runs a cadence implies, so a user who
+ * said "monthly webinars" gets twelve webinars' worth of revenue. The build
+ * route then wrote `kind: 'one-time'` regardless — so the plan claimed the
+ * revenue of twelve runs while describing, scheduling and task-planning one.
+ *
+ * Mapping it here rather than in the route because this module already owns the
+ * translation between the intake's vocabulary and the plan's, and the two
+ * halves of that translation must not live apart: whoever changes `toCadence`
+ * has to see this.
+ *
+ * `always_on` becomes 'evergreen' rather than 'recurring'. That distinction is
+ * load-bearing, not cosmetic — the weekly planner shows an evergreen
+ * initiative for any week after its activation instead of keying off a single
+ * event date, and generate-plan's scheduler treats it as non-exclusive so it
+ * neither blocks another launch nor gets pushed by one.
+ */
+export function initiativeKindForCadence(value: unknown): InitiativeKind {
+  switch (toCadence(value)) {
+    case "repeat":
+      return "recurring";
+    case "always-on":
+      return "evergreen";
+    default:
+      return "one-time";
   }
 }
 

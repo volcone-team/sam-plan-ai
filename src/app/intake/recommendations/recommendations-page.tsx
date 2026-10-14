@@ -2,11 +2,13 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, Info, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BrandLogo } from "@/components/brand-logo";
+import { cn } from "@/lib/utils";
 import { formatMoney } from "@/lib/format-money";
 import { goalGap, type GoalGap } from "@/lib/intake-forecast";
+import { MAX_RECOMMENDED_INITIATIVES } from "@/lib/recommend/sizing";
 import { outputHeadline, outputVariantFor, type PlanPath } from "@/lib/intake/flow";
 import {
   planBuilt,
@@ -51,10 +53,19 @@ interface RecommendResponse {
   gap: GoalGap;
   goal: number;
   horizonMonths: number;
-  yours: { key: string; name: string; forecast: number | null; productIds: string[] }[];
+  yours: {
+    /** `intake_initiatives` row id — the stable handle for deselecting one. */
+    id: string;
+    key: string;
+    name: string;
+    forecast: number | null;
+    productIds: string[];
+  }[];
   recommended: ApiRecommendation[];
   alternatives: ApiRecommendation[];
   planLimit: number | null;
+  /** The most initiatives this plan may hold in total, counting the user's own. */
+  capacity: number;
   aiUnavailable: string | null;
   error?: string;
 }
@@ -73,6 +84,30 @@ export function RecommendationsPage() {
   const [shortlist, setShortlist] = React.useState<ApiRecommendation[]>([]);
   const [accepted, setAccepted] = React.useState<Set<string>>(new Set());
   const [dismissed, setDismissed] = React.useState<Set<string>>(new Set());
+  /**
+   * The user's OWN initiatives they have switched off, by row id.
+   *
+   * Stored as the dropped set rather than the kept set so the default — keep
+   * everything they entered — needs no initialisation from the response, and
+   * so an id that arrives late cannot start out deselected.
+   *
+   * By id, not key or index: two of a user's initiatives can share a library
+   * key (two webinars for different products), and indices shift if the draft
+   * is re-read in another order.
+   */
+  const [droppedOwn, setDroppedOwn] = React.useState<Set<string>>(new Set());
+  /**
+   * Shown when a click was refused because the plan is already full.
+   *
+   * Set by the toggles rather than derived from `atCapacity`: being at the cap
+   * is a normal resting state that needs no warning, whereas being refused is
+   * an event. Rendering it off `atCapacity` would nag everyone who legitimately
+   * selected five and was perfectly happy.
+   *
+   * Cleared by the next successful change, so it cannot outlive the condition
+   * it describes.
+   */
+  const [capacityNotice, setCapacityNotice] = React.useState<string | null>(null);
   /** Everything the user has seen, so a swap never repeats (D3). */
   const [seen, setSeen] = React.useState<Set<string>>(new Set());
 
@@ -130,25 +165,81 @@ export function RecommendationsPage() {
     if (!data) return null;
     return goalGap({
       goal: data.goal,
-      yours: data.yours.map((y) => y.forecast),
+      // Only the ones they are keeping contribute — a deselected initiative is
+      // not in the plan, so counting its revenue would overstate the forecast.
+      yours: data.yours.filter((y) => !droppedOwn.has(y.id)).map((y) => y.forecast),
       recommended: shortlist
         .filter((r) => accepted.has(r.key) && !dismissed.has(r.key))
         .map((r) => r.forecast),
     });
-  }, [data, shortlist, accepted, dismissed]);
+  }, [data, shortlist, accepted, dismissed, droppedOwn]);
 
   const acceptedCount = shortlist.filter(
     (r) => accepted.has(r.key) && !dismissed.has(r.key)
   ).length;
-  const totalInitiatives = (data?.yours.length ?? 0) + acceptedCount;
+  const keptOwnCount = (data?.yours.length ?? 0) - droppedOwn.size;
+  const totalInitiatives = keptOwnCount + acceptedCount;
 
-  // REQ-13.15 — warn and block the button, not the selection itself.
+  /**
+   * The selection cap: the tightest of the stage/plan capacity the server sent
+   * and the hard ceiling.
+   *
+   * Falls back to the ceiling rather than to "unlimited" if the field is
+   * missing — a cached bundle meeting an older response must not be able to
+   * build a nine-initiative plan.
+   */
+  const capacity = Math.min(data?.capacity ?? MAX_RECOMMENDED_INITIATIVES, MAX_RECOMMENDED_INITIATIVES);
+  const atCapacity = totalInitiatives >= capacity;
+
+  /**
+   * MORE than the cap, not merely at it.
+   *
+   * Distinct from `atCapacity`, which means full and blocks further additions.
+   * This means the cap is already exceeded, and the only way in is the user's
+   * OWN initiatives: `toggleAccept` and `toggleOwn` both refuse to grow the
+   * selection past capacity, so nothing we offer can cause it. Someone who
+   * described six things they are already running arrives here at six.
+   *
+   * WITHOUT THIS the Build button stayed enabled and the server answered 422
+   * — "A plan can hold at most 5 initiatives, and this one has 6" — after the
+   * click. The cap was real but enforced in the wrong place, which is the
+   * failure mode the screen's own checks exist to avoid.
+   *
+   * NOT folded into `overLimit`: that one names the customer's PLAN
+   * ("your plan allows 10"), while this is the product's five-initiative rule.
+   * One message cannot say both truthfully, and at current settings only this
+   * one can actually fire — Starter allows 10 and Pro and Mastery are
+   * unlimited.
+   */
+  const overCapacity = totalInitiatives > capacity;
+
+  // REQ-13.15 — kept as a separate signal because the plan limit has its own
+  // wording, naming the plan rather than the five-initiative rule.
   const overLimit =
     data?.planLimit !== null &&
     data?.planLimit !== undefined &&
     totalInitiatives > data.planLimit;
 
   const toggleAccept = (key: string) => {
+    /**
+     * Nothing may be added once the plan is full — but SAY SO.
+     *
+     * This used to `return` silently. From the user's side a click on "Add to
+     * plan" simply did nothing, which reads as a broken button rather than as
+     * a rule, and the only hint was a counter further up the page that they
+     * had no reason to be looking at.
+     */
+    if (!accepted.has(key) && atCapacity) {
+      setCapacityNotice(
+        `A plan holds up to ${capacity} initiatives, and you already have ` +
+        `${capacity} selected. Deselect one to make room for this.`
+      );
+      return;
+    }
+
+    // Any successful change makes the warning stale.
+    setCapacityNotice(null);
+
     setAccepted((prev) => {
       const next = new Set(prev);
       if (next.has(key)) {
@@ -163,6 +254,36 @@ export function RecommendationsPage() {
     setDismissed((prev) => {
       const next = new Set(prev);
       next.delete(key);
+      return next;
+    });
+  };
+
+  /**
+   * Keep or drop one of the user's OWN initiatives.
+   *
+   * Turning one back on is blocked at capacity for the same reason as
+   * accepting a recommendation: the cap is on the total, so something has to
+   * come out first.
+   */
+  const toggleOwn = (id: string) => {
+    const dropping = !droppedOwn.has(id);
+
+    // Re-selecting one of their own is blocked at capacity for the same reason
+    // as accepting a recommendation, and gets the same explanation.
+    if (!dropping && atCapacity) {
+      setCapacityNotice(
+        `A plan holds up to ${capacity} initiatives, and you already have ` +
+        `${capacity} selected. Deselect one to put this back.`
+      );
+      return;
+    }
+
+    setCapacityNotice(null);
+
+    setDroppedOwn((prev) => {
+      const next = new Set(prev);
+      if (dropping) next.add(id);
+      else next.delete(id);
       return next;
     });
   };
@@ -234,7 +355,10 @@ export function RecommendationsPage() {
       const response = await fetch("/api/intake/build", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ acceptedKeys }),
+        // The dropped set travels too: the build reads the user's own
+        // initiatives straight from the draft, so without it a deselected one
+        // would silently reappear in the plan.
+        body: JSON.stringify({ acceptedKeys, droppedOwnIds: [...droppedOwn] }),
       });
 
       const body = (await response.json()) as { error?: string };
@@ -314,29 +438,98 @@ export function RecommendationsPage() {
         </p>
       )}
 
+      {/*
+        THE SELECTION COUNTER.
+        The screen is one pool of the user's own initiatives plus ours, and a
+        plan holds at most `capacity`. Stating the count here — rather than only
+        complaining once they exceed it — is what makes "deselect one of yours
+        to take one of ours" discoverable instead of a dead end.
+      */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))] px-4 py-3">
+        <p className="text-sm font-medium text-foreground">
+          {totalInitiatives} of {capacity} selected
+        </p>
+        <p className="text-xs text-[hsl(var(--foreground-muted))]">
+          {atCapacity
+            ? "Your plan is full. Deselect one to swap in another."
+            : `A plan runs best with up to ${capacity} initiatives.`}
+        </p>
+      </div>
+
+      {/*
+        THE REFUSED CLICK, explained.
+
+        `role="status"` rather than `role="alert"`: this is the consequence of
+        something the user just did, not an error in their plan, and an
+        assertive live region would interrupt a screen reader mid-sentence.
+
+        Placed under the counter so the message and the number it refers to are
+        read together, and rendered only after a refusal — sitting at the cap is
+        a perfectly good place to be and needs no warning.
+      */}
+      {capacityNotice && (
+        <p
+          role="status"
+          className="flex items-start gap-2 rounded-[var(--radius-md)] border border-[hsl(var(--warning)_/_0.4)] bg-[hsl(var(--warning)_/_0.08)] px-3 py-2.5 text-sm text-foreground"
+        >
+          <Info
+            className="mt-0.5 h-4 w-4 shrink-0 text-[hsl(var(--warning))]"
+            aria-hidden="true"
+          />
+          <span>{capacityNotice}</span>
+        </p>
+      )}
+
       {data.yours.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-sm font-semibold text-foreground">
             What you&apos;re already planning
           </h2>
           <ul className="space-y-2">
-            {data.yours.map((initiative, index) => (
-              <li
-                key={`${initiative.key}-${index}`}
-                className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-border px-4 py-3"
-              >
-                <span className="text-sm font-medium text-foreground">
-                  {initiative.name}
-                </span>
-                <span className="text-sm tabular-nums text-[hsl(var(--foreground-muted))]">
-                  {initiative.forecast === null
-                    ? // Null is not zero: an unforecast initiative has
-                      // incomplete inputs, not no value.
-                      "No forecast yet"
-                    : formatMoney(initiative.forecast)}
-                </span>
-              </li>
-            ))}
+            {data.yours.map((initiative, index) => {
+              const kept = !droppedOwn.has(initiative.id);
+              // Blocked only when turning one back ON would exceed the cap.
+              const blocked = !kept && atCapacity;
+              return (
+                <li key={initiative.id || `${initiative.key}-${index}`}>
+                  {/*
+                    The user's own initiatives are now DESELECTABLE. They used
+                    to be a fixed list, which made the cap unreachable for
+                    anyone who had entered five of their own — they could see
+                    our alternatives but never choose one.
+                  */}
+                  <label
+                    className={cn(
+                      "flex cursor-pointer items-center justify-between gap-3 rounded-[var(--radius-md)] border px-4 py-3 transition-colors",
+                      kept
+                        ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary)_/_0.06)]"
+                        : "border-border opacity-60",
+                      blocked && "cursor-not-allowed"
+                    )}
+                  >
+                    <span className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={kept}
+                        disabled={blocked}
+                        onChange={() => toggleOwn(initiative.id)}
+                        className="h-4 w-4 shrink-0 accent-[hsl(var(--primary))]"
+                      />
+                      <span className="text-sm font-medium text-foreground">
+                        {initiative.name}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-sm tabular-nums text-[hsl(var(--foreground-muted))]">
+                      {initiative.forecast === null
+                        ? // Null is not zero: an unforecast initiative has
+                          // incomplete inputs, not no value.
+                          "No forecast yet"
+                        : formatMoney(initiative.forecast)}
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
@@ -369,12 +562,41 @@ export function RecommendationsPage() {
 
       {shortlist.length === 0 && data.yours.length > 0 && (
         <p className="rounded-[var(--radius-md)] border border-border px-4 py-3 text-sm text-[hsl(var(--foreground-muted))]">
-          Your own initiatives cover your goal, so we have nothing to add.
+          {/*
+            No longer "your initiatives cover your goal" — a covered goal no
+            longer suppresses recommendations, so an empty shortlist now means
+            we genuinely had nothing eligible left to offer.
+          */}
+          You&apos;ve already planned everything we&apos;d suggest, so there&apos;s
+          nothing to add.
+        </p>
+      )}
+
+      {/*
+        OVER FIVE. Only reachable by the user's own initiatives, so the message
+        says which ones to deselect rather than implying we added too many.
+
+        Shown instead of the plan-limit alert below when both would fire: two
+        alerts about the same count, differing only in which number they quote,
+        reads as a bug rather than as two rules.
+      */}
+      {overCapacity && (
+        <p
+          className="flex items-start gap-2 rounded-[var(--radius-md)] border border-[hsl(var(--invalid-border))] bg-[hsl(var(--invalid)_/_0.08)] px-3 py-2.5 text-sm text-[hsl(var(--destructive))]"
+          role="alert"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>
+            A plan runs best with up to {capacity} initiatives, and you have{" "}
+            {totalInitiatives} selected. Deselect{" "}
+            {totalInitiatives - capacity} of your own to continue — you can
+            swap one of ours in afterwards.
+          </span>
         </p>
       )}
 
       {/* REQ-13.15 — names the limit and the number to deselect. */}
-      {overLimit && data.planLimit !== null && (
+      {!overCapacity && overLimit && data.planLimit !== null && (
         <p
           className="flex items-start gap-2 rounded-[var(--radius-md)] border border-[hsl(var(--invalid-border))] bg-[hsl(var(--invalid)_/_0.08)] px-3 py-2.5 text-sm text-[hsl(var(--destructive))]"
           role="alert"
@@ -402,10 +624,12 @@ export function RecommendationsPage() {
         <Button
           size="lg"
           onClick={build}
-          // Disabled while over the limit: billing enforces the cap
-          // server-side anyway, so letting them past would fail later with a
-          // worse message.
-          disabled={building || overLimit}
+          /*
+            Disabled while over EITHER cap. Both are enforced server-side by
+            /api/intake/build regardless, so letting the click through would
+            only trade a clear on-screen message for a 422 after a round trip.
+          */
+          disabled={building || overLimit || overCapacity}
         >
           {building && <Loader2 className="h-4 w-4 animate-spin" />}
           Build my plan

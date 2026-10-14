@@ -34,8 +34,70 @@ export interface ContextEntry {
   whatToAvoid: string | null; sequencingNotes: string | null;
 }
 
-/** The whole selectable library. Small (tens of rows), so no filtering needed. */
-export async function loadLibrary(db: SupabaseClient): Promise<LibraryEntry[]> {
+/**
+ * Which initiative keys the AI is allowed to reference.
+ *
+ * Reads `initiative_settings` (migration 034), which lives OUTSIDE the wb_*
+ * tables because those are deleted and rebuilt by every workbook upload.
+ *
+ * ABSENT MEANS ACTIVE, in two different situations and for the same reason — an
+ * initiative should never vanish from the product because a bookkeeping row is
+ * missing:
+ *
+ *   - no settings row for a key: a freshly uploaded workbook is usable before
+ *     anyone visits the admin screen;
+ *   - the table cannot be read at all (not yet migrated, or a transient
+ *     failure): `null` is returned and the caller falls back to the FULL
+ *     library rather than an empty one.
+ *
+ * That second case is deliberate and worth stating plainly: failing open gives
+ * the AI too MANY initiatives, failing closed gives it none — and none means
+ * recommendations, plan generation, Enhance and the chatbot all silently stop
+ * working. A slightly-too-wide library is a far cheaper failure.
+ *
+ * RETURNS THE DISABLED SET, NOT THE ALLOWED ONE. That inversion is what makes
+ * "absent means active" actually work: filtering by an allow-list would drop
+ * every initiative that has no settings row yet, which is precisely the
+ * newly-uploaded case this is supposed to protect.
+ */
+export async function loadInactiveInitiativeKeys(
+  db: SupabaseClient
+): Promise<Set<string> | null> {
+  const { data, error } = await db
+    .from("initiative_settings")
+    .select("initiative_key, is_active");
+
+  if (error) {
+    console.error(
+      "[workbook/read] loadInactiveInitiativeKeys failed, falling back to the full library:",
+      error.message
+    );
+    return null;
+  }
+
+  return new Set(
+    (data || [])
+      // Explicitly disabled only. A missing row, or is_active null, is active.
+      .filter((r) => r.is_active === false)
+      .map((r) => r.initiative_key as string)
+  );
+}
+
+/**
+ * The selectable library. Small (tens of rows), so no pagination needed.
+ *
+ * FILTERED TO THE ACTIVE SET BY DEFAULT, and this is the single chokepoint that
+ * makes the admin toggles real: recommendations, the intake picker, plan
+ * generation, Enhance and the chatbot all call this function, so narrowing it
+ * here narrows all five at once.
+ *
+ * `includeInactive` is for the admin screen, which has to show the whole
+ * library in order to offer a toggle for each row.
+ */
+export async function loadLibrary(
+  db: SupabaseClient,
+  opts?: { includeInactive?: boolean }
+): Promise<LibraryEntry[]> {
   const { data, error } = await db
     .from("wb_initiative_library")
     .select("initiative_key, workbook_id, name, category, difficulty, speed_to_results, one_liner, own_or_ops, price_tier, needs_sales_team")
@@ -44,7 +106,33 @@ export async function loadLibrary(db: SupabaseClient): Promise<LibraryEntry[]> {
     console.error("[workbook/read] loadLibrary failed:", error.message);
     return [];
   }
-  return (data || []).map((r) => ({
+
+  let rows = data || [];
+
+  if (!opts?.includeInactive) {
+    const inactive = await loadInactiveInitiativeKeys(db);
+    // null means "could not determine" — keep everything rather than starve
+    // the AI of its whole vocabulary.
+    if (inactive && inactive.size > 0) {
+      const before = rows.length;
+      rows = rows.filter((r) => !inactive.has(r.initiative_key as string));
+
+      if (rows.length === 0 && before > 0) {
+        /**
+         * Everything is switched off. Honoured rather than overridden — an
+         * admin may genuinely have disabled the lot — but logged loudly,
+         * because the symptom downstream is "the AI recommends nothing" with
+         * no other clue as to why.
+         */
+        console.warn(
+          `[workbook/read] Every one of the ${before} library initiatives is ` +
+          "inactive. The AI has nothing to recommend. Check /admin/ai-workbook."
+        );
+      }
+    }
+  }
+
+  return rows.map((r) => ({
     initiativeKey: r.initiative_key as string,
     workbookId: (r.workbook_id as string) ?? null,
     name: r.name as string,

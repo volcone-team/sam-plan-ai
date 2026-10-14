@@ -55,6 +55,26 @@ interface CompanySubscription {
   };
 }
 
+/**
+ * Why this company last cancelled. Null if they never have.
+ *
+ * NOT PART OF `CompanySubscription`, because it outlives one: a customer who
+ * resubscribes gets a new subscription, and a company whose subscription row
+ * is gone still has a reason worth reading. It also survives reactivation —
+ * changing your mind does not unmake the cancellation — which is why every
+ * rendering of it carries the date.
+ */
+interface CompanyCancellation {
+  /** Stored reason code, e.g. `too_expensive`. */
+  reason: string;
+  /** The label the customer themselves picked, verbatim. */
+  reasonLabel: string;
+  /** Their "Anything else?" free text, or null if they wrote none. */
+  detail: string | null;
+  cancelledAt: string;
+  accessEndsAt: string | null;
+}
+
 interface AdminCompany {
   id: string;
   name: string;
@@ -73,6 +93,7 @@ interface AdminCompany {
   /** Minor units, as stored by Stripe. */
   lifetimePaid: number;
   subscription: CompanySubscription | null;
+  cancellation: CompanyCancellation | null;
 }
 
 function formatCurrency(amount: number, currency: string = "USD"): string {
@@ -711,6 +732,50 @@ export function CompanyManagement() {
                             {company.description && (
                               <div className="sm:col-span-2 lg:col-span-4">
                                 <Detail label="Description">{company.description}</Detail>
+                              </div>
+                            )}
+
+                            {/*
+                              WHY THEY LEFT.
+                              Full width, like Description, because the second
+                              line is the customer's own prose and would wrap
+                              to shreds in a quarter-width column.
+
+                              ALWAYS SHOWN once a cancellation exists, never
+                              gated on the current subscription state. Someone
+                              who cancelled and came back is exactly the
+                              account an operator most wants the history on,
+                              and that is also the case where the subscription
+                              looks perfectly healthy. The date is part of the
+                              note for that reason — it reads as history, not
+                              as a claim about today.
+                            */}
+                            {company.cancellation && (
+                              <div className="sm:col-span-2 lg:col-span-4">
+                                <Detail label="Reason for plan cancellation">
+                                  <span className="font-medium">
+                                    {company.cancellation.reasonLabel}
+                                  </span>
+                                  <span className="text-[hsl(var(--foreground-muted))]">
+                                    {" — cancelled "}
+                                    {shortDate(company.cancellation.cancelledAt)}
+                                    {company.cancellation.accessEndsAt
+                                      ? `, access ended ${shortDate(company.cancellation.accessEndsAt)}`
+                                      : ""}
+                                  </span>
+                                  {company.cancellation.detail && (
+                                    /*
+                                      Quoted and italicised so it is obvious
+                                      this is the customer talking, not us. It
+                                      is unfiltered free text, which is why it
+                                      stays inside the accordion and never
+                                      reaches a collapsed row.
+                                    */
+                                    <span className="mt-1 block italic text-[hsl(var(--foreground-muted))]">
+                                      “{company.cancellation.detail}”
+                                    </span>
+                                  )}
+                                </Detail>
                               </div>
                             )}
                           </div>

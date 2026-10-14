@@ -3,6 +3,7 @@
  * Tests for initiative type loading, filtering, and retrieval
  */
 
+import { describe, test, expect } from 'vitest';
 import { initiativeTypeService } from '../initiative-type.service';
 
 describe('InitiativeTypeService', () => {

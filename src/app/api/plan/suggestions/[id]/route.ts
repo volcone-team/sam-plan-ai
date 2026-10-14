@@ -194,7 +194,18 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
     const [{ data: annualPlan }, { data: products }, { data: initTypes }] = await Promise.all([
       db.from("annual_plans").select("id").eq("company_id", companyId).order("year", { ascending: false }).limit(1).single(),
       db.from("products").select("id").eq("company_id", companyId).eq("is_active", true).order("display_order").limit(1),
-      db.from("initiative_types").select("id, channel").eq("is_active", true),
+      /**
+       * NOT filtered on `is_active` — same fix as generate-plan.
+       *
+       * Filtering here meant a deactivated type was never found, so the insert
+       * below created an active duplicate of the row an admin had just switched
+       * off. Oldest first, so if duplicates already exist the one other plans
+       * point at wins.
+       */
+      db
+        .from("initiative_types")
+        .select("id, channel, created_at")
+        .order("created_at", { ascending: true }),
     ]);
 
     if (!annualPlan) throw new Error("No annual plan to attach the initiative to");

@@ -105,10 +105,46 @@ describe("option values match the database CHECK constraints", () => {
 });
 
 describe("industries", () => {
-  // The spec fixes the list at 13 plus Other.
-  it("has 13 industries plus Other", () => {
-    expect(INDUSTRIES).toHaveLength(13);
-    expect(INDUSTRY_OPTIONS).toHaveLength(14);
+  // The client's list: 15 industries, plus Other appended by INDUSTRY_OPTIONS.
+  it("has 15 industries plus Other", () => {
+    expect(INDUSTRIES).toHaveLength(15);
+    expect(INDUSTRY_OPTIONS).toHaveLength(16);
+  });
+
+  /**
+   * The list verbatim and in order, because the ORDER is a product decision —
+   * related trades sit together so the dropdown reads as a shortlist. An
+   * accidental re-sort or a silent rename should fail here rather than in front
+   * of a customer.
+   */
+  it("matches the client's list exactly, in their order", () => {
+    expect([...INDUSTRIES]).toEqual([
+      "Coaching & Consulting",
+      "Course Creators",
+      "Speakers & Authors",
+      "Network Marketing",
+      "Health & Wellness",
+      "Financial Services",
+      "Real Estate & Investing",
+      "Faith-Based & Ministry",
+      "B2B Services & Agencies",
+      "SaaS & Tech",
+      "Local & Home Services",
+      "Retail",
+      "Brick & Mortar",
+      "E-commerce",
+      "Nonprofit & Association",
+    ]);
+  });
+
+  /**
+   * "Other" is not an industry — it reveals a free-text field and is the one
+   * value the library has no vocabulary for. Listing it in INDUSTRIES would
+   * duplicate it in the dropdown and make isKnownIndustry("Other") true, which
+   * validation relies on being false.
+   */
+  it("keeps Other out of the industry list itself", () => {
+    expect(INDUSTRIES as readonly string[]).not.toContain(INDUSTRY_OTHER);
   });
 
   it("puts Other last so the real industries read first", () => {

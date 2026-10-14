@@ -3,7 +3,8 @@
  * Tests filtering, searching, and sorting logic
  */
 
-import type { Initiative } from '@/types';
+import { describe, test, expect } from 'vitest';
+import type { Initiative, InitiativeStatus } from '@/types';
 
 // Mock data factory
 function createMockInitiative(overrides?: Partial<Initiative>): Initiative {
@@ -85,7 +86,16 @@ describe('InitiativesList Filtering Logic', () => {
         createMockInitiative({ status: 'planned' }),
       ];
 
-      const selectedStatuses = ['planned' as const];
+      /*
+       * Typed as the full union, not inferred from the literal.
+       *
+       * `['planned' as const]` infers `'planned'[]`, whose `.includes()` only
+       * accepts `'planned'` — so passing an `InitiativeStatus` was a type
+       * error even though the filter is correct at runtime. The annotation
+       * also matches what the component really holds: a multi-select of
+       * statuses, any of which the user may have picked.
+       */
+      const selectedStatuses: InitiativeStatus[] = ['planned'];
       const filtered = initiatives.filter(i =>
         selectedStatuses.includes(i.status)
       );
@@ -101,7 +111,7 @@ describe('InitiativesList Filtering Logic', () => {
         createMockInitiative({ status: 'completed' }),
       ];
 
-      const selectedStatuses = ['planned' as const, 'in_progress' as const];
+      const selectedStatuses: InitiativeStatus[] = ['planned', 'in_progress'];
       const filtered = initiatives.filter(i =>
         selectedStatuses.includes(i.status)
       );

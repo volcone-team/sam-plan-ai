@@ -44,29 +44,48 @@ export function valuesOf<V extends string>(options: readonly Option<V>[]): V[] {
  * ------------------------------------------------------------------ */
 
 /**
- * The 13 industries plus Other.
+ * The 15 industries plus Other.
  *
  * Stored as the LABEL, not a slug, because the Initiative Library's
- * "Ideal Industries" column holds these exact strings and eligibility is an
- * exact match against it (REQ-13.12). A slug would need a translation table
- * that silently drifts every time the workbook is re-uploaded.
+ * "Ideal Industries" column is meant to hold these exact strings and
+ * eligibility is an exact match against it (REQ-13.12). A slug would need a
+ * translation table that silently drifts every time the workbook is
+ * re-uploaded.
  *
  * "Other" is the only value that is not in the library — initiatives tagged
  * "Broad fit" stay eligible for it (REQ-4.2).
+ *
+ * ORDER IS THE CLIENT'S, not alphabetical: related trades sit together
+ * (the audience-led businesses first, then services and tech, then the
+ * retail/physical group) so the dropdown reads as a shortlist rather than a
+ * glossary.
+ *
+ * WORTH KNOWING BEFORE EDITING THIS LIST. As of this change,
+ * `wb_initiative_library` has no ideal-industries column at all, so
+ * `passesIndustry` finds no authored restriction and every initiative is
+ * eligible for every industry. That makes adding or renaming a value harmless
+ * today — but it also means an initiative tagged with an OLD name in a future
+ * workbook would silently stop matching. If that column ever lands, renaming
+ * an industry here becomes a breaking change and needs the workbook updated in
+ * the same pass.
  */
 export const INDUSTRIES = [
   "Coaching & Consulting",
   "Course Creators",
   "Speakers & Authors",
+  "Network Marketing",
   "Health & Wellness",
   "Financial Services",
   "Real Estate & Investing",
-  "Network Marketing",
-  "B2B Services & Agencies",
-  "B2B SaaS & Tech",
-  "E-commerce",
-  "Local & Home Services",
   "Faith-Based & Ministry",
+  "B2B Services & Agencies",
+  // Renamed from "B2B SaaS & Tech": the product is bought by consumer-facing
+  // software businesses too, and the old name read as excluding them.
+  "SaaS & Tech",
+  "Local & Home Services",
+  "Retail",
+  "Brick & Mortar",
+  "E-commerce",
   "Nonprofit & Association",
 ] as const;
 
@@ -74,7 +93,13 @@ export type Industry = (typeof INDUSTRIES)[number];
 
 export const INDUSTRY_OTHER = "Other";
 
-/** Screen 1's dropdown: the 13, then Other last. */
+/**
+ * Screen 1's dropdown: the 15, then Other last.
+ *
+ * "Other" is appended here rather than being part of INDUSTRIES, because it is
+ * not a real industry — it reveals a free-text field and is the one value the
+ * library has no vocabulary for.
+ */
 export const INDUSTRY_OPTIONS: readonly Option[] = [
   ...INDUSTRIES.map((name) => ({ value: name, label: name })),
   { value: INDUSTRY_OTHER, label: INDUSTRY_OTHER },

@@ -526,7 +526,7 @@ describe("restoreDraft", () => {
       plan_start_month: "2026-11-01",
       revenue_goal: 292500,
       sells_to: "businesses",
-      customer_industries: ["B2B SaaS & Tech"],
+      customer_industries: ["SaaS & Tech"],
       problem_solved: "Lead flow",
       borrowed_audiences: ["partners"],
       challenges: ["need_leads", "limited_time"],

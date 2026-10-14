@@ -316,3 +316,352 @@ export async function sendPasswordResetEmail(
     tags: ["password-reset"],
   });
 }
+
+/**
+ * Cancellation confirmation.
+ *
+ * Sent by /api/billing/cancel, NOT by the Stripe webhook. The webhook has no
+ * user context — it resolves a company from a Stripe customer id and cannot
+ * tell which person acted — and it must stay fast and idempotent, because a
+ * duplicate delivery would re-send this. The route knows who clicked and runs
+ * once.
+ *
+ * The receipt is the point: step 4 of the flow tells the customer "we've sent a
+ * confirmation to <email>", and an unexplained end of service weeks later is
+ * exactly what generates a chargeback. It states the access-until date and,
+ * when there is one, the outstanding balance — a customer who cancelled while
+ * past_due is still being invoiced by Stripe and must not be told otherwise.
+ *
+ * Returns the Mailgun message id, or null on any failure (sendEmail never
+ * throws). Callers treat the send as best-effort: the subscription is already
+ * cancelled by this point and a mail outage must not report that as a failure.
+ */
+export async function sendSubscriptionCancelledEmail(
+  to: string,
+  opts: {
+    firstName?: string | null;
+    planName?: string | null;
+    /** Formatted date access stops, e.g. "Nov 12, 2026". */
+    accessUntil?: string | null;
+    /** True when an unpaid invoice is still outstanding. */
+    balanceOutstanding?: boolean;
+    /** Link back into settings, where they can reactivate. */
+    settingsUrl: string;
+  }
+): Promise<string | null> {
+  const name = opts.firstName || "there";
+  const plan = opts.planName || "your plan";
+
+  const accessLine = opts.accessUntil
+    ? `You keep full access to ${plan} until <strong>${opts.accessUntil}</strong>. Nothing changes before then.`
+    : `You keep full access to ${plan} for the rest of the period you have already paid for.`;
+  const accessText = opts.accessUntil
+    ? `You keep full access to ${plan} until ${opts.accessUntil}. Nothing changes before then.`
+    : `You keep full access to ${plan} for the rest of the period you have already paid for.`;
+
+  // Honest about money in both directions. Promising "no further charges" to
+  // someone with an unpaid invoice is the one error here that becomes a dispute.
+  const chargeLine = opts.balanceOutstanding
+    ? `Your subscription will not renew. One earlier invoice is still unpaid, so you may see a further attempt to collect that balance.`
+    : `You won't be charged again.`;
+
+  return sendEmail({
+    to,
+    subject: "Your SAM Plan AI subscription is cancelled",
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #1a1a1a;">Hi ${name},</h1>
+        <p style="font-size: 16px; line-height: 1.6; color: #333;">
+          Your SAM Plan AI subscription is cancelled. ${chargeLine}
+        </p>
+        <p style="font-size: 16px; line-height: 1.6; color: #333;">
+          ${accessLine}
+        </p>
+        <p style="font-size: 15px; line-height: 1.6; color: #555;">
+          Your plan and history are kept, so if you come back everything is where
+          you left it.
+        </p>
+        <a href="${opts.settingsUrl}"
+           style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px;
+                  border-radius: 6px; text-decoration: none; font-weight: 600; margin: 20px 0;">
+          Reactivate my plan
+        </a>
+        <p style="font-size: 14px; line-height: 1.6; color: #666;">
+          Thank you for building with us. If you cancelled by mistake, or there is
+          something we could have done differently, just reply to this email.
+        </p>
+        <p style="font-size: 14px; color: #666; margin-top: 32px;">— The SAM Plan AI Team</p>
+      </div>
+    `,
+    text: `Hi ${name},\n\nYour SAM Plan AI subscription is cancelled. ${chargeLine}\n\n${accessText}\n\nYour plan and history are kept, so if you come back everything is where you left it.\n\nReactivate any time:\n${opts.settingsUrl}\n\nThank you for building with us. If you cancelled by mistake, or there is something we could have done differently, just reply to this email.\n\n— The SAM Plan AI Team`,
+    tags: ["subscription-cancelled"],
+  });
+}
+
+/**
+ * Reactivation confirmation.
+ *
+ * The counterpart to the email above, sent when a customer clears a pending
+ * cancellation. Short on purpose: the only facts that matter are that billing
+ * resumes and when the next charge lands, because someone who reactivates has
+ * already decided and does not need persuading.
+ */
+export async function sendSubscriptionReactivatedEmail(
+  to: string,
+  opts: {
+    firstName?: string | null;
+    planName?: string | null;
+    /** Formatted date of the next renewal, e.g. "Nov 12, 2026". */
+    renewsOn?: string | null;
+    settingsUrl: string;
+  }
+): Promise<string | null> {
+  const name = opts.firstName || "there";
+  const plan = opts.planName || "your plan";
+
+  const renewLine = opts.renewsOn
+    ? `${plan} continues as normal and renews on <strong>${opts.renewsOn}</strong>.`
+    : `${plan} continues as normal and will renew at the end of your current period.`;
+  const renewText = opts.renewsOn
+    ? `${plan} continues as normal and renews on ${opts.renewsOn}.`
+    : `${plan} continues as normal and will renew at the end of your current period.`;
+
+  return sendEmail({
+    to,
+    subject: "Your SAM Plan AI subscription is back on",
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #1a1a1a;">Hi ${name},</h1>
+        <p style="font-size: 16px; line-height: 1.6; color: #333;">
+          Good news — your cancellation is cancelled. ${renewLine}
+        </p>
+        <p style="font-size: 15px; line-height: 1.6; color: #555;">
+          Nothing was lost. Your plan, initiatives and history are exactly as they
+          were.
+        </p>
+        <a href="${opts.settingsUrl}"
+           style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px;
+                  border-radius: 6px; text-decoration: none; font-weight: 600; margin: 20px 0;">
+          Go to my plan
+        </a>
+        <p style="font-size: 14px; color: #666; margin-top: 32px;">— The SAM Plan AI Team</p>
+      </div>
+    `,
+    text: `Hi ${name},\n\nGood news — your cancellation is cancelled. ${renewText}\n\nNothing was lost. Your plan, initiatives and history are exactly as they were.\n\nGo to my plan:\n${opts.settingsUrl}\n\n— The SAM Plan AI Team`,
+    tags: ["subscription-reactivated"],
+  });
+}
+
+/**
+ * Retention offer confirmation.
+ *
+ * Sent when a customer accepts a discount instead of cancelling. The screen
+ * tells them "we've emailed you the details", and this is the email that makes
+ * that true.
+ *
+ * IT EXISTS TO PREVENT A DISPUTE. The customer has just been told a payment is
+ * being skipped or halved. If their next invoice does not match what they
+ * remember agreeing to — and a discount is exactly the sort of thing people
+ * misremember generously — a written record of the actual terms is the
+ * difference between a question and a chargeback. So the amount, the number of
+ * periods and the date normal billing resumes are all stated explicitly rather
+ * than summarised as "your discount is active".
+ */
+export async function sendRetentionOfferEmail(
+  to: string,
+  opts: {
+    firstName?: string | null;
+    planName?: string | null;
+    /** What they accepted, e.g. "Next month free". */
+    offerTitle: string;
+    /** One sentence describing the effect, built from the offer spec. */
+    offerSummary: string;
+    /** Formatted date full billing resumes, e.g. "Dec 12, 2026". */
+    billingResumesOn?: string | null;
+    /** Formatted normal price, e.g. "$49". */
+    normalPrice?: string | null;
+    settingsUrl: string;
+  }
+): Promise<string | null> {
+  const name = opts.firstName || "there";
+  const plan = opts.planName || "your plan";
+
+  const resumeLine = opts.billingResumesOn
+    ? opts.normalPrice
+      ? `Normal billing of ${opts.normalPrice}/mo resumes on <strong>${opts.billingResumesOn}</strong>.`
+      : `Normal billing resumes on <strong>${opts.billingResumesOn}</strong>.`
+    : "Your normal billing resumes after that.";
+  const resumeText = opts.billingResumesOn
+    ? opts.normalPrice
+      ? `Normal billing of ${opts.normalPrice}/mo resumes on ${opts.billingResumesOn}.`
+      : `Normal billing resumes on ${opts.billingResumesOn}.`
+    : "Your normal billing resumes after that.";
+
+  return sendEmail({
+    to,
+    subject: `Your SAM Plan AI discount is applied — ${opts.offerTitle}`,
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #1a1a1a;">Hi ${name},</h1>
+        <p style="font-size: 16px; line-height: 1.6; color: #333;">
+          Glad you're staying. Your discount is applied to ${plan} — nothing else
+          about your account has changed.
+        </p>
+        <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin: 20px 0;">
+          <p style="font-size: 15px; font-weight: 600; color: #1a1a1a; margin: 0 0 8px 0;">
+            ${opts.offerTitle}
+          </p>
+          <p style="font-size: 14px; line-height: 1.6; color: #555; margin: 0;">
+            ${opts.offerSummary} ${resumeLine}
+          </p>
+        </div>
+        <p style="font-size: 15px; line-height: 1.6; color: #555;">
+          This was a one-time offer, so it won't repeat — but your plan, initiatives
+          and history carry on exactly as they are.
+        </p>
+        <a href="${opts.settingsUrl}"
+           style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px;
+                  border-radius: 6px; text-decoration: none; font-weight: 600; margin: 8px 0 20px 0;">
+          View my billing
+        </a>
+        <p style="font-size: 14px; line-height: 1.6; color: #666;">
+          If any of this does not match what you expected, reply to this email and
+          we'll sort it out.
+        </p>
+        <p style="font-size: 14px; color: #666; margin-top: 32px;">— The SAM Plan AI Team</p>
+      </div>
+    `,
+    text: `Hi ${name},\n\nGlad you're staying. Your discount is applied to ${plan} — nothing else about your account has changed.\n\n${opts.offerTitle}\n${opts.offerSummary} ${resumeText}\n\nThis was a one-time offer, so it won't repeat — but your plan, initiatives and history carry on exactly as they are.\n\nView my billing:\n${opts.settingsUrl}\n\nIf any of this does not match what you expected, reply to this email and we'll sort it out.\n\n— The SAM Plan AI Team`,
+    tags: ["retention-offer"],
+  });
+}
+
+/**
+ * Billing paused confirmation.
+ *
+ * Sent when a customer pauses from the cancellation flow.
+ *
+ * LEADS WITH THE ACCESS CONSEQUENCE. A pause stops billing AND access, and the
+ * customer is about to be redirected out of the product. Someone who clicked a
+ * reassuring green button and then found themselves locked out, with only this
+ * email to explain it, needs the explanation in the first sentence rather than
+ * buried under the good news.
+ *
+ * Also carries the resume link, because the paused screen is the only way back
+ * in and a customer who changes their mind in a week should not have to go
+ * looking for it.
+ */
+export async function sendBillingPausedEmail(
+  to: string,
+  opts: {
+    firstName?: string | null;
+    planName?: string | null;
+    months: number;
+    /** Formatted restart date, e.g. "Dec 12, 2026". */
+    restartsOn?: string | null;
+    resumeUrl: string;
+  }
+): Promise<string | null> {
+  const name = opts.firstName || "there";
+  const plan = opts.planName || "your plan";
+  const duration = `${opts.months} month${opts.months === 1 ? "" : "s"}`;
+
+  const restartLine = opts.restartsOn
+    ? `Billing restarts on <strong>${opts.restartsOn}</strong>, and your access comes straight back with it.`
+    : `Billing restarts in ${duration}, and your access comes straight back with it.`;
+  const restartText = opts.restartsOn
+    ? `Billing restarts on ${opts.restartsOn}, and your access comes straight back with it.`
+    : `Billing restarts in ${duration}, and your access comes straight back with it.`;
+
+  return sendEmail({
+    to,
+    subject: `Your SAM Plan AI billing is paused for ${duration}`,
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #1a1a1a;">Hi ${name},</h1>
+        <p style="font-size: 16px; line-height: 1.6; color: #333;">
+          ${plan} is paused for ${duration}. You won't be charged during that
+          time, and <strong>your access is on hold too</strong> — nothing has been
+          deleted, and everything is waiting exactly as you left it.
+        </p>
+        <p style="font-size: 16px; line-height: 1.6; color: #333;">
+          ${restartLine}
+        </p>
+        <p style="font-size: 15px; line-height: 1.6; color: #555;">
+          Want to come back sooner? You can restart your plan at any time — you
+          don't have to wait for the date above.
+        </p>
+        <a href="${opts.resumeUrl}"
+           style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px;
+                  border-radius: 6px; text-decoration: none; font-weight: 600; margin: 8px 0 20px 0;">
+          Restart my plan
+        </a>
+        <p style="font-size: 14px; line-height: 1.6; color: #666;">
+          We'll email you a week before billing restarts, so there are no
+          surprises.
+        </p>
+        <p style="font-size: 14px; color: #666; margin-top: 32px;">— The SAM Plan AI Team</p>
+      </div>
+    `,
+    text: `Hi ${name},\n\n${plan} is paused for ${duration}. You won't be charged during that time, and your access is on hold too — nothing has been deleted, and everything is waiting exactly as you left it.\n\n${restartText}\n\nWant to come back sooner? You can restart your plan at any time — you don't have to wait for the date above:\n${opts.resumeUrl}\n\nWe'll email you a week before billing restarts, so there are no surprises.\n\n— The SAM Plan AI Team`,
+    tags: ["billing-paused"],
+  });
+}
+
+/**
+ * "Billing restarts soon" warning, sent a week before a pause ends.
+ *
+ * KEEPS A PROMISE THE PAUSE SCREEN MAKES IN WRITING: "we'll email you a week
+ * before billing restarts". Without it a card gets charged out of nowhere
+ * weeks after the customer last thought about us, which is a dispute waiting to
+ * happen — and the charge would be entirely legitimate, which makes it worse,
+ * not better.
+ *
+ * Sent by /api/cron/resume-paused and made idempotent by
+ * `subscriptions.pause_reminder_sent_at`, because a daily job would otherwise
+ * send this on all seven days.
+ */
+export async function sendPauseEndingSoonEmail(
+  to: string,
+  opts: {
+    firstName?: string | null;
+    planName?: string | null;
+    /** Formatted restart date, e.g. "Dec 12, 2026". */
+    restartsOn?: string | null;
+    /** Formatted normal price, e.g. "$49". */
+    price?: string | null;
+    settingsUrl: string;
+  }
+): Promise<string | null> {
+  const name = opts.firstName || "there";
+  const plan = opts.planName || "your plan";
+
+  const when = opts.restartsOn ? `on ${opts.restartsOn}` : "in about a week";
+  const amount = opts.price ? ` You'll be charged ${opts.price}.` : "";
+
+  return sendEmail({
+    to,
+    subject: "Your SAM Plan AI billing restarts in a week",
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #1a1a1a;">Hi ${name},</h1>
+        <p style="font-size: 16px; line-height: 1.6; color: #333;">
+          A heads-up as promised: your pause on ${plan} ends ${when}, so billing
+          and your access both start again then.${amount}
+        </p>
+        <p style="font-size: 15px; line-height: 1.6; color: #555;">
+          Nothing to do if that suits you. If it doesn't, you can change or cancel
+          your plan from your settings before then.
+        </p>
+        <a href="${opts.settingsUrl}"
+           style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px;
+                  border-radius: 6px; text-decoration: none; font-weight: 600; margin: 8px 0 20px 0;">
+          Review my billing
+        </a>
+        <p style="font-size: 14px; color: #666; margin-top: 32px;">— The SAM Plan AI Team</p>
+      </div>
+    `,
+    text: `Hi ${name},\n\nA heads-up as promised: your pause on ${plan} ends ${when}, so billing and your access both start again then.${amount}\n\nNothing to do if that suits you. If it doesn't, you can change or cancel your plan from your settings before then:\n${opts.settingsUrl}\n\n— The SAM Plan AI Team`,
+    tags: ["pause-ending-soon"],
+  });
+}

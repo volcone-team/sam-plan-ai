@@ -97,6 +97,48 @@ export async function ingestWorkbook(
       }
     }
 
+    /**
+     * Give every initiative a settings row, WITHOUT touching existing ones.
+     *
+     * `initiative_settings` decides which initiatives the AI may reference. It
+     * deliberately lives outside the wb_* tables, because those are wiped and
+     * rebuilt above — a toggle stored on the library row would be destroyed by
+     * the very next upload.
+     *
+     * `ignoreDuplicates` is the whole point: an initiative the admin has
+     * already switched off must stay off across a re-upload, so this only ever
+     * ADDS rows for keys it has not seen. Anything new a workbook introduces
+     * arrives ACTIVE, which is the safe direction — a new initiative is usable
+     * and visible until someone decides otherwise, rather than silently absent.
+     *
+     * Best effort. The library is already written by this point, and a failure
+     * here would leave the admin thinking the upload failed when the data
+     * landed. An initiative with no settings row still reads as active, so the
+     * worst case is a missing toggle, not a broken library.
+     */
+    const settingsKeys = [...new Set(parsed.library.map((r) => r.initiativeKey))];
+    if (settingsKeys.length > 0) {
+      const { error: settingsError } = await client
+        .from("initiative_settings")
+        .upsert(
+          settingsKeys.map((initiative_key) => ({ initiative_key })),
+          { onConflict: "initiative_key", ignoreDuplicates: true }
+        );
+
+      if (settingsError) {
+        // Most likely migration 034 not applied yet.
+        console.error(
+          "[workbook/ingest] Could not seed initiative_settings:",
+          settingsError.message
+        );
+        parsed.warnings.push(
+          "Could not record settings rows for the uploaded initiatives, so new " +
+          "ones may not appear in the admin toggle list. The library itself " +
+          "ingested fine."
+        );
+      }
+    }
+
     console.log("[workbook/ingest] ok:", JSON.stringify(counts), "| warnings:", parsed.warnings.length);
     return { ok: true, counts, warnings: parsed.warnings };
   } catch (err) {

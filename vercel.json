@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/initiative-reminders",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/resume-paused",
+      "schedule": "0 6 * * *"
     }
   ]
 }

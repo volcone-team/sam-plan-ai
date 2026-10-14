@@ -163,10 +163,30 @@ export function WorkbookUpload() {
       const headers = jsonData[0].map(String);
       const rows = jsonData.slice(1).map(row => row.map(String));
 
+      /**
+       * EVERY NON-BLANK ROW, not the first 50.
+       *
+       * These sheets are not a preview — they are the only copy that reaches
+       * `ingestWorkbook`, which projects them into the wb_* tables the AI reads.
+       * The old `slice(0, 50)` therefore truncated the actual data: the longer
+       * task templates (Funnels, OPS, Hybrid Events, Affiliate Launches) all
+       * stopped at exactly 50 tasks, and the loss was invisible because 50 rows
+       * still ingested cleanly.
+       *
+       * Blank rows are dropped here rather than shipped: Excel pads sheets to
+       * ~1000 rows, so sending them all would be ~970 empty arrays per sheet
+       * across 30 sheets, which is what the cap was really protecting against.
+       * `rowCount` stays the raw count so the UI can still show the sheet's
+       * true size.
+       */
+      const contentRows = rows.filter((row) =>
+        row.some((cellValue) => String(cellValue ?? "").trim() !== "")
+      );
+
       sheets.push({
         name: sheetName,
         headers,
-        rows: rows.slice(0, 50), // Store first 50 rows for preview
+        rows: contentRows,
         rowCount: rows.length,
       });
     }

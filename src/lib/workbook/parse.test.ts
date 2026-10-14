@@ -1,8 +1,46 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseWorkbook, normalizeKey, canonicalKey, parseNumeric, parseDependsOn,
-  templateInitiativeName, contentRows, type RawSheet,
+  templateInitiativeName, contentRows, resolveLibraryColumns, type RawSheet,
 } from '@/lib/workbook/parse';
+
+/**
+ * The REAL headers from the client's workbook, copied verbatim out of
+ * `workbook_data` — newlines, trailing "(future)" and all.
+ *
+ * "Cost to Run" at index 5 is the column that broke positional parsing: every
+ * field after it shifted by one, so the one-liner came out blank (Cost to Run
+ * is empty for every row), the long description landed in needs_sales_team,
+ * "POSSIBLY" became the price tier and "Mid → High" became Own/Ops.
+ */
+const REAL_LIBRARY_HEADERS = [
+  'Initiative Category',
+  'ID',
+  'Initiative Name',
+  'Difficulty \n1 easy - 5 very hard',
+  'Speed to Revenue',
+  'Cost to Run',
+  'One-line description',
+  'Longer Description',
+  'Do you need a sales team?',
+  'Primary product price tier it feeds',
+  'Own / Ops (future)',
+  'Training',
+];
+
+/** The same sheet before "Cost to Run" was inserted. */
+const LEGACY_LIBRARY_HEADERS = [
+  'Initiative Category',
+  'ID',
+  'Initiative Name',
+  'Difficulty',
+  'Speed to Revenue',
+  'One-line description',
+  'Longer Description',
+  'Do you need a sales team?',
+  'Primary product price tier it feeds',
+  'Own / Ops',
+];
 
 /** Pad a sheet the way the real workbook does: ~1000 rows, most of them blank. */
 const padded = (name: string, headers: string[], rows: string[][]): RawSheet => ({
@@ -25,6 +63,18 @@ describe('normalizeKey / canonicalKey', () => {
   });
   it('leaves an unaliased name as its normalised form', () => {
     expect(canonicalKey('Referral')).toBe('referral');
+  });
+
+  /**
+   * The Dinners task template sheet is named "Dinners" while the library row is
+   * "Dinners/Lunches". The alias used to resolve to `dinners`, which is not a
+   * library key either — so the template never joined and a plan containing
+   * Dinners was generated with no tasks at all.
+   */
+  it('joins every spelling of Dinners onto the library row that exists', () => {
+    for (const name of ['Dinner', 'Dinners', 'Dinners/Lunches', 'dinners  ']) {
+      expect(canonicalKey(name)).toBe('dinners-lunches');
+    }
   });
 });
 
@@ -184,5 +234,172 @@ describe('parseWorkbook', () => {
     const empty = parseWorkbook([]);
     expect(empty.library).toEqual([]);
     expect(empty.warnings.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('resolveLibraryColumns', () => {
+  /**
+   * THE BUG, stated as a test. Read positionally, oneLiner was index 5 — which
+   * is now the always-blank "Cost to Run" — and everything after it was off by
+   * one. These are the indices from the client's actual workbook.
+   */
+  it('finds every field in the real workbook, past the inserted Cost to Run', () => {
+    expect(resolveLibraryColumns(REAL_LIBRARY_HEADERS)).toEqual({
+      category: 0,
+      workbookId: 1,
+      name: 2,
+      difficulty: 3,
+      speedToResults: 4,
+      // 5 is Cost to Run, which no field wants.
+      oneLiner: 6,
+      description: 7,
+      needsSalesTeam: 8,
+      priceTier: 9,
+      ownOrOps: 10,
+    });
+  });
+
+  it('still reads a workbook from before that column existed', () => {
+    expect(resolveLibraryColumns(LEGACY_LIBRARY_HEADERS)).toEqual({
+      category: 0,
+      workbookId: 1,
+      name: 2,
+      difficulty: 3,
+      speedToResults: 4,
+      oneLiner: 5,
+      description: 6,
+      needsSalesTeam: 7,
+      priceTier: 8,
+      ownOrOps: 9,
+    });
+  });
+
+  /** Matches "Difficulty \n1 easy - 5 very hard" by prefix, newline included. */
+  it('tolerates newlines, trailing punctuation and parentheticals', () => {
+    const cols = resolveLibraryColumns([
+      'initiative   category',
+      'ID',
+      'Initiative\nName',
+      'Difficulty \n1 easy - 5 very hard',
+      'Speed to Revenue',
+      'One-line description',
+      'Longer Description',
+      'Do you need a sales team?',
+      'Price tier',
+      'Own / Ops (future)',
+    ]);
+    expect(cols.difficulty).toBe(3);
+    expect(cols.name).toBe(2);
+    expect(cols.needsSalesTeam).toBe(7);
+    expect(cols.ownOrOps).toBe(9);
+  });
+
+  /**
+   * Both headers end in "description", so a loose contains-match would resolve
+   * whichever appeared first and swap the two fields.
+   */
+  it('does not confuse the one-liner with the longer description', () => {
+    const cols = resolveLibraryColumns(REAL_LIBRARY_HEADERS);
+    expect(cols.oneLiner).not.toBe(cols.description);
+    expect(REAL_LIBRARY_HEADERS[cols.oneLiner]).toBe('One-line description');
+    expect(REAL_LIBRARY_HEADERS[cols.description]).toBe('Longer Description');
+  });
+
+  it('survives columns being reordered', () => {
+    const cols = resolveLibraryColumns([
+      'Initiative Name',
+      'Own / Ops (future)',
+      'Initiative Category',
+      'One-line description',
+      'ID',
+    ]);
+    expect(cols.name).toBe(0);
+    expect(cols.ownOrOps).toBe(1);
+    expect(cols.category).toBe(2);
+    expect(cols.oneLiner).toBe(3);
+    expect(cols.workbookId).toBe(4);
+  });
+
+  it('falls back to historical positions with no headers at all', () => {
+    for (const headers of [undefined, []]) {
+      expect(resolveLibraryColumns(headers)).toEqual({
+        category: 0, workbookId: 1, name: 2, difficulty: 3, speedToResults: 4,
+        oneLiner: 5, description: 6, needsSalesTeam: 7, priceTier: 8, ownOrOps: 9,
+      });
+    }
+  });
+
+  /** No two fields may claim the same column, or one silently shadows another. */
+  it('never assigns one column to two fields', () => {
+    for (const headers of [REAL_LIBRARY_HEADERS, LEGACY_LIBRARY_HEADERS]) {
+      const indices = Object.values(resolveLibraryColumns(headers));
+      expect(new Set(indices).size).toBe(indices.length);
+    }
+  });
+});
+
+describe('parseWorkbook — library fields land in the right columns', () => {
+  /** One real row from the client's workbook, verbatim. */
+  const DINNERS = [
+    'Small Format',
+    'IN18',
+    'Dinners/Lunches',
+    '4',
+    'Medium',
+    '',                                        // Cost to Run — always blank
+    'A self-hosted and intimate, in-person event.',
+    'This is one of the more curated initiatives.',
+    'POSSIBLY',
+    'Mid/High',
+    'OPS',
+    'Dinner course assets',
+  ];
+
+  it('reads the real sheet without shifting a single field', () => {
+    const parsed = parseWorkbook([
+      padded('1. Initiative Library', REAL_LIBRARY_HEADERS, [DINNERS]),
+    ]);
+
+    expect(parsed.library).toHaveLength(1);
+    const row = parsed.library[0];
+
+    expect(row.initiativeKey).toBe('dinners-lunches');
+    expect(row.name).toBe('Dinners/Lunches');
+    expect(row.category).toBe('Small Format');
+    expect(row.workbookId).toBe('IN18');
+    expect(row.difficulty).toBe(4);
+    expect(row.speedToResults).toBe('Medium');
+    // The four fields the old parser got wrong:
+    expect(row.oneLiner).toBe('A self-hosted and intimate, in-person event.');
+    expect(row.description).toBe('This is one of the more curated initiatives.');
+    expect(row.needsSalesTeam).toBe('POSSIBLY');
+    expect(row.priceTier).toBe('Mid/High');
+    expect(row.ownOrOps).toBe('OPS');
+  });
+
+  /**
+   * Regression guard phrased as the symptom that was in production: the
+   * one-liner was null and "POSSIBLY" was being stored as a price tier, which
+   * is what the sales-call eligibility filter then read.
+   */
+  it('no longer stores a blank one-liner or POSSIBLY as the price tier', () => {
+    const row = parseWorkbook([
+      padded('1. Initiative Library', REAL_LIBRARY_HEADERS, [DINNERS]),
+    ]).library[0];
+
+    expect(row.oneLiner).not.toBeNull();
+    expect(row.priceTier).not.toBe('POSSIBLY');
+    expect(row.ownOrOps).not.toBe('Mid/High');
+  });
+
+  it('warns when a header cannot be matched instead of silently guessing', () => {
+    const parsed = parseWorkbook([
+      padded('1. Initiative Library', ['Thing', 'Another', 'Initiative Name'], [
+        ['x', 'y', 'Referral'],
+      ]),
+    ]);
+    expect(parsed.warnings.some((w) => /could not find a header/i.test(w))).toBe(true);
+    // Still parses what it can — the name header matched.
+    expect(parsed.library[0]?.name).toBe('Referral');
   });
 });

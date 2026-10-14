@@ -6,6 +6,7 @@ import {
   passesCapacity,
   passesSalesModel,
   passesIndustry,
+  passesActiveAllowlist,
   productCoverage,
   DOMINANT_PRODUCT_SHARE,
   MIN_HOURS_FOR_HIGH_EFFORT,
@@ -239,7 +240,7 @@ describe("REQ-13.12 — industry eligibility, honouring Broad fit", () => {
       idealIndustries: "E-commerce, Local & Home Services",
     } as LibraryInitiative;
     expect(passesIndustry(targeted, ctx({ industry: "E-commerce" })).eligible).toBe(true);
-    expect(passesIndustry(targeted, ctx({ industry: "B2B SaaS & Tech" })).eligible).toBe(false);
+    expect(passesIndustry(targeted, ctx({ industry: "SaaS & Tech" })).eligible).toBe(false);
   });
 });
 
@@ -373,5 +374,67 @@ describe("REQ-13.11 — coverage of the products carrying the goal", () => {
 
   it("handles no products", () => {
     expect(productCoverage([], new Map())).toEqual([]);
+  });
+});
+
+describe("passesActiveAllowlist — the admin toggle backstop", () => {
+  const base = ctx({ industry: "Coaching & Consulting" });
+
+  it("allows anything when no allowlist is in force", () => {
+    expect(passesActiveAllowlist(WEBINAR, base).eligible).toBe(true);
+    expect(passesActiveAllowlist(WEBINAR, { ...base, inactiveKeys: new Set() }).eligible)
+      .toBe(true);
+  });
+
+  it("rejects an initiative the admin switched off", () => {
+    const verdict = passesActiveAllowlist(WEBINAR, {
+      ...base,
+      inactiveKeys: new Set([WEBINAR.key]),
+    });
+    expect(verdict.eligible).toBe(false);
+    expect(verdict.reason).toMatch(/isn't currently offered/i);
+  });
+
+  /**
+   * "Absent means active". The disabled set is what travels, so an initiative
+   * with no settings row — anything a new workbook introduced — stays usable.
+   */
+  it("allows an initiative that is not in the disabled set", () => {
+    expect(
+      passesActiveAllowlist(WEBINAR, {
+        ...base,
+        inactiveKeys: new Set(["paid-ads", "sales-calls"]),
+      }).eligible
+    ).toBe(true);
+  });
+
+  /**
+   * Checked before every other rule: "we do not offer this" outranks "this
+   * suits a different industry", which would otherwise invite an argument
+   * about the user's industry over something they cannot have anyway.
+   */
+  it("outranks every other rejection reason", () => {
+    const verdict = isEligible(
+      { ...WEBINAR, idealIndustries: ["E-commerce"] } as LibraryInitiative,
+      {
+        ...ctx({ industry: "Real Estate & Investing" }),
+        didntWork: [WEBINAR.key],
+        inactiveKeys: new Set([WEBINAR.key]),
+      }
+    );
+    expect(verdict.eligible).toBe(false);
+    expect(verdict.reason).toMatch(/isn't currently offered/i);
+  });
+
+  it("drops disabled initiatives from filterEligible", () => {
+    const pool = [
+      WEBINAR,
+      { ...WEBINAR, key: "referral", name: "Referral" } as LibraryInitiative,
+    ];
+    const kept = filterEligible(pool, {
+      ...base,
+      inactiveKeys: new Set([WEBINAR.key]),
+    });
+    expect(kept.map((p) => p.key)).toEqual(["referral"]);
   });
 });
