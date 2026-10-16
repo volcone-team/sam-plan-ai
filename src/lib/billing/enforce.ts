@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { loadBillingConfig } from "./stripe-client";
-import { evaluateAccess, type AccessDecision } from "./entitlement";
+import type { AccessDecision } from "./entitlement";
+import { loadSubscriptionAccess } from "./company-access";
 import { checkLimit, resolveUsagePeriod, LIMIT_KEYS, type LimitCheck } from "./limits";
 
 /**
@@ -87,49 +87,9 @@ export async function checkEntitlement(
   limitKey: string,
   requested = 1
 ): Promise<EnforcementResult> {
-  const config = await loadBillingConfig(db);
-
-  const { data: sub } = companyId
-    ? await db
-        .from("subscriptions")
-        .select(
-          "plan_id, status, stripe_status, is_comped, comped_until, trial_ends_at, " +
-          "current_period_start, current_period_end, past_due_since, cancel_at_period_end, " +
-          "is_paused, pause_resumes_at"
-        )
-        .eq("company_id", companyId)
-        .maybeSingle()
-    : { data: null };
-
-  const row = sub as {
-    plan_id: string | null; status: string | null; stripe_status: string | null;
-    is_comped: boolean; comped_until: string | null; trial_ends_at: string | null;
-    current_period_start: string | null; current_period_end: string | null;
-    past_due_since: string | null; cancel_at_period_end: boolean;
-    is_paused: boolean | null; pause_resumes_at: string | null;
-  } | null;
-
-  const access = evaluateAccess(
-    {
-      stripeEnabled: config.stripeEnabled,
-      trialEnabled: config.trialEnabled,
-      trialDays: config.trialDays,
-      dunningGraceDays: config.dunningGraceDays,
-    },
-    row
-      ? {
-          status: (row.stripe_status ?? row.status) as never,
-          isComped: row.is_comped,
-          compedUntil: row.comped_until,
-          trialEndsAt: row.trial_ends_at,
-          currentPeriodEnd: row.current_period_end,
-          pastDueSince: row.past_due_since,
-          cancelAtPeriodEnd: row.cancel_at_period_end,
-          isPaused: row.is_paused ?? false,
-          pauseResumesAt: row.pause_resumes_at,
-        }
-      : null
-  );
+  // Same config read, same subscriptions select, same evaluateAccess call as
+  // before — moved verbatim so loadCompanyAccess shares it.
+  const { row, access } = await loadSubscriptionAccess(db, companyId);
 
   const period = resolveUsagePeriod(
     row?.current_period_start ?? null,

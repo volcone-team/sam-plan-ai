@@ -39,14 +39,21 @@ const TABS: {
   { id: 'benchmarks', label: 'Benchmarks', icon: BarChart3 },
 ];
 
-export function SettingsPage() {
+function isSettingsTab(value: string | undefined): value is SettingsTab {
+  return TABS.some((tab) => tab.id === value);
+}
+
+export function SettingsPage({ initialTab }: { initialTab?: string } = {}) {
   const { role, loading } = useAuth();
 
   const visibleTabs = TABS.filter(
     (tab) => !tab.requires || roleHasPermission(role, tab.requires)
   );
 
-  const [activeTab, setActiveTab] = useState<SettingsTab>('company');
+  // An unknown or not-permitted tab falls through `resolvedTab` below.
+  const [activeTab, setActiveTab] = useState<SettingsTab>(
+    isSettingsTab(initialTab) ? initialTab : 'company'
+  );
 
   /**
    * Never render a tab the viewer cannot see.

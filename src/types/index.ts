@@ -179,3 +179,27 @@ export type {
 } from './subscription-plan.types';
 
 export { LIMIT_KEYS, FEATURE_KEYS } from './subscription-plan.types';
+// SAM University (migration 038)
+export type {
+  UniversityResourceType,
+  UniversityStatus,
+  UniversityCustomerStatus,
+  UniversityIcon,
+  UniversityCategoryRow,
+  UniversityResourceRow,
+  UniversityResourcePlanRow,
+  UniversityCategory,
+  UniversityResource,
+  UniversityResourceView,
+  UniversityCategoryView,
+  UniversityViewer,
+  UniversityPlanRef,
+  UniversityResourceInput,
+  UniversityCategoryInput,
+  UniversityValidationResult,
+} from './university.types';
+export {
+  UNIVERSITY_RESOURCE_TYPES,
+  UNIVERSITY_STATUSES,
+  UNIVERSITY_ICONS,
+} from './university.types';

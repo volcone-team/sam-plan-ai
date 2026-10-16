@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { UniversityManagement } from "./university-management";
 
 /* ------------------------------------------------------------------
    Types
@@ -28,11 +29,18 @@ interface ContentItem {
 
 type TabKey = "university" | "faq" | "emails";
 
+/** Tabs still backed by localStorage mocks. University is a real editor. */
+type MockTabKey = Exclude<TabKey, "university">;
+
 interface TabConfig {
   key: TabKey;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   storageKey: string;
+}
+
+interface MockTabConfig extends TabConfig {
+  key: MockTabKey;
 }
 
 /* ------------------------------------------------------------------
@@ -45,12 +53,7 @@ const TABS: TabConfig[] = [
   { key: "emails", label: "Emails", icon: Mail, storageKey: "sam-content-emails" },
 ];
 
-const MOCK_DATA: Record<TabKey, ContentItem[]> = {
-  university: [
-    { id: "uni-1", title: "Getting Started with SAM Flow", body: "Welcome to SAM Flow AI. This guide walks you through the basics of setting up your strategic account management workflow, from onboarding to your first initiative.", createdAt: "2025-01-15" },
-    { id: "uni-2", title: "Understanding Initiative Types", body: "Learn about the different initiative types available in SAM Flow: retention programs, cross-sell campaigns, upsell strategies, and new product launches.", createdAt: "2025-01-20" },
-    { id: "uni-3", title: "Building Your Annual Plan", body: "A step-by-step guide to constructing a comprehensive annual strategic plan using SAM Flow's planning tools and benchmarks.", createdAt: "2025-02-01" },
-  ],
+const MOCK_DATA: Record<MockTabKey, ContentItem[]> = {
   faq: [
     { id: "faq-1", title: "How do I reset my password?", body: "Navigate to Settings > Account > Security and click 'Change Password'. You'll receive a verification email before the change takes effect.", createdAt: "2025-01-10" },
     { id: "faq-2", title: "What are benchmarks?", body: "Benchmarks are industry-standard performance metrics that SAM Flow uses to set realistic targets for your initiatives. They come from first-party data, published research, and partner networks.", createdAt: "2025-01-12" },
@@ -116,10 +119,14 @@ export function ContentManagement() {
       </div>
 
       {/* Tab Content */}
-      {TABS.map((tab) =>
-        activeTab === tab.key ? (
-          <ContentList key={tab.key} tabConfig={tab} />
-        ) : null
+      {activeTab === "university" ? (
+        <UniversityManagement />
+      ) : (
+        TABS.map((tab) =>
+          tab.key === activeTab ? (
+            <ContentList key={tab.key} tabConfig={tab as MockTabConfig} />
+          ) : null
+        )
       )}
     </div>
   );
@@ -129,7 +136,7 @@ export function ContentManagement() {
    Content List
    ------------------------------------------------------------------ */
 
-function ContentList({ tabConfig }: { tabConfig: TabConfig }) {
+function ContentList({ tabConfig }: { tabConfig: MockTabConfig }) {
   const [items, setItems] = useState<ContentItem[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -173,6 +180,7 @@ function ContentList({ tabConfig }: { tabConfig: TabConfig }) {
       <div className="flex items-center justify-between">
         <p className="text-sm text-[hsl(var(--foreground-muted))]">
           {items.length} item{items.length !== 1 ? "s" : ""}
+          <span className="ml-2 text-xs">· Saved in this browser only</span>
         </p>
         <button
           onClick={() => setShowAddForm(!showAddForm)}
