@@ -420,9 +420,10 @@ export async function POST(request: Request) {
     const symbol = (price?.currency ?? "usd").toUpperCase() === "USD" ? "$" : "";
     const normalPrice =
       typeof price?.unit_amount === "number"
-        ? `${symbol}${(price.unit_amount / 100).toFixed(
-            price.unit_amount % 100 === 0 ? 0 : 2
-          )}`
+        ? `${symbol}${(price.unit_amount / 100).toLocaleString("en-US", {
+            minimumFractionDigits: price.unit_amount % 100 === 0 ? 0 : 2,
+            maximumFractionDigits: price.unit_amount % 100 === 0 ? 0 : 2,
+          })}`
         : null;
 
     if (me.email) {

@@ -14,6 +14,7 @@ import {
   Filter,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatNumber } from "@/lib/format-money";
 
 /* ------------------------------------------------------------------
    Types
@@ -301,8 +302,8 @@ function AIAnalyticsTab() {
 
   // Dash, not 0: "no data yet" and "zero" are different facts.
   const dash = "—";
-  const totalValue = loading ? dash : metrics ? metrics.totalGenerations.toLocaleString() : dash;
-  const perDayValue = loading ? dash : metrics ? metrics.generationsPerDay.toFixed(1) : dash;
+  const totalValue = loading ? dash : metrics ? formatNumber(metrics.totalGenerations) : dash;
+  const perDayValue = loading ? dash : metrics ? metrics.generationsPerDay.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : dash;
   const successValue =
     loading || !metrics || metrics.successRatePct === null ? dash : `${metrics.successRatePct}%`;
   const avgValue = loading || !metrics ? dash : formatDuration(metrics.avgDurationMs);
@@ -414,7 +415,7 @@ function AIAnalyticsTab() {
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-[hsl(var(--foreground-muted))]">
                         {row.tokensOutput === null && row.tokensInput === null
                           ? dash
-                          : `${(row.tokensInput ?? 0).toLocaleString()} / ${(row.tokensOutput ?? 0).toLocaleString()}`}
+                          : `${formatNumber(row.tokensInput ?? 0)} / ${formatNumber(row.tokensOutput ?? 0)}`}
                       </td>
                       <td className="whitespace-nowrap px-6 py-4">
                         {row.status === "success" ? (

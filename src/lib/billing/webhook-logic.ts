@@ -12,6 +12,8 @@
  * The route still performs the I/O. What to DO is decided here.
  */
 
+import { isLiveSubscription } from "./plan-change";
+
 /** Events the handler acts on. Anything else is recorded and ignored. */
 export const HANDLED_EVENTS = [
   "checkout.session.completed",
@@ -197,6 +199,59 @@ export function shouldClearPendingChange(state: PendingChangeState): boolean {
 export function shouldClearComp(stripeStatus: string): boolean {
   return stripeStatus === "active" || stripeStatus === "trialing";
 }
+
+/**
+ * Should a sync lift an admin/customer pause? "Buying a plan ends the pause"
+ * (user decision, spec results-expenses-billing-access-fix task 18).
+ *
+ * A paused company with no live subscription may buy through Checkout. When
+ * that NEW subscription lands, the pause has served its purpose and is
+ * cleared. Every condition below exists to keep a pause that must stay:
+ *
+ *   - incoming not live            -> nothing was bought
+ *   - incoming has pause_collection -> a paused paid subscription (admin pause
+ *                                     with Stripe synced, or a customer pause);
+ *                                     only an admin/customer resume lifts it
+ *   - subscription created BEFORE the pause, or no paused_at recorded
+ *                                   -> it is the subscription that was paused,
+ *                                     not a purchase made to end the pause.
+ *                                     Fails closed when the date is missing.
+ *
+ * Keyed on creation time rather than on "the row's subscription id changed",
+ * because /api/billing/reconcile may record the new id seconds before the
+ * webhook arrives, which would make the id comparison miss the purchase.
+ */
+export function shouldClearPauseOnSync(args: {
+  isPaused: boolean;
+  /** subscriptions.paused_at, ISO. */
+  pausedAt: string | null;
+  incomingStatus: string;
+  /** Stripe `subscription.created`, unix seconds. */
+  incomingCreated: number;
+  incomingHasPauseCollection: boolean;
+}): boolean {
+  if (!args.isPaused) return false;
+  if (!isLiveSubscription(args.incomingStatus)) return false;
+  if (args.incomingHasPauseCollection) return false;
+  if (!args.pausedAt) return false;
+  const pausedAtMs = Date.parse(args.pausedAt);
+  if (!Number.isFinite(pausedAtMs)) return false;
+  return args.incomingCreated * 1000 > pausedAtMs;
+}
+
+/**
+ * Every pause column (migrations 027 and 032), as written by an admin
+ * resume. Applied by the webhook when shouldClearPauseOnSync says so.
+ */
+export const PAUSE_CLEAR_PATCH = {
+  is_paused: false,
+  paused_at: null,
+  paused_by: null,
+  pause_reason: null,
+  pause_resumes_at: null,
+  pause_origin: null,
+  pause_reminder_sent_at: null,
+} as const;
 
 /** Outcomes of the idempotency gate. */
 export type ClaimOutcome = "process" | "duplicate" | "storage_error";

@@ -1,7 +1,8 @@
 'use client';
 
-import { useCompanyId } from '@/hooks/use-auth';
+import { useAuth, useCompanyId } from '@/hooks/use-auth';
 import { usePermissions } from '@/hooks/use-permission';
+import { useTeamMembers, memberLabel, type TeamMember } from '@/hooks/use-team-members';
 import { DateInput } from '@/components/ui/date-input';
 import { useEffect, useState } from 'react';
 import {
@@ -56,6 +57,29 @@ interface TaskFormData {
 
 export function InitiativeTasks({ initiativeId }: InitiativeTasksProps) {
   const companyId = useCompanyId() || "";
+  const { userId } = useAuth();
+  const { members } = useTeamMembers();
+
+  /**
+   * Resolve an assignee id to a name for display.
+   *
+   * The task row stores a UUID, and the UI used to render it raw — the detail
+   * panel printed the whole id where a name belongs, and the avatar bubble
+   * showed the id's first character as an initial. Neither told anyone who the
+   * task belonged to.
+   *
+   * Falls back to a short id rather than "Unknown" when the assignee is not in
+   * the current member list: that happens when someone has been deactivated,
+   * and saying so is more useful than pretending the task is unassigned.
+   */
+  const assigneeName = (assignedToUserId?: string): string | null => {
+    if (!assignedToUserId) return null;
+    const match = members.find(member => member.id === assignedToUserId);
+    if (match) {
+      return memberLabel(match) + (match.id === userId ? " (you)" : "");
+    }
+    return `Former member (${assignedToUserId.slice(0, 8)})`;
+  };
   const { canCreate, canEdit, canDelete, canComplete } = usePermissions({
     canCreate: 'tasks.create',
     canEdit: 'tasks.edit',
@@ -127,6 +151,21 @@ export function InitiativeTasks({ initiativeId }: InitiativeTasksProps) {
         priority: formData.priority,
         dueDate: new Date(formData.dueDate),
         estimatedHours: formData.estimatedHours,
+        /**
+         * THE SECOND HALF OF THE BUG. This field was simply absent from the
+         * update, so editing a task could never change its assignee however
+         * the form behaved — the value was collected, shown back, and then
+         * dropped on save.
+         *
+         * SENT AS AN EMPTY STRING, NOT undefined, when clearing it.
+         *
+         * `updateTask` skips any field that is `undefined` — that is how it
+         * supports partial updates — and maps a falsy-but-present value to
+         * NULL. So `|| undefined` would have made "Unassigned" silently
+         * impossible: the column would keep its previous owner while the form
+         * showed it cleared.
+         */
+        assignedToUserId: formData.assignedTo,
       });
       setTasks(prev => prev.map(t => t.id === taskId ? updated : t));
       setEditingTaskId(null);
@@ -183,6 +222,8 @@ export function InitiativeTasks({ initiativeId }: InitiativeTasksProps) {
       {/* Add task form */}
       {showAddForm && (
         <TaskForm
+          members={members}
+          currentUserId={userId ?? null}
           onSubmit={handleAddTask}
           onCancel={() => setShowAddForm(false)}
           title="Add New Task"
@@ -215,6 +256,9 @@ export function InitiativeTasks({ initiativeId }: InitiativeTasksProps) {
               onDelete={() => setDeleteConfirmId(task.id)}
               onConfirmDelete={() => handleDeleteTask(task.id)}
               onCancelDelete={() => setDeleteConfirmId(null)}
+              assignedLabel={assigneeName(task.assignedToUserId)}
+              members={members}
+              currentUserId={userId ?? null}
               canEdit={canEdit}
               canDelete={canDelete}
               canComplete={canComplete}
@@ -244,6 +288,11 @@ interface TaskRowProps {
   onDelete: () => void;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
+  /** The assignee's display name, already resolved. Null when unassigned. */
+  assignedLabel: string | null;
+  /** Assignable people, for the edit form's dropdown. */
+  members: TeamMember[];
+  currentUserId: string | null;
   canEdit?: boolean;
   canDelete?: boolean;
   canComplete?: boolean;
@@ -262,6 +311,9 @@ function TaskRow({
   onDelete,
   onConfirmDelete,
   onCancelDelete,
+  assignedLabel,
+  members,
+  currentUserId,
   canEdit = true,
   canDelete = true,
   canComplete = true,
@@ -313,12 +365,17 @@ function TaskRow({
               <Clock className="h-3 w-3" />
               {task.estimatedHours}h
             </span>
-            {task.assignedToUserId && (
+            {task.assignedToUserId && assignedLabel && (
               <span className="inline-flex items-center gap-1 rounded-full bg-[hsl(var(--background-muted))] px-2 py-0.5">
+                {/*
+                  The initial comes from the NAME, not the id. It used to take
+                  the first character of the UUID, so every assignee was
+                  labelled with a meaningless hex digit.
+                */}
                 <span className="h-3 w-3 rounded-full bg-[hsl(var(--primary)_/_0.3)] flex items-center justify-center text-[8px] font-bold text-[hsl(var(--primary))]">
-                  {task.assignedToUserId.slice(0, 1).toUpperCase()}
+                  {assignedLabel.slice(0, 1).toUpperCase()}
                 </span>
-                <span className="text-[11px]">Assigned</span>
+                <span className="text-[11px]">{assignedLabel}</span>
               </span>
             )}
             {!task.assignedToUserId && (
@@ -398,7 +455,8 @@ function TaskRow({
             </div>
             <div>
               <p className="text-xs text-[hsl(var(--foreground-muted))]">Assigned to</p>
-              <p className="text-sm font-medium">{task.assignedToUserId || 'Unassigned'}</p>
+              {/* The person's name. This printed the raw UUID. */}
+              <p className="text-sm font-medium">{assignedLabel || 'Unassigned'}</p>
             </div>
           </div>
 
@@ -440,6 +498,8 @@ function TaskRow({
               estimatedHours: task.estimatedHours,
               assignedTo: task.assignedToUserId || '',
             }}
+            members={members}
+            currentUserId={currentUserId}
             onSubmit={onSaveEdit}
             onCancel={onCancelEdit}
             title="Edit Task"
@@ -458,13 +518,17 @@ function TaskRow({
 
 interface TaskFormProps {
   initialData?: TaskFormData;
+  /** Assignable people, for the Assign to dropdown. */
+  members: TeamMember[];
+  /** So the caller's own entry can be marked "(you)". */
+  currentUserId: string | null;
   onSubmit: (data: TaskFormData) => void;
   onCancel: () => void;
   title: string;
   submitLabel?: string;
 }
 
-function TaskForm({ initialData, onSubmit, onCancel, title, submitLabel = 'Add Task' }: TaskFormProps) {
+function TaskForm({ initialData, members, currentUserId, onSubmit, onCancel, title, submitLabel = 'Add Task' }: TaskFormProps) {
   const [formData, setFormData] = useState<TaskFormData>(
     initialData || {
       name: '',
@@ -573,15 +637,40 @@ function TaskForm({ initialData, onSubmit, onCancel, title, submitLabel = 'Add T
         <label htmlFor="task-assignee" className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">
           Assign to
         </label>
-        <input
+        {/*
+          A SELECT, NOT A TEXT BOX.
+
+          `tasks.assigned_to_user_id` is a UUID with a foreign key to
+          `profiles`. This field used to be a free-text input placeholdered
+          "e.g. Sarah, Marcus, or leave blank", so whatever was typed went
+          straight at a UUID column — Postgres rejected "Sarah" outright and
+          the error was swallowed by the caller's catch. The field could not
+          ever have worked, for anyone.
+
+          Listing real people also means the value saved is the id of someone
+          who exists, which is what the foreign key is there to guarantee.
+        */}
+        <select
           id="task-assignee"
-          type="text"
           value={formData.assignedTo}
           onChange={e => setFormData(prev => ({ ...prev, assignedTo: e.target.value }))}
           className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))] transition-colors"
-          placeholder="e.g. Sarah, Marcus, or leave blank"
-        />
-        <p className="mt-1 text-[11px] text-[hsl(var(--foreground-muted))]">Who is responsible for this task?</p>
+        >
+          {/* Unassigned stays available: not every task has an owner yet. */}
+          <option value="">Unassigned</option>
+          {members.map(member => (
+            <option key={member.id} value={member.id}>
+              {memberLabel(member)}
+              {member.id === currentUserId ? " (you)" : ""}
+              {member.pending ? " — invite pending" : ""}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-[11px] text-[hsl(var(--foreground-muted))]">
+          {members.length <= 1
+            ? "Only you are on this account. Invite colleagues from Settings to share work out."
+            : "Who is responsible for this task?"}
+        </p>
       </div>
 
       {/* Submit */}

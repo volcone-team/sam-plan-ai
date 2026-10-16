@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { requirePlanEditor } from "@/lib/require-plan-editor";
+import { snapshotProducts } from "@/lib/snapshot-products";
 
 /**
  * GET    /api/plan/year?year=YYYY — what deleting that year would remove.
@@ -260,6 +261,8 @@ export async function DELETE(request: Request) {
           projections: projections ?? [],
           results: results ?? [],
           expenses: expenses ?? [],
+          // Products are needed to restore initiatives (product_id is NOT NULL).
+          products: await snapshotProducts(supabase, companyId),
           deletedYear: year,
           snapshotDate: new Date().toISOString(),
         },

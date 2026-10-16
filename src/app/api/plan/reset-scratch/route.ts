@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { requirePlanEditor } from "@/lib/require-plan-editor";
 import { toDateOnly, todayDateOnly } from '@/lib/plan-dates';
+import { snapshotProducts } from "@/lib/snapshot-products";
 
 /**
  * DELETE /api/plan/reset-scratch
@@ -131,6 +132,8 @@ export async function DELETE(request: Request) {
           projections: projectionsFull || [],
           results: resultsFull || [],
           expenses: expensesFull || [],
+          // Products are needed to restore initiatives (product_id is NOT NULL).
+          products: await snapshotProducts(supabase, companyId),
           snapshotDate: new Date().toISOString(),
         };
 

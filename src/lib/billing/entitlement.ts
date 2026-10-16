@@ -123,6 +123,18 @@ export function evaluateAccess(
   }
 
   /**
+   * The local `status` column is written as 'cancelled' (British spelling, see
+   * mapStripeStatus), and callers pass `stripe_status ?? status`. A row with no
+   * stripe_status therefore arrived here as 'cancelled', matched nothing below,
+   * and was reported as `incomplete` ("Your payment wasn't completed") to
+   * someone whose subscription had ended. Normalised inline: this module is
+   * loaded by the Edge middleware and deliberately has no imports.
+   */
+  if ((sub.status as string | null) === "cancelled") {
+    sub = { ...sub, status: "canceled" };
+  }
+
+  /**
    * 2. Admin-paused. Checked before everything except the master switch.
    *
    * A pause is an explicit instruction, so it beats a comp and a trial — which

@@ -24,7 +24,16 @@ export type Permission =
   | 'results.log'
   | 'plan.regenerate'
   | 'settings.company'
-  | 'settings.manage_team';
+  | 'settings.manage_team'
+  /**
+   * See and manage the subscription: plan, price, invoices, cancellation.
+   *
+   * OWNER ONLY, and separate from `settings.company` because the two are not
+   * the same trust level — an operator may legitimately edit the company's
+   * fiscal year without being shown what it pays, what it has been invoiced,
+   * or being handed a cancel button.
+   */
+  | 'settings.billing';
 
 const ROLE_PERMISSIONS: Record<AccessRole, Permission[]> = {
   owner: [
@@ -32,7 +41,7 @@ const ROLE_PERMISSIONS: Record<AccessRole, Permission[]> = {
     'products.create', 'products.edit', 'products.delete',
     'tasks.create', 'tasks.edit', 'tasks.delete', 'tasks.complete',
     'results.log', 'plan.regenerate',
-    'settings.company', 'settings.manage_team',
+    'settings.company', 'settings.manage_team', 'settings.billing',
   ],
   operator: [
     'initiatives.create', 'initiatives.edit', 'initiatives.delete',

@@ -1018,6 +1018,93 @@ describe("canReactivate — one label, two operations", () => {
   });
 });
 
+/**
+ * THE INVARIANT THE SETTINGS PANEL RELIES ON, and the one that broke.
+ *
+ * These two functions are the whole basis for which control the subscription
+ * card renders. The panel handled `canCancel` and the `resume` kind, and
+ * silently rendered NOTHING for `repurchase` — so a customer whose
+ * subscription had fully lapsed saw a card with no action on it at all, while
+ * the plan picker sat further down the page unannounced.
+ *
+ * Asserted across every state combination rather than case by case, because
+ * the bug was not a wrong answer from either function — both were right — but
+ * a state neither test exercised together.
+ */
+describe("canCancel and canReactivate together — no dead states", () => {
+  const STATUSES = [
+    "active", "trialing", "trial", "past_due", "unpaid", "canceled", "cancelled",
+  ];
+
+  function everyState() {
+    const states: { label: string; sub: typeof payer }[] = [];
+    for (const status of STATUSES) {
+      for (const cancelAtPeriodEnd of [false, true]) {
+        for (const hasStripeSubscription of [false, true]) {
+          for (const isPaused of [false, true]) {
+            for (const isComped of [false, true]) {
+              states.push({
+                label: `${status} cancelAtEnd=${cancelAtPeriodEnd} stripe=${hasStripeSubscription} paused=${isPaused} comped=${isComped}`,
+                sub: {
+                  ...payer,
+                  status,
+                  cancelAtPeriodEnd,
+                  hasStripeSubscription,
+                  isPaused,
+                  isComped,
+                },
+              });
+            }
+          }
+        }
+      }
+    }
+    return states;
+  }
+
+  /**
+   * Cancel and reactivate are opposites, so offering both at once would be a
+   * contradiction on screen.
+   */
+  it("never offers cancel and reactivate at the same time", () => {
+    for (const { label, sub } of everyState()) {
+      const cancel = canCancel(sub);
+      const reactivate = canReactivate(sub);
+      expect(cancel.allowed && reactivate.allowed, label).toBe(false);
+    }
+  });
+
+  /**
+   * A lapsed subscription must always offer the repurchase route. Paused and
+   * comped accounts are the documented exceptions — both are administrative
+   * states the customer is not meant to resolve themselves.
+   */
+  it("always offers a way back once a subscription has been cancelled", () => {
+    for (const status of ["canceled", "cancelled"]) {
+      const sub = { ...payer, status, isPaused: false, isComped: false };
+
+      expect(canCancel(sub).allowed, status).toBe(false);
+      expect(canReactivate(sub), status).toEqual({ allowed: true, kind: "repurchase" });
+    }
+  });
+
+  /**
+   * Every state the customer can reach on their own offers exactly one action,
+   * so the card is never blank. The exclusions are the states where "contact
+   * an administrator" is the correct and only answer.
+   */
+  it("leaves no self-service state without an action", () => {
+    for (const { label, sub } of everyState()) {
+      if (sub.isPaused || sub.isComped) continue;      // admin-held states
+      if (!sub.hasStripeSubscription) continue;        // nothing bought yet
+      if (sub.status === "trialing" || sub.status === "trial") continue;
+
+      const offersSomething = canCancel(sub).allowed || canReactivate(sub).allowed;
+      expect(offersSomething, label).toBe(true);
+    }
+  });
+});
+
 describe("dates", () => {
   it("adds the window to the access end date", () => {
     const by = reactivateByIso("2026-11-12T00:00:00.000Z", 90);

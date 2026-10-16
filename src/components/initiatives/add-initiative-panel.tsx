@@ -9,6 +9,8 @@ import {
   Users,
 } from 'lucide-react';
 import { DateInput } from '@/components/ui/date-input';
+import { NumberInputRaw } from '@/components/ui/number-input';
+import { formatNumber } from '@/lib/format-money';
 import type { InitiativeType, CreateInitiativeDTO, InitiativeKind } from '@/types';
 
 export interface AddInitiativePanelProps {
@@ -393,12 +395,10 @@ export function AddInitiativePanel({
                       <label htmlFor="init-actual-revenue" className="text-xs font-medium text-[hsl(var(--foreground-muted))]">
                         Actual revenue ($)
                       </label>
-                      <input
+                      <NumberInputRaw
                         id="init-actual-revenue"
-                        type="number"
-                        min="0"
                         value={actualRevenue}
-                        onChange={e => setActualRevenue(e.target.value)}
+                        onValueChange={setActualRevenue}
                         placeholder="0"
                         className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-[hsl(var(--primary))]"
                       />
@@ -407,12 +407,10 @@ export function AddInitiativePanel({
                       <label htmlFor="init-actual-spend" className="text-xs font-medium text-[hsl(var(--foreground-muted))]">
                         Actual spend ($)
                       </label>
-                      <input
+                      <NumberInputRaw
                         id="init-actual-spend"
-                        type="number"
-                        min="0"
                         value={actualSpend}
-                        onChange={e => setActualSpend(e.target.value)}
+                        onValueChange={setActualSpend}
                         placeholder="0"
                         className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-[hsl(var(--primary))]"
                       />
@@ -641,12 +639,10 @@ export function AddInitiativePanel({
                   <label htmlFor="init-product-price" className="text-xs font-medium text-[hsl(var(--foreground))]">
                     Product price ($)
                   </label>
-                  <input
+                  <NumberInputRaw
                     id="init-product-price"
-                    type="number"
-                    min="0"
                     value={productPrice}
-                    onChange={e => setProductPrice(e.target.value)}
+                    onValueChange={setProductPrice}
                     placeholder="e.g. 2497"
                     className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-[hsl(var(--primary))]"
                   />
@@ -688,12 +684,10 @@ export function AddInitiativePanel({
                   <label htmlFor="init-traffic" className="text-xs font-medium text-[hsl(var(--foreground))]">
                     Expected registrants / audience
                   </label>
-                  <input
+                  <NumberInputRaw
                     id="init-traffic"
-                    type="number"
-                    min="0"
                     value={trafficInput}
-                    onChange={e => setTrafficInput(e.target.value)}
+                    onValueChange={setTrafficInput}
                     placeholder="0"
                     className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-[hsl(var(--primary))]"
                   />
@@ -769,15 +763,15 @@ export function AddInitiativePanel({
                         placeholder="Description"
                         className="flex-1 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 text-xs outline-none focus:border-[hsl(var(--primary))]"
                       />
-                      <input
-                        type="number"
+                      <NumberInputRaw
                         value={exp.amount}
-                        onChange={e => {
+                        onValueChange={amount => {
                           const updated = [...otherExpenses];
-                          updated[idx] = { ...updated[idx], amount: e.target.value };
+                          updated[idx] = { ...updated[idx], amount };
                           setOtherExpenses(updated);
                         }}
                         placeholder="$0"
+                        aria-label={`Expense ${idx + 1} amount ($)`}
                         className="w-20 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 text-xs outline-none focus:border-[hsl(var(--primary))]"
                       />
                       <button
@@ -831,12 +825,11 @@ export function AddInitiativePanel({
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-[hsl(var(--foreground))]">Initiative Target ($)</label>
-                    <input
-                      type="number"
-                      min="0"
+                    <label htmlFor="init-target-revenue" className="text-[11px] font-medium text-[hsl(var(--foreground))]">Initiative Target ($)</label>
+                    <NumberInputRaw
+                      id="init-target-revenue"
                       value={initiativeTarget}
-                      onChange={e => setInitiativeTarget(e.target.value)}
+                      onValueChange={setInitiativeTarget}
                       placeholder="Enter your target revenue"
                       className="w-full rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 text-sm outline-none transition-colors focus:border-[hsl(var(--primary))]"
                     />
@@ -846,7 +839,7 @@ export function AddInitiativePanel({
                     <input
                       type="text"
                       readOnly
-                      value={initiativeTarget ? Math.round(parseFloat(initiativeTarget) * 1.1).toLocaleString() : ''}
+                      value={initiativeTarget ? formatNumber(Math.round(parseFloat(initiativeTarget) * 1.1)) : ''}
                       placeholder="—"
                       className="w-full rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))] px-2 py-1.5 text-sm text-[hsl(var(--foreground-muted))] outline-none cursor-not-allowed"
                     />
@@ -857,7 +850,7 @@ export function AddInitiativePanel({
                     <input
                       type="text"
                       readOnly
-                      value={initiativeTarget ? Math.round(parseFloat(initiativeTarget) * 1.25).toLocaleString() : ''}
+                      value={initiativeTarget ? formatNumber(Math.round(parseFloat(initiativeTarget) * 1.25)) : ''}
                       placeholder="—"
                       className="w-full rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))] px-2 py-1.5 text-sm text-[hsl(var(--foreground-muted))] outline-none cursor-not-allowed"
                     />

@@ -3,17 +3,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   CreditCard, ExternalLink, TriangleAlert, CheckCircle2, Gift, RefreshCw,
-  CalendarClock, Info,
+  CalendarClock, Info, BadgePercent,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Spinner, LoadingPanel } from '@/components/ui/spinner';
 import { PlanChangeModal } from './plan-change-modal';
 import { CancelSubscriptionModal } from './cancel-subscription-modal';
 import { canCancel, canReactivate } from '@/lib/billing/cancellation';
+import { formatMoneyFromMinor } from '@/lib/format-money';
+import { pickMoneyFormatter } from '@/lib/results-tab-totals';
 
 /**
  * Customer-facing billing panel: current plan, usage this period, plan changes,
- * and a link to Stripe's portal for cards, invoices and cancellation.
+ * invoice history, the in-app cancellation flow, and an "Update card" button.
+ *
+ * "Update card" deep-links into Stripe's portal on the card-update screen only
+ * (`flow: "payment_method_update"`). There is deliberately no general portal
+ * link here: invoices are listed below and cancellation runs in-app.
  *
  * Renders a plain "no billing required" note when Stripe is disabled, rather than
  * showing plans that cannot be bought.
@@ -66,6 +72,17 @@ interface BillingMe {
   usage: UsageRow[];
   counts: { initiatives: number };
   periodEnd: string;
+  /**
+   * The discount in force, or null. Resolved server-side from Stripe — see
+   * src/lib/billing/discount-display.ts.
+   */
+  activeDiscount: {
+    couponId: string | null;
+    nextCharge: string | null;
+    summary: string;
+    afterwards: string | null;
+    saving: string | null;
+  } | null;
   invoices: {
     stripe_invoice_id: string; status: string | null; amount_paid: number | null;
     currency: string; paid_at: string | null; hosted_invoice_url: string | null;
@@ -80,8 +97,7 @@ function shortDate(iso: string | null): string {
 }
 
 function money(minor: number | null, currency = 'usd'): string {
-  const v = typeof minor === 'number' && Number.isFinite(minor) ? minor / 100 : 0;
-  return `${currency.toUpperCase() === 'USD' ? '$' : ''}${v.toFixed(2)}`;
+  return formatMoneyFromMinor(minor, currency);
 }
 
 /** Human wording for why access is limited, paired with what to do about it. */
@@ -91,6 +107,18 @@ function accessNotice(me: BillingMe): { tone: 'warn' | 'error'; text: string } |
   if (!access.allowed) {
     switch (access.reason) {
       case 'paused':
+        /*
+          No live subscription behind the pause: buying a plan ends it (user
+          decision). Reached by super admins, who bypass the middleware. The
+          picker below already offers Checkout, because hasStripeSubscription
+          is false for a canceled or missing subscription.
+        */
+        if (subscription && !subscription.hasStripeSubscription && !subscription.isComped) {
+          return {
+            tone: 'error',
+            text: 'Your account is paused and has no active subscription. Choose a plan below to restore access — buying a plan ends the pause.',
+          };
+        }
         // Mostly unreachable: the middleware redirects a paused user to
         // /account-paused before any app page renders. Kept so the panel never
         // falls through to "not active yet", which would misdescribe a pause as
@@ -143,7 +171,16 @@ function accessNotice(me: BillingMe): { tone: 'warn' | 'error'; text: string } |
 export function BillingPanel() {
   const [me, setMe] = useState<BillingMe | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  /**
+   * Which action is in flight, or null. Keys: `subscribe:<planId>`,
+   * `change:<planId>`, `reactivate`.
+   *
+   * Per-action rather than one boolean so only the clicked button shows a
+   * spinner. Every action button is still disabled while ANY action runs
+   * (via `busy` below) to prevent double submission.
+   */
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const busy = busyAction !== null;
   const [error, setError] = useState<string | null>(null);
   const [cycle, setCycle] = useState<'monthly' | 'annual'>('monthly');
   /**
@@ -218,7 +255,7 @@ export function BillingPanel() {
 
   /** Start checkout for a plan the company has never subscribed to. */
   const subscribe = async (planId: string) => {
-    setBusy(true);
+    setBusyAction(`subscribe:${planId}`);
     setError(null);
     try {
       const res = await fetch('/api/stripe/checkout', {
@@ -239,13 +276,55 @@ export function BillingPanel() {
                 ? (body?.message ?? 'This plan is not available yet. Please contact support.')
                 : 'Could not start checkout. Please try again.'
         );
+        // Failure: release the buttons. (Success deliberately keeps them
+        // locked, because the page is about to navigate to Stripe.)
+        setBusyAction(null);
         return;
       }
       // Leaves the app for Stripe's hosted page; card data never touches us.
       window.location.href = body.url;
     } catch {
       setError('Could not reach the server.');
-      setBusy(false);
+      setBusyAction(null);
+    }
+  };
+
+  /**
+   * Open Stripe's portal straight on the card-update screen.
+   *
+   * Card data never touches us: Stripe hosts the form and redirects back to
+   * /settings when the new card is saved.
+   */
+  const updateCard = async () => {
+    setBusyAction('update_card');
+    setError(null);
+    try {
+      const res = await fetch('/api/stripe/portal', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flow: 'payment_method_update' }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body?.url) {
+        setError(
+          body?.error === 'not_permitted'
+            ? 'Only the account owner can update the payment card.'
+            : body?.error === 'no_customer'
+              ? 'There is no payment card on file for this account yet.'
+              : body?.error === 'billing_disabled'
+                ? 'Billing is switched off at the moment, so there is no card to update.'
+                : 'Could not open the card update page. Please try again.'
+        );
+        // Failure: release the buttons. Success keeps them locked because
+        // the page is about to navigate to Stripe.
+        setBusyAction(null);
+        return;
+      }
+      window.location.href = body.url;
+    } catch {
+      setError('Could not reach the server.');
+      setBusyAction(null);
     }
   };
 
@@ -271,7 +350,7 @@ export function BillingPanel() {
 
   /** Move an existing subscription to another plan. */
   const changePlan = async (planId: string) => {
-    setBusy(true);
+    setBusyAction(`change:${planId}`);
     setError(null);
     try {
       const res = await fetch('/api/stripe/change-plan', {
@@ -285,7 +364,11 @@ export function BillingPanel() {
         setError(
           body?.error === 'comped_account'
             ? 'Your access was granted directly, so there is no subscription to change.'
-            : `Could not change plan: ${body?.error ?? 'unknown'}`
+            : body?.error === 'no_live_subscription'
+              ? 'Your previous subscription has ended, so there is nothing to change. Refresh the page and choose a plan to start a new subscription.'
+              : body?.error === 'account_paused'
+                ? 'Your account is paused. Contact your administrator to make changes to your plan.'
+                : `Could not change plan: ${body?.error ?? 'unknown'}`
         );
         return;
       }
@@ -296,31 +379,7 @@ export function BillingPanel() {
     } catch {
       setError('Could not reach the server.');
     } finally {
-      setBusy(false);
-    }
-  };
-
-  const openPortal = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/stripe/portal', {
-        method: 'POST',
-        credentials: 'same-origin',
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || !body?.url) {
-        setError(
-          body?.error === 'no_customer'
-            ? 'There is no billing account to manage yet.'
-            : 'Could not open the billing portal.'
-        );
-        return;
-      }
-      window.location.href = body.url;
-    } catch {
-      setError('Could not reach the server.');
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -336,7 +395,7 @@ export function BillingPanel() {
    * through the normal plan cards below.
    */
   const reactivate = async () => {
-    setBusy(true);
+    setBusyAction('reactivate');
     setError(null);
     try {
       const res = await fetch('/api/billing/reactivate', {
@@ -363,7 +422,7 @@ export function BillingPanel() {
     } catch {
       setError('Could not reach the server.');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -417,6 +476,18 @@ export function BillingPanel() {
     : null;
   const cancelState = canCancel(subState);
   const reactivateState = canReactivate(subState);
+
+  /**
+   * "Update card" needs a live Stripe subscription (past_due and unpaid count
+   * as live) and an owner. Comped accounts have no card to update.
+   */
+  const showUpdateCard =
+    me.canManage &&
+    !!me.subscription?.hasStripeSubscription &&
+    !me.subscription.isComped;
+  /** The notices for these reasons tell the user to update their card. */
+  const cardNeedsAttention =
+    me.access.reason === 'past_due_expired' || me.access.reason === 'grace_period';
 
   return (
     <div className="space-y-6">
@@ -473,6 +544,35 @@ export function BillingPanel() {
                       : `Billed ${me.subscription.billingCycle}`}
               </p>
               {/*
+                THE DISCOUNT, AND WHAT THEY WILL ACTUALLY PAY.
+
+                Accepting a retention offer used to change nothing here: the
+                line above still showed the plan's list price and "Renews 14
+                Nov", so someone who had just claimed 50% off saw no evidence
+                of it and no way to check short of re-entering the
+                cancellation flow — where they would be told they had already
+                used their one offer.
+
+                Rendered above the plan name's siblings rather than tucked at
+                the bottom, because the amount due is the thing they came to
+                confirm.
+              */}
+              {me.activeDiscount && (
+                <p className="mt-2 inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-[var(--radius-md)] border border-green-300 bg-green-50 px-2.5 py-1.5 text-xs text-green-900 dark:border-green-800 dark:bg-green-950 dark:text-green-200">
+                  <BadgePercent className="h-3.5 w-3.5 shrink-0" />
+                  {me.activeDiscount.nextCharge && (
+                    <span className="font-semibold">
+                      {me.activeDiscount.nextCharge} due next
+                    </span>
+                  )}
+                  <span>{me.activeDiscount.summary}</span>
+                  {me.activeDiscount.afterwards && (
+                    <span className="opacity-80">{me.activeDiscount.afterwards}</span>
+                  )}
+                </p>
+              )}
+
+              {/*
                 A scheduled downgrade is persisted in pending_plan_id, so this
                 survives a refresh. It previously did not: the webhook cleared
                 the column as soon as the subscription reported `active`, which
@@ -527,14 +627,31 @@ export function BillingPanel() {
                 Refresh billing
               </button>
 
-              {me.canManage && me.subscription.hasStripeSubscription && (
+              {/*
+                Primary when a failed payment is the reason for the notice
+                above, since that notice tells them to update their card.
+              */}
+              {showUpdateCard && (
                 <button
-                  onClick={openPortal}
+                  onClick={updateCard}
                   disabled={busy}
-                  className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-2 text-sm font-medium hover:bg-[hsl(var(--background-muted))] disabled:opacity-40"
+                  aria-busy={busyAction === 'update_card'}
+                  className={cn(
+                    'inline-flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-sm disabled:opacity-40',
+                    cardNeedsAttention
+                      ? 'bg-[hsl(var(--primary))] font-semibold text-white hover:opacity-90'
+                      : 'border border-border font-medium hover:bg-[hsl(var(--background-muted))]'
+                  )}
                 >
-                  Manage payment &amp; invoices
-                  <ExternalLink className="h-3.5 w-3.5" />
+                  {busyAction === 'update_card' ? (
+                    <Spinner
+                      size="sm"
+                      className={cardNeedsAttention ? 'text-white' : undefined}
+                    />
+                  ) : (
+                    <CreditCard className="h-3.5 w-3.5" />
+                  )}
+                  Update card
                 </button>
               )}
 
@@ -549,9 +666,44 @@ export function BillingPanel() {
                 <button
                   onClick={reactivate}
                   disabled={busy}
+                  aria-busy={busyAction === 'reactivate'}
                   className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40"
                 >
+                  {busyAction === 'reactivate' && (
+                    <Spinner size="sm" className="text-white" />
+                  )}
                   Reactivate my plan
+                </button>
+              )}
+
+              {/*
+                THE OTHER REACTIVATION STATE, which had no control at all.
+
+                `canReactivate` returns two allowed kinds. `resume` is a
+                subscription still running but set to end — one flag flip, no
+                charge, handled above. `repurchase` is one that has ALREADY
+                ended: Stripe has nothing left to resume, so it needs a new
+                checkout at whatever the current price is.
+
+                Only `resume` was rendered. In the repurchase state the card
+                showed no action whatsoever — Cancel is correctly blocked by
+                `already_canceled`, so a customer who had fully lapsed was left
+                with a dead panel and no way back in, even though the plan
+                picker was sitting further down the page.
+
+                A button rather than a link so it can also move the viewport:
+                "choose a plan below" is unhelpful when "below" is off screen.
+              */}
+              {me.canManage && reactivateState.allowed && reactivateState.kind === 'repurchase' && (
+                <button
+                  onClick={() => {
+                    document
+                      .getElementById('plan-picker')
+                      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
+                  className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-2 text-sm font-semibold text-white hover:opacity-90"
+                >
+                  Start a new subscription
                 </button>
               )}
             </div>
@@ -626,7 +778,12 @@ export function BillingPanel() {
 
       {/* Plans */}
       {me.canManage && (
-        <div className="space-y-3">
+        /*
+          Anchored so the subscription card above can point at it. A customer
+          whose subscription has fully ended is told to "choose a plan below",
+          and on a long settings page "below" is not always on screen.
+        */
+        <div className="space-y-3" id="plan-picker">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold">
               {me.subscription?.hasStripeSubscription ? 'Change plan' : 'Choose a plan'}
@@ -655,6 +812,10 @@ export function BillingPanel() {
               const buyable = cycle === 'annual' ? plan.purchasableAnnual : plan.purchasableMonthly;
               const isCurrent =
                 plan.isCurrent && me.subscription?.billingCycle === cycle;
+              // Only THIS card's own action spins. A change is confirmed in
+              // the modal first, so `change:<id>` spins there as well.
+              const cardBusy =
+                busyAction === `subscribe:${plan.id}` || busyAction === `change:${plan.id}`;
 
               return (
                 <div
@@ -677,7 +838,7 @@ export function BillingPanel() {
                     <p className="mt-0.5 text-xs text-[hsl(var(--foreground-muted))]">{plan.tagline}</p>
                   )}
                   <p className="mt-3 text-2xl font-bold">
-                    ${price}
+                    {pickMoneyFormatter([price])(price)}
                     <span className="text-sm font-normal text-[hsl(var(--foreground-muted))]">
                       /{cycle === 'annual' ? 'yr' : 'mo'}
                     </span>
@@ -721,13 +882,14 @@ export function BillingPanel() {
                             ? setConfirming(plan)
                             : subscribe(plan.id)
                         }
+                        aria-busy={cardBusy}
                         className="w-full rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
                       >
                         {/*
                           Never "Start trial": the trial already began at signup,
                           so every button here is an upgrade to a paid plan.
                         */}
-                        {busy ? (
+                        {cardBusy ? (
                           <Spinner size="sm" className="mx-auto text-white" />
                         ) : me.subscription?.hasStripeSubscription ? (
                           'Switch to this plan'
@@ -815,7 +977,7 @@ export function BillingPanel() {
           )}
           targetCycle={cycle}
           periodEnd={me.subscription?.currentPeriodEnd ?? null}
-          pending={busy}
+          pending={busyAction === `change:${confirming.id}`}
           onConfirm={() => changePlan(confirming.id)}
           onClose={() => setConfirming(null)}
         />

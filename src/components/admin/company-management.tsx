@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DateInput } from "@/components/ui/date-input";
+import { formatMoneyFromMinor } from "@/lib/format-money";
 
 /** The subscription half of a row. Null when the company has no subscription. */
 interface CompanySubscription {
@@ -120,8 +121,7 @@ function getPlanStatusClasses(status: string): string {
 
 /** Minor units to a display string. Stripe stores cents. */
 function money(minor: number | null | undefined, currency = "usd"): string {
-  const v = typeof minor === "number" && Number.isFinite(minor) ? minor / 100 : 0;
-  return `${currency.toUpperCase() === "USD" ? "$" : ""}${v.toFixed(2)}`;
+  return formatMoneyFromMinor(minor, currency);
 }
 
 function shortDate(iso: string | null): string {

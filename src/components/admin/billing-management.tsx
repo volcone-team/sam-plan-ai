@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LoadingPanel } from "@/components/ui/spinner";
+import { formatMoneyFromMinor } from "@/lib/format-money";
+import { pickMoneyFormatter } from "@/lib/results-tab-totals";
 
 /**
  * Real Stripe billing administration. SUPER-ADMIN ONLY.
@@ -113,8 +115,7 @@ interface SubscribersResponse {
 
 /** Minor units to a display string. */
 function money(minor: number | null | undefined, currency = "usd"): string {
-  const v = typeof minor === "number" && Number.isFinite(minor) ? minor / 100 : 0;
-  return `${currency.toUpperCase() === "USD" ? "$" : ""}${v.toFixed(2)}`;
+  return formatMoneyFromMinor(minor, currency);
 }
 
 function shortDate(iso: string | null): string {
@@ -637,8 +638,8 @@ export function BillingManagement() {
                 return (
                   <tr key={p.id} className="border-b border-border last:border-0">
                     <td className="px-4 py-2 font-medium">{p.name}</td>
-                    <td className="px-4 py-2">${p.monthly_price}</td>
-                    <td className="px-4 py-2">${p.annual_price}</td>
+                    <td className="px-4 py-2">{pickMoneyFormatter([p.monthly_price])(p.monthly_price)}</td>
+                    <td className="px-4 py-2">{pickMoneyFormatter([p.annual_price])(p.annual_price)}</td>
                     <td className="px-4 py-2">
                       {/*
                         Distinguishes "not offered" from "needs a sync". A price of

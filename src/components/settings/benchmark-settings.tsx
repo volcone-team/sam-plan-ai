@@ -2,12 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import { CheckCircle, Shield } from 'lucide-react';
+import { useLegalUrls } from '@/hooks/use-legal-urls';
+import { LegalLink } from '@/components/legal-link';
 
 const STORAGE_KEY = 'sam-flow-benchmark-settings';
 
 export function BenchmarkSettings() {
   const [optedIn, setOptedIn] = useState(true);
   const [showSuccess, setShowSuccess] = useState(false);
+  const legal = useLegalUrls();
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -98,13 +101,15 @@ export function BenchmarkSettings() {
         </div>
       </div>
 
-      {/* Privacy Link Placeholder */}
+      {/*
+        Both policies, linked from admin settings. This was a placeholder: a
+        <span> styled as a link with no href, so it looked clickable and did
+        nothing.
+      */}
       <p className="text-xs text-[hsl(var(--foreground-muted))]">
         For more details, see our{' '}
-        <span className="cursor-pointer text-[hsl(var(--primary))] hover:underline">
-          Privacy Policy
-        </span>
-        .
+        <LegalLink href={legal.privacyPolicyUrl}>Privacy Policy</LegalLink> and{' '}
+        <LegalLink href={legal.termsUrl}>Terms &amp; Conditions</LegalLink>.
       </p>
     </div>
   );

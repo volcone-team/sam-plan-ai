@@ -20,6 +20,7 @@ import { ProgressBar } from "@/components/ui/progress-bar";
 import { usePermission } from "@/hooks/use-permission";
 import { useCompanyId } from "@/hooks/use-auth";
 import { usePlanYears } from "@/hooks/use-plan-years";
+import { formatMoney } from "@/lib/format-money";
 
 interface Suggestion {
   id: string;
@@ -51,7 +52,7 @@ function formatValue(obj: Record<string, any>): string {
     .map(([k, v]) => {
       // Prettify common keys
       if (k === "plannedBudget" || k === "baselineRevenue" || k === "stretchRevenue" || k === "price") {
-        return `${labelize(k)}: $${Number(v).toLocaleString()}`;
+        return `${labelize(k)}: ${formatMoney(Number(v))}`;
       }
       if (k === "activationMonth") return `Month: ${v}`;
       return `${labelize(k)}: ${v}`;

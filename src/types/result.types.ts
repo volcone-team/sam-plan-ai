@@ -57,11 +57,19 @@ export type Result = InitiativeResult | EvergreenResult;
 
 export interface CreateInitiativeResultDTO {
   companyId: string;
-  initiativeId: string;
+  /**
+   * The initiative this result belongs to, or null for a company-level result
+   * not tied to any one initiative. `results.initiative_id` is nullable.
+   */
+  initiativeId: string | null;
   weekStartDate: Date;
   weekEndDate: Date;
   actualRevenue: number;
-  actualSpend: number;
+  /**
+   * Optional: the Results tab records spend as expenses, not on the result.
+   * Planner and onboarding still pass it. Defaults to 0 when omitted.
+   */
+  actualSpend?: number;
   metrics?: {
     [key: string]: number;
   };

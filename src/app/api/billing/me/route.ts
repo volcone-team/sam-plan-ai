@@ -2,8 +2,14 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
-import { loadBillingConfig, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client";
+import { loadBillingConfig, STRIPE_MODE_TAG, getStripe } from "@/lib/billing/stripe-client";
+import {
+  describeActiveDiscount,
+  couponIdFromDiscount,
+  type ActiveDiscount,
+} from "@/lib/billing/discount-display";
 import { evaluateAccess } from "@/lib/billing/entitlement";
+import { hasLiveStripeSubscription } from "@/lib/billing/live-subscription";
 import { resolveUsagePeriod, checkLimit } from "@/lib/billing/limits";
 import { canCancel, canOfferDiscount } from "@/lib/billing/cancellation";
 import { canPauseSelf } from "@/lib/billing/pause";
@@ -265,6 +271,131 @@ export async function GET() {
       console.error("[billing/me] Could not read redemptions:", redemptionError.message);
     }
 
+    /**
+     * Only an owner may SEE the billing detail, not merely act on it.
+     *
+     * Declared here rather than beside the response because the discount
+     * lookup below depends on it — there is no reason to spend a Stripe call
+     * resolving a figure the caller is not allowed to be shown.
+     */
+    const canSeeBillingDetail = !profile?.role || profile.role === "owner";
+
+    /**
+     * The ACTIVE DISCOUNT, and what the customer will really be charged.
+     *
+     * Accepting a retention offer used to change nothing on this screen: the
+     * panel showed the plan's list price and the renewal date, so a customer
+     * who had just claimed "50% off for 2 months" saw £149 and no
+     * acknowledgement. The only way to check was to re-enter the cancellation
+     * flow and be told they had already used their one offer.
+     *
+     * GATED ON THE REDEMPTION ROW, which is already counted just above for
+     * `alreadyRedeemed` and costs nothing. Only an account that has actually
+     * claimed something pays for a Stripe round trip, so Settings stays as
+     * fast as it was for everyone else — and that is the overwhelming
+     * majority.
+     *
+     * KNOWN LIMITATION: a discount applied by hand in the Stripe dashboard
+     * leaves no redemption row, so it will not be shown. Catching those would
+     * mean a Stripe call on every load for every customer, which is not worth
+     * it for an administrative edge case — and `/api/billing/retention-offer`
+     * re-checks Stripe directly before granting anything, so nobody can double
+     * up.
+     */
+    let activeDiscount: ActiveDiscount | null = null;
+
+    if (
+      canSeeBillingDetail &&
+      (redemptionCount ?? 0) > 0 &&
+      sub?.stripe_subscription_id &&
+      sub.stripe_mode === STRIPE_MODE_TAG
+    ) {
+      try {
+        const stripe = getStripe();
+
+        const stripeSub = await stripe.subscriptions.retrieve(
+          sub.stripe_subscription_id,
+          { expand: ["discounts"] }
+        );
+
+        /**
+         * `discounts` is the current field; `discount` is the legacy singular
+         * one. Both are read because the API version an object comes back
+         * under is not entirely in our control.
+         *
+         * An EMPTY array is the signal that matters here: the redemption row
+         * never expires, so a customer who took "50% off for 2 months" still
+         * has one a year later. Stripe is the authority on whether the
+         * discount is still in force.
+         */
+        const discounts = (stripeSub.discounts ?? []) as unknown[];
+        const legacy = (stripeSub as unknown as { discount?: unknown }).discount;
+        const couponId = couponIdFromDiscount(discounts[0] ?? legacy);
+
+        /**
+         * The coupon is fetched SEPARATELY rather than expanded.
+         *
+         * On API version 2026-08-26.dahlia a subscription's discount carries
+         * only `source.coupon` as a string id — there is no coupon object to
+         * expand, and `expand: ["discounts.coupon"]` returns nothing. The
+         * percent, duration and month count all live on the coupon itself, so
+         * it has to be retrieved by id. See couponIdFromDiscount.
+         */
+        const coupon = couponId
+          ? ((await stripe.coupons.retrieve(couponId)) as unknown as Record<string, unknown>)
+          : null;
+
+        if (coupon) {
+          /**
+           * The upcoming invoice is the AUTHORITATIVE next charge — it
+           * accounts for proration, credits and tax, none of which we could
+           * compute correctly from the coupon alone.
+           *
+           * Previewing fails for a cancelled subscription, which has no
+           * upcoming invoice. That is not an error worth surfacing: the
+           * discount is still describable without the figure, and
+           * describeActiveDiscount omits what it does not know.
+           */
+          let nextChargeMinor: number | null = null;
+          try {
+            const preview = await stripe.invoices.createPreview({
+              subscription: sub.stripe_subscription_id,
+            });
+            nextChargeMinor = preview.total;
+          } catch (previewErr) {
+            console.log(
+              "[billing/me] No upcoming invoice to preview:",
+              previewErr instanceof Error ? previewErr.message : previewErr
+            );
+          }
+
+          activeDiscount = describeActiveDiscount({
+            couponId: typeof coupon.id === "string" ? coupon.id : null,
+            percentOff: typeof coupon.percent_off === "number" ? coupon.percent_off : null,
+            amountOff: typeof coupon.amount_off === "number" ? coupon.amount_off : null,
+            duration: typeof coupon.duration === "string" ? coupon.duration : null,
+            durationInMonths:
+              typeof coupon.duration_in_months === "number"
+                ? coupon.duration_in_months
+                : null,
+            nextChargeMinor,
+            standardChargeMinor: paidPrice?.unit_amount ?? null,
+            currency: paidPrice?.currency ?? null,
+            billingCycle: sub.billing_cycle ?? null,
+          });
+        }
+      } catch (err) {
+        /*
+         * Never fails the request. The panel is perfectly usable without the
+         * discount line, and billing state is what the customer came for.
+         */
+        console.error(
+          "[billing/me] Could not read the active discount:",
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+
     const cancelEligibility = canCancel(
       sub
         ? {
@@ -272,8 +403,8 @@ export async function GET() {
             isComped: sub.is_comped,
             isPaused: sub.is_paused ?? false,
             cancelAtPeriodEnd: sub.cancel_at_period_end,
-            hasStripeSubscription:
-              !!sub.stripe_subscription_id && sub.stripe_mode === STRIPE_MODE_TAG,
+            // LIVE only: a canceled subscription kept on the row is not one.
+            hasStripeSubscription: hasLiveStripeSubscription(sub),
             currentPeriodEnd: sub.current_period_end,
           }
         : null
@@ -421,11 +552,53 @@ export async function GET() {
           .limit(12)
       : { data: [] };
 
+    /**
+     * Only an owner may SEE the billing detail, not merely act on it.
+     *
+     * `canManage` already hid the buttons, but the payload itself still
+     * carried the plan, the price, the renewal date and up to twelve invoices
+     * — including `hosted_invoice_url`, which links straight to the document
+     * in Stripe — to any authenticated member who asked. The Settings tab is
+     * now owner-only too, so nothing legitimate calls this as a non-owner;
+     * this is the second lock, for anyone calling the endpoint directly.
+     *
+     * The ENVELOPE is kept rather than returning 403, because the response
+     * also carries the access state the app uses for gating. A non-owner gets
+     * a truthful "there is nothing here for you" instead of an error that a
+     * caller would have to special-case.
+     */
+    if (!canSeeBillingDetail) {
+      console.log("[billing/me]", user.email, "is", profile?.role, "— billing detail withheld");
+
+      return NextResponse.json({
+        billingEnabled: config.stripeEnabled,
+        canManage: false,
+        /** Withheld, not empty: the distinction matters when debugging. */
+        restricted: true,
+        trial: {
+          enabled: config.trialEnabled,
+          days: config.trialDays,
+          requiresCard: config.trialRequiresCard,
+        },
+        plans: [],
+        subscription: null,
+        invoices: [],
+        activeDiscount: null,
+        counts: { initiatives: initiativeCount ?? 0 },
+        access: {
+          allowed: access.allowed,
+          reason: access.reason,
+          warn: access.warn,
+          daysRemaining: access.daysRemaining,
+        },
+      });
+    }
+
     return NextResponse.json({
       billingEnabled: config.stripeEnabled,
       // Only an owner may buy or change a plan; the UI hides the buttons for
       // everyone else rather than letting them fail at the API.
-      canManage: !profile?.role || profile.role === "owner",
+      canManage: canSeeBillingDetail,
       trial: {
         enabled: config.trialEnabled,
         days: config.trialDays,
@@ -480,10 +653,19 @@ export async function GET() {
               ? allPlans.find((p) => p.id === sub.pending_plan_id)?.name ?? null
               : null,
             pendingBillingCycle: sub.pending_billing_cycle,
-            // Drives whether the portal link is shown: no Stripe subscription in
-            // the active mode means there is nothing for the portal to manage.
-            hasStripeSubscription:
-              !!sub.stripe_subscription_id && sub.stripe_mode === STRIPE_MODE_TAG,
+            /**
+             * A LIVE Stripe subscription in this mode (active, trialing,
+             * past_due, unpaid). Drives Change plan vs Checkout in the panel,
+             * and the portal link.
+             *
+             * It used to be "an id is stored", which stayed true for a
+             * subscription Stripe had already CANCELED — e.g. after a comp was
+             * granted then revoked — so the panel offered "Switch to this plan"
+             * and change-plan could only answer `no_change` or fail. A
+             * non-live subscription is now treated as none, so the customer
+             * is sent to Checkout.
+             */
+            hasStripeSubscription: hasLiveStripeSubscription(sub),
             /**
              * Minor units, as Stripe reports them. Both nullable: a comped or
              * trialing account has no Stripe price, and the cancellation screen
@@ -521,6 +703,12 @@ export async function GET() {
             strategyCallUrl: booking.strategyCall,
           }
         : null,
+      /**
+       * The discount actually in force, or null. See discount-display.ts for
+       * why the panel could not previously tell the customer anything about an
+       * offer they had just accepted.
+       */
+      activeDiscount,
       // Account contents, for the cancellation screen's "what gets locked" list.
       counts: { initiatives: initiativeCount ?? 0 },
       access: {

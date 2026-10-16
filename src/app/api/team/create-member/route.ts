@@ -135,7 +135,7 @@ export async function POST(request: Request) {
     }
 
     // Update the profile to the correct company (use update, not upsert)
-    const { error: profileError } = await adminClient
+    const { data: updatedRows, error: profileError } = await adminClient
       .from("profiles")
       .update({
         company_id: companyId,
@@ -144,10 +144,22 @@ export async function POST(request: Request) {
         role,
         is_admin: false,
       })
-      .eq("id", newUser.user.id);
+      .eq("id", newUser.user.id)
+      // Returned so the decision below rests on what the UPDATE actually did,
+      // rather than on a SELECT taken a moment earlier.
+      .select("id");
 
-    // If update found no row (trigger didn't fire), insert it
-    if (!autoProfile) {
+    /**
+     * Insert only if the update genuinely matched nothing.
+     *
+     * This used to branch on `!autoProfile` — the result of a SELECT taken
+     * before the update. Those can disagree: the trigger can commit in the gap,
+     * so the SELECT sees no row, the UPDATE then succeeds, and the insert runs
+     * anyway and fails on the duplicate primary key. The caller got a 500 and
+     * the auth user was deleted, for a member who had in fact been created
+     * correctly.
+     */
+    if (!profileError && (updatedRows?.length ?? 0) === 0) {
       const { error: insertError } = await adminClient
         .from("profiles")
         .insert({
@@ -171,7 +183,48 @@ export async function POST(request: Request) {
 
     if (profileError) {
       console.error("[team/create-member] Profile update error:", profileError.message);
-      // Non-fatal: the profile might still be correct if trigger handled it
+    }
+
+    /**
+     * VERIFY THE ROLE LANDED, AND REFUSE TO LEAVE AN OWNER BEHIND.
+     *
+     * `handle_new_user` creates every auth user as the OWNER of a brand-new
+     * company. This route's job is to overwrite that with the invited role and
+     * the inviting company. The previous code logged a failed update and
+     * carried on, commenting that "the profile might still be correct if
+     * trigger handled it" — but the trigger's version is precisely the wrong
+     * one. A failure there silently produced a full owner of someone else's
+     * company, with billing access and the ability to delete the account, and
+     * nothing anywhere would have said so.
+     *
+     * So the final state is read back and checked. If it is not what was asked
+     * for, the auth user is removed and the request fails loudly: no member is
+     * far better than an accidental owner, and the inviter can simply try
+     * again.
+     */
+    const { data: finalProfile } = await adminClient
+      .from("profiles")
+      .select("role, company_id")
+      .eq("id", newUser.user.id)
+      .maybeSingle();
+
+    if (finalProfile?.role !== role || finalProfile?.company_id !== companyId) {
+      console.error(
+        "[team/create-member] Profile did not take the invited role — rolling back.",
+        "wanted role:", role, "got:", finalProfile?.role,
+        "| wanted company:", companyId, "got:", finalProfile?.company_id
+      );
+
+      await adminClient.auth.admin.deleteUser(newUser.user.id);
+
+      return NextResponse.json(
+        {
+          error:
+            "Could not finish setting up that member, so nothing was created. " +
+            "Please try again.",
+        },
+        { status: 500 }
+      );
     }
 
     // 5. Generate the invite link and email it. This is best-effort — the

@@ -10,6 +10,7 @@ import { expenseService } from '@/services/expense.service';
 import { initiativeService } from '@/services/initiative.service';
 import type { Expense, ExpenseCategory, Initiative } from '@/types';
 import { usePlanYears } from '@/hooks/use-plan-years';
+import { formatMoney } from '@/lib/format-money';
 
 // Was the literal 2026, which silently stops being true. Now the shared
 // selected plan year, so reports follow the year filter like every other screen.
@@ -178,7 +179,7 @@ export function ExpensesReport() {
             <p className="text-sm font-medium text-[hsl(var(--foreground-muted))]">Total Expenses</p>
             <DollarSign className="h-4 w-4 text-[hsl(var(--foreground-muted))]" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{formatCurrency(totalExpenses)}</p>
+          <p className="mt-2 text-2xl font-bold">{formatMoney(totalExpenses)}</p>
           <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">All time</p>
         </div>
 
@@ -191,7 +192,7 @@ export function ExpensesReport() {
             {highestCategory ? CATEGORY_LABELS[highestCategory.category] : '—'}
           </p>
           <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">
-            {highestCategory ? formatCurrency(highestCategory.total) : 'No data'}
+            {highestCategory ? formatMoney(highestCategory.total) : 'No data'}
           </p>
         </div>
 
@@ -209,7 +210,7 @@ export function ExpensesReport() {
             <p className="text-sm font-medium text-[hsl(var(--foreground-muted))]">Avg per Initiative</p>
             <Receipt className="h-4 w-4 text-[hsl(var(--foreground-muted))]" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{formatCurrency(averagePerInitiative)}</p>
+          <p className="mt-2 text-2xl font-bold">{formatMoney(averagePerInitiative)}</p>
           <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">Average spend</p>
         </div>
       </div>
@@ -230,7 +231,7 @@ export function ExpensesReport() {
                     <span className="font-medium">{CATEGORY_LABELS[item.category]}</span>
                   </div>
                   <div className="flex items-center gap-3 text-[hsl(var(--foreground-muted))]">
-                    <span>{formatCurrency(item.total)}</span>
+                    <span>{formatMoney(item.total)}</span>
                     <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${colors.bg} ${colors.text}`}>
                       {percentage.toFixed(1)}%
                     </span>
@@ -276,7 +277,7 @@ export function ExpensesReport() {
                       {row.name}
                     </button>
                   </td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(row.total)}</td>
+                  <td className="px-4 py-3 text-right">{formatMoney(row.total)}</td>
                   <td className="px-4 py-3 text-right">{row.count}</td>
                 </tr>
               ))}
@@ -284,7 +285,7 @@ export function ExpensesReport() {
             <tfoot>
               <tr className="border-t-2 border-border bg-[hsl(var(--muted)/.3)]">
                 <td className="px-4 py-3 font-semibold">Total</td>
-                <td className="px-4 py-3 text-right font-semibold">{formatCurrency(totalExpenses)}</td>
+                <td className="px-4 py-3 text-right font-semibold">{formatMoney(totalExpenses)}</td>
                 <td className="px-4 py-3 text-right font-semibold">{expenses.length}</td>
               </tr>
             </tfoot>
@@ -306,7 +307,7 @@ export function ExpensesReport() {
                       item.total > 0 ? 'bg-[hsl(var(--primary))]' : 'bg-[hsl(var(--muted))]'
                     }`}
                     style={{ height: `${item.total > 0 ? Math.max(height, 2) : 4}%` }}
-                    title={`${MONTH_SHORT[item.month - 1]}: ${formatCurrency(item.total)}`}
+                    title={`${MONTH_SHORT[item.month - 1]}: ${formatMoney(item.total)}`}
                   />
                 </div>
                 <span className="text-[10px] text-[hsl(var(--foreground-muted))] sm:text-xs">
@@ -359,7 +360,7 @@ export function ExpensesReport() {
                       </span>
                     </td>
                     <td className="px-4 py-3 max-w-[300px] truncate">{expense.description}</td>
-                    <td className="px-4 py-3 text-right font-medium">{formatCurrency(expense.amount)}</td>
+                    <td className="px-4 py-3 text-right font-medium">{formatMoney(expense.amount)}</td>
                   </tr>
                 );
               })}
@@ -372,15 +373,6 @@ export function ExpensesReport() {
 }
 
 // --- Utility ---
-
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
 
 function formatDate(date: Date): string {
   const d = new Date(date);

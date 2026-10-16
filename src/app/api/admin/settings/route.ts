@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireAdmin } from "@/lib/require-admin";
 import { logActivity } from "@/lib/activity-log";
+import {
+  resolveLegalUrls,
+  normaliseLegalUrl,
+  describeLegalUrlProblem,
+} from "@/lib/legal-urls";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,9 +22,18 @@ export const dynamic = "force-dynamic";
  * observable from the page's behaviour regardless. Writes require an admin.
  */
 
-type Settings = { deterDevtools: boolean };
+type Settings = {
+  deterDevtools: boolean;
+  /** Linked from the required consent checkbox on signup (migration 037). */
+  privacyPolicyUrl: string | null;
+  termsUrl: string | null;
+};
 
-const DEFAULTS: Settings = { deterDevtools: false };
+const DEFAULTS: Settings = {
+  deterDevtools: false,
+  privacyPolicyUrl: null,
+  termsUrl: null,
+};
 
 function adminClient() {
   return createClient(
@@ -37,7 +51,7 @@ export async function GET() {
     const db = adminClient();
     const { data, error } = await db
       .from("app_settings")
-      .select("deter_devtools")
+      .select("deter_devtools, privacy_policy_url, terms_url")
       .eq("id", "global")
       .maybeSingle();
 
@@ -49,6 +63,7 @@ export async function GET() {
 
     return NextResponse.json({
       deterDevtools: data?.deter_devtools ?? DEFAULTS.deterDevtools,
+      ...resolveLegalUrls(data),
     });
   } catch (err: unknown) {
     console.error("[admin/settings] GET error:", errMessage(err));
@@ -64,7 +79,11 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: check.error }, { status: check.status });
     }
 
-    let body: { deterDevtools?: unknown } = {};
+    let body: {
+      deterDevtools?: unknown;
+      privacyPolicyUrl?: unknown;
+      termsUrl?: unknown;
+    } = {};
     try {
       const parsed = await req.json();
       if (parsed && typeof parsed === "object") body = parsed;
@@ -76,18 +95,50 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "deterDevtools" }, { status: 400 });
     }
 
+    /**
+     * The legal URLs are OPTIONAL in the payload, so an older client that only
+     * knows about `deterDevtools` cannot wipe them by omission.
+     *
+     * An explicit empty string DOES clear the link — that is how an admin
+     * removes one — which is why absent and empty are treated differently
+     * here rather than both falling through to null.
+     */
+    const patch: Record<string, unknown> = {
+      id: "global",
+      deter_devtools: body.deterDevtools,
+      updated_by: check.userId,
+      updated_at: new Date().toISOString(),
+    };
+
+    for (const [key, column] of [
+      ["privacyPolicyUrl", "privacy_policy_url"],
+      ["termsUrl", "terms_url"],
+    ] as const) {
+      const supplied = body[key];
+      if (supplied === undefined) continue;
+
+      if (typeof supplied !== "string") {
+        return NextResponse.json({ error: key }, { status: 400 });
+      }
+
+      /*
+       * Rejected with the REASON rather than silently stored as null. An admin
+       * who pastes an http link and is told nothing would reasonably assume it
+       * saved, and only discover otherwise when a customer reports a missing
+       * link on the signup page.
+       */
+      const problem = describeLegalUrlProblem(supplied);
+      if (problem) {
+        return NextResponse.json({ error: key, message: problem }, { status: 400 });
+      }
+
+      patch[column] = normaliseLegalUrl(supplied);
+    }
+
     const db = adminClient();
     const { error } = await db
       .from("app_settings")
-      .upsert(
-        {
-          id: "global",
-          deter_devtools: body.deterDevtools,
-          updated_by: check.userId,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "id" }
-      );
+      .upsert(patch, { onConflict: "id" });
 
     if (error) {
       console.error("[admin/settings] PUT error:", error.message);
@@ -109,12 +160,25 @@ export async function PUT(req: Request) {
         targetType: "app_settings",
         targetId: null,
         targetLabel: "global",
-        metadata: { deterDevtools: body.deterDevtools },
+        /*
+         * The URLs are recorded in the audit trail: "who changed the terms
+         * link, and to what" is exactly the kind of question that gets asked
+         * later.
+         */
+        metadata: {
+          deterDevtools: body.deterDevtools,
+          privacyPolicyUrl: patch.privacy_policy_url ?? undefined,
+          termsUrl: patch.terms_url ?? undefined,
+        },
       },
       db
     );
 
-    return NextResponse.json({ deterDevtools: body.deterDevtools });
+    return NextResponse.json({
+      deterDevtools: body.deterDevtools,
+      privacyPolicyUrl: (patch.privacy_policy_url as string | null) ?? null,
+      termsUrl: (patch.terms_url as string | null) ?? null,
+    });
   } catch (err: unknown) {
     const msg = errMessage(err);
     console.error("[admin/settings] PUT error:", msg);

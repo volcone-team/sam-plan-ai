@@ -12,6 +12,8 @@ import {
 import { cn } from "@/lib/utils";
 import { benchmarkService } from "@/services/benchmark.service";
 import { initiativeTypeService } from "@/services/initiative-type.service";
+import { formatMoneyPrecise } from "@/lib/format-money";
+import { NumberInputRaw } from "@/components/ui/number-input";
 import type {
   Benchmark,
   BenchmarkSource,
@@ -66,7 +68,7 @@ function formatValue(value: number): string {
   if (value < 1) {
     return `${(value * 100).toFixed(1)}%`;
   }
-  return `$${value.toFixed(2)}`;
+  return formatMoneyPrecise(value);
 }
 
 /* ------------------------------------------------------------------
@@ -385,11 +387,10 @@ function BenchmarkRow({
                   <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">
                     Conservative
                   </label>
-                  <input
-                    type="number"
-                    step="any"
+                  <NumberInputRaw
+                    aria-label="Conservative"
                     value={editConservative}
-                    onChange={(e) => setEditConservative(e.target.value)}
+                    onValueChange={setEditConservative}
                     className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]"
                   />
                 </div>
@@ -397,11 +398,10 @@ function BenchmarkRow({
                   <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">
                     Moderate
                   </label>
-                  <input
-                    type="number"
-                    step="any"
+                  <NumberInputRaw
+                    aria-label="Moderate"
                     value={editModerate}
-                    onChange={(e) => setEditModerate(e.target.value)}
+                    onValueChange={setEditModerate}
                     className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]"
                   />
                 </div>
@@ -409,11 +409,10 @@ function BenchmarkRow({
                   <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">
                     Aggressive
                   </label>
-                  <input
-                    type="number"
-                    step="any"
+                  <NumberInputRaw
+                    aria-label="Aggressive"
                     value={editAggressive}
-                    onChange={(e) => setEditAggressive(e.target.value)}
+                    onValueChange={setEditAggressive}
                     className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]"
                   />
                 </div>
@@ -551,11 +550,10 @@ function AddBenchmarkForm({ initiativeTypes, onAdd, onCancel }: AddBenchmarkForm
           <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">
             Conservative
           </label>
-          <input
-            type="number"
-            step="any"
+          <NumberInputRaw
+            aria-label="Conservative"
             value={conservative}
-            onChange={(e) => setConservative(e.target.value)}
+            onValueChange={setConservative}
             placeholder="0.05"
             className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--foreground-muted))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]"
           />
@@ -564,11 +562,10 @@ function AddBenchmarkForm({ initiativeTypes, onAdd, onCancel }: AddBenchmarkForm
           <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">
             Moderate
           </label>
-          <input
-            type="number"
-            step="any"
+          <NumberInputRaw
+            aria-label="Moderate"
             value={moderate}
-            onChange={(e) => setModerate(e.target.value)}
+            onValueChange={setModerate}
             placeholder="0.10"
             className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--foreground-muted))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]"
           />
@@ -577,11 +574,10 @@ function AddBenchmarkForm({ initiativeTypes, onAdd, onCancel }: AddBenchmarkForm
           <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">
             Aggressive
           </label>
-          <input
-            type="number"
-            step="any"
+          <NumberInputRaw
+            aria-label="Aggressive"
             value={aggressive}
-            onChange={(e) => setAggressive(e.target.value)}
+            onValueChange={setAggressive}
             placeholder="0.20"
             className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--foreground-muted))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]"
           />

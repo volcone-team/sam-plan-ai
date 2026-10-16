@@ -1,0 +1,493 @@
+{
+  "pbtResults": {
+    "2. Write bug condition exploration tests for the Results tab": {
+      "status": "passed",
+      "failingExample": "9/9 fail on unfixed code as expected. (1) \"no deleteResult on ResultService\" (typeof undefined) — blocks delete-chain, zero-rows permission error and Supabase-error cases. (2) \"Total Spend (Results) card present\": design example {revenue 12500, spend 300, expense 450} → ['Total Revenue','Total Spend (Results)','Total Expenses']; generated seed 20261016 i=0 {results:[{actualRevenue:3695.65,actualSpend:0}],expenses:[{amount:51129}]} → three cards, two spend totals. (3) Component source: 'Total Spend (Results)' label present; Spend input + setEditSpend present; handleDeleteResult never calls resultService.deleteResult (local filter only); no NumberInputRaw (raw <input type=\"number\"> money inputs).",
+      "lastRunTimestamp": 1792143821250
+    },
+    "3. Write preservation property tests for the Results tab (BEFORE the fix)": {
+      "status": "passed",
+      "lastRunTimestamp": 1792143991161
+    },
+    "4.5 Verify the exploration tests now pass": {
+      "status": "passed",
+      "lastRunTimestamp": 1792144683963
+    },
+    "4.6 Verify the preservation tests still pass": {
+      "status": "passed",
+      "lastRunTimestamp": 1792144806267
+    },
+    "8. Write bug condition exploration tests for ROI spend": {
+      "status": "passed",
+      "failingExample": "Expenses $2,000, hand 0, revenue $5,000 → spend 0, net 5000, ROI null (expected 2000/3000/150). Hand $1,000, no expenses, revenue $4,000 → spend 1000, net 3000, ROI 300 (expected 0/4000/null). ROI totalSpend 1000 vs Expenses report total 2450. Seeded: \"seed 1 i0: hand=0 expenses=85778 revenue=48418 → spend=0 roi=null\"; \"seed 1: ROI totalSpend=41597.19 ≠ Expenses report total=125072.57\".",
+      "lastRunTimestamp": 1792148238379
+    },
+    "9. Write preservation property tests for ROI (BEFORE the fix)": {
+      "status": "passed",
+      "lastRunTimestamp": 1792148434252
+    },
+    "10.4 Verify the exploration tests now pass": {
+      "status": "passed",
+      "lastRunTimestamp": 1792149450544
+    },
+    "10.5 Verify the preservation tests still pass": {
+      "status": "passed",
+      "lastRunTimestamp": 1792149652922
+    },
+    "19.1 Exploration test `src/lib/billing/__tests__/revoked-purchase.exploration.test.ts`": {
+      "status": "passed",
+      "failingExample": "Unfixed code, 7/7 fail as expected: (a) canceled sub id → hasStripeSubscription=true, panel 'change_plan'; (b) paused+no live sub → gate 'paused' for /api/stripe/checkout, webhook never clears pause; (c) status 'cancelled' → evaluateAccess reason 'incomplete'; (d) change-plan guard {ok:true} (proceeds to Stripe → no_change/500).",
+      "lastRunTimestamp": 1792155526300
+    },
+    "19.2 Preservation test `src/lib/billing/__tests__/revoked-purchase.preservation.test.ts`": {
+      "status": "passed",
+      "lastRunTimestamp": 1792155704990
+    }
+  },
+  "executionHistory": {
+    "1. Confirm decision D1 with the user": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143443207
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143660133
+      }
+    ],
+    "2. Write bug condition exploration tests for the Results tab": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143660329
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143674545
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143850777
+      }
+    ],
+    "3. Write preservation property tests for the Results tab (BEFORE the fix)": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143660378
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143851496
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792144010523
+      }
+    ],
+    "4.1 Pure helper `src/lib/results-tab-totals.ts` + colocated `results-tab-totals.test.ts`": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143660437
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792144012470
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792144155058
+      }
+    ],
+    "4.2 `src/services/result.service.ts`": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143660531
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792144155817
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792144306335
+      }
+    ],
+    "4.3 `src/components/initiatives/initiative-results.tsx`": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143660681
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792144306430
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792144630617
+      }
+    ],
+    "4.4 Not applicable (D1 default chosen in task 1, no migration 038). Originally: if D1 alternative was chosen, write `scripts/gen-migration-038.mjs` (`String.fromCharCode(36)` for `$`), generate the SQL, read it back from disk, hand it to the owner to apply.": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143660747
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792144630883
+      }
+    ],
+    "4.5 Verify the exploration tests now pass": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143660798
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792144631086
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792144710086
+      }
+    ],
+    "4.6 Verify the preservation tests still pass": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143660846
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792144711136
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792144929152
+      }
+    ],
+    "4.7 Site-wide thousands-separator formatting": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143660953
+      },
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792144936961
+      }
+    ],
+    "5. Verify Unit A (V)": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143661020
+      }
+    ],
+    "6. Checkpoint A: Stop and wait for the user's approval before starting the next unit": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143661096
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792148104236
+      }
+    ],
+    "7. Confirm decision D2 with the user": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143661182
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792148104601
+      }
+    ],
+    "8. Write bug condition exploration tests for ROI spend": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143661309
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792148121042
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792148275361
+      }
+    ],
+    "9. Write preservation property tests for ROI (BEFORE the fix)": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143661387
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792148283558
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792148476080
+      }
+    ],
+    "10.1 Pure helper `src/lib/initiative-spend.ts` + colocated `initiative-spend.test.ts`": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143661464
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792148484379
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792148636803
+      }
+    ],
+    "10.2 `src/components/reports/roi-report.tsx`": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143661527
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792148644244
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792148806079
+      }
+    ],
+    "10.3 D2 surfaces (per the choice recorded in task 7)": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143661581
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792148819324
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792149391187
+      }
+    ],
+    "10.4 Verify the exploration tests now pass": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143661688
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792149401906
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792149470723
+      }
+    ],
+    "10.5 Verify the preservation tests still pass": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143661747
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792149481073
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792149692881
+      }
+    ],
+    "11. Verify Unit B (V)": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143661818
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792149701994
+      },
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792149806745
+      }
+    ],
+    "12. Checkpoint B: Stop and wait for the user's approval before starting the next unit": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143661877
+      },
+      {
+        "executionId": "b41a6497-4720-41c8-98e4-c64ff4b1ff5b",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792150020295
+      }
+    ],
+    "13. C1: subscription row and owner probe": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143661928
+      },
+      {
+        "executionId": "b41a6497-4720-41c8-98e4-c64ff4b1ff5b",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792150029635
+      },
+      {
+        "executionId": "b41a6497-4720-41c8-98e4-c64ff4b1ff5b",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792150233544
+      }
+    ],
+    "14. C2: Stripe state probe": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143662039
+      },
+      {
+        "executionId": "b41a6497-4720-41c8-98e4-c64ff4b1ff5b",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792150234572
+      },
+      {
+        "executionId": "b41a6497-4720-41c8-98e4-c64ff4b1ff5b",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792150449874
+      }
+    ],
+    "15. C3: decision replay probe": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143662099
+      },
+      {
+        "executionId": "b41a6497-4720-41c8-98e4-c64ff4b1ff5b",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792150450328
+      },
+      {
+        "executionId": "b41a6497-4720-41c8-98e4-c64ff4b1ff5b",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792150986853
+      }
+    ],
+    "16. C4: observed failure (owner-performed, browser)": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143662164
+      },
+      {
+        "executionId": "a5ebb0e7-fdfc-4a64-b82f-7599d1ccb57a",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792157177865
+      }
+    ],
+    "17. C5: non-admin reproduction (owner-performed, browser)": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143662221
+      },
+      {
+        "executionId": "a5ebb0e7-fdfc-4a64-b82f-7599d1ccb57a",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792157178185
+      }
+    ],
+    "18. Write the confirmed root cause and chosen fix into this file, and get approval": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143662279
+      }
+    ],
+    "19. Fix billing after grant then revoke (sub-tasks written in task 18)": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143662402
+      }
+    ],
+    "20. Verify Unit C (V)": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143662464
+      }
+    ],
+    "21. Checkpoint C: Stop and wait for the user's approval before closing the spec": [
+      {
+        "executionId": "cb8b29b0-2bc1-481b-8209-9145b5d65449",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792143662529
+      }
+    ],
+    "10. Fix ROI and actual spend": [
+      {
+        "executionId": "39262074-38e5-4cea-9299-fb134df77011",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1792149693008
+      }
+    ]
+  }
+}

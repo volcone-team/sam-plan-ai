@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { DollarSign, TrendingUp, Users, Gift } from 'lucide-react';
 import { LoadingPanel } from '@/components/ui/spinner';
+import { formatMoney, formatNumber } from '@/lib/format-money';
+import { pickMoneyFormatter } from '@/lib/results-tab-totals';
 
 /**
  * Real revenue overview, replacing the prototype's hardcoded figures
@@ -21,9 +23,7 @@ interface Overview {
   byPlan: { planId: string; name: string; monthlyPrice: number; subscribers: number; mrr: number }[];
 }
 
-function usd(n: number): string {
-  return `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-}
+const usd = formatMoney;
 
 function Metric({ label, value, sub, icon }: {
   label: string; value: string; sub?: string; icon: React.ReactNode;
@@ -95,7 +95,7 @@ export function SubscriptionOverview() {
               <div className="flex items-center justify-between text-sm">
                 <span>{p.name}</span>
                 <span className="text-xs text-[hsl(var(--foreground-muted))]">
-                  ${p.monthlyPrice}/mo · {p.subscribers} subscriber{p.subscribers === 1 ? '' : 's'} · {usd(p.mrr)} MRR
+                  {pickMoneyFormatter([p.monthlyPrice])(p.monthlyPrice)}/mo · {formatNumber(p.subscribers)} subscriber{p.subscribers === 1 ? '' : 's'} · {usd(p.mrr)} MRR
                 </span>
               </div>
               <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-[hsl(var(--background-muted))]">

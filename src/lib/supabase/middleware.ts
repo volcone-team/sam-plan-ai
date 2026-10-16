@@ -1,8 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { TWO_FACTOR_COOKIE, verifyDeviceToken } from '@/lib/two-factor';
-import { evaluateAccess } from '@/lib/billing/entitlement';
-import { requiresPurchase, isAllowedWhileLockedOut } from '@/lib/billing/lockout';
+import { decideBillingGate, type GateSubRow } from '@/lib/billing/billing-gate';
 
 /**
  * Reads the authentication method out of a JWT's `amr` (Authentication Methods
@@ -510,11 +509,10 @@ export async function updateSession(request: NextRequest) {
    * auth pages and the paused page itself skip it entirely, so an admin
    * suspending an account never locks themselves out of the admin area.
    *
-   * `is_paused` is read directly rather than through `evaluateAccess`: the
-   * middleware runs on the Edge on every request, and loading billing settings
-   * plus the full entitlement evaluation here would tax every page load. The
-   * flag is a single boolean with one meaning, and the full evaluation still
-   * runs server-side in the API routes that enforce limits.
+   * `is_paused` is honoured directly (not through evaluateAccess's elapsed
+   * resume date), as before. Exception: a paused company with NO live Stripe
+   * subscription may reach the purchase journey — buying a plan ends the
+   * pause. See decideBillingGate.
    */
   if (userId && (isAppRoute || (isApiRoute && !isPublicApiRoute))) {
     const { data: gateProfile } = await supabase
@@ -537,27 +535,33 @@ export async function updateSession(request: NextRequest) {
         .select(
           'is_paused, pause_resumes_at, status, stripe_status, is_comped, ' +
           'comped_until, trial_ends_at, current_period_end, past_due_since, ' +
-          'cancel_at_period_end'
+          'cancel_at_period_end, stripe_subscription_id, stripe_mode'
         )
         .eq('company_id', gateProfile.company_id)
         .maybeSingle();
 
       // Via `unknown`: supabase-js cannot infer a row shape from a
       // concatenated select string and falls back to an error-type union.
-      const gateSub = gateSubRaw as unknown as {
-        is_paused: boolean | null;
-        pause_resumes_at: string | null;
-        status: string | null;
-        stripe_status: string | null;
-        is_comped: boolean | null;
-        comped_until: string | null;
-        trial_ends_at: string | null;
-        current_period_end: string | null;
-        past_due_since: string | null;
-        cancel_at_period_end: boolean | null;
-      } | null;
+      const gateSub = gateSubRaw as unknown as GateSubRow | null;
 
-      if (gateSub?.is_paused) {
+      /**
+       * The paused and entitlement decisions, as one tested pure function
+       * (src/lib/billing/billing-gate.ts). Same rules as before, plus one
+       * approved change: a paused company with NO live Stripe subscription
+       * may reach the purchase journey, because buying a plan ends the pause
+       * (the webhook clears it). A paused company with a live subscription is
+       * still refused everywhere.
+       */
+      const settings = await loadGateSettings(supabase);
+      const gate = decideBillingGate({
+        isAdmin: false,
+        hasCompany: true,
+        sub: gateSub,
+        settings,
+        pathname: request.nextUrl.pathname,
+      });
+
+      if (gate.kind === 'paused') {
         // APIs get JSON. A client fetching data must see a real error rather
         // than the HTML of a login page.
         if (isApiRoute) {
@@ -592,33 +596,16 @@ export async function updateSession(request: NextRequest) {
        * Settings is INTENTIONALLY blocked. Plan purchase moved to its own
        * route precisely so profile, team and notification settings could be
        * shut without taking the way out with them.
+       *
+       * Decided by decideBillingGate above (evaluateAccess + requiresPurchase
+       * + isAllowedWhileLockedOut, unchanged).
        */
-      const settings = await loadGateSettings(supabase);
-
-      const access = evaluateAccess(
-        settings,
-        {
-          status: (gateSub?.stripe_status ?? gateSub?.status ?? null) as never,
-          isComped: gateSub?.is_comped ?? false,
-          compedUntil: gateSub?.comped_until ?? null,
-          trialEndsAt: gateSub?.trial_ends_at ?? null,
-          currentPeriodEnd: gateSub?.current_period_end ?? null,
-          pastDueSince: gateSub?.past_due_since ?? null,
-          cancelAtPeriodEnd: gateSub?.cancel_at_period_end ?? false,
-          isPaused: false,
-        }
-      );
-
-      if (
-        !access.allowed &&
-        requiresPurchase(access.reason) &&
-        !isAllowedWhileLockedOut(request.nextUrl.pathname)
-      ) {
+      if (gate.kind === 'purchase') {
         if (isApiRoute) {
           return NextResponse.json(
             {
               error: 'subscription_required',
-              reason: access.reason,
+              reason: gate.reason,
               message: 'This account needs an active plan to continue.',
             },
             { status: 402 }

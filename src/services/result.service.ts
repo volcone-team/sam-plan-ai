@@ -149,7 +149,7 @@ export class ResultService {
           week_start_date: toDateOnly(dto.weekStartDate),
           week_end_date: toDateOnly(dto.weekEndDate),
           actual_revenue: dto.actualRevenue,
-          actual_spend: dto.actualSpend,
+          actual_spend: dto.actualSpend ?? 0,
           metrics: dto.metrics || {},
           source: 'manual',
           notes: dto.notes || null,
@@ -164,12 +164,25 @@ export class ResultService {
         if (!error && data) {
           return this.mapRow(data) as InitiativeResult;
         }
-      } catch { /* fall through */ }
+
+        /*
+         * Report what actually happened. This used to swallow the Supabase
+         * error and throw "Not found" — for a failed INSERT — which hid a 400
+         * caused by sending the string "general" into a UUID column.
+         */
+        console.error('[result] Insert failed:', error?.message, '| details:', error?.details);
+        throw new Error(
+          error?.code === '42501'
+            ? 'Your role cannot record results.'
+            : `Could not save this result: ${error?.message || 'unknown error'}`
+        );
+      } catch (err) {
+        if (err instanceof Error) throw err;
+        throw new Error(String(err));
+      }
     }
 
-    // Mock data removed - return empty
-    console.log("[result] No data in Supabase, returning empty");
-    console.log("[result] Not found in Supabase"); throw new Error("Not found");
+    throw new Error('Results are unavailable because the database is not configured.');
   }
 
   async createEvergreenResult(dto: CreateEvergreenResultDTO): Promise<EvergreenResult> {
@@ -232,6 +245,38 @@ export class ResultService {
     // Mock data removed - return empty
     console.log("[result] No data in Supabase, returning empty");
     console.log("[result] Not found in Supabase"); throw new Error("Not found");
+  }
+
+  /**
+   * Delete a result row.
+   * `.select('id')` returns the deleted rows so a silent RLS filter (the
+   * delete policy requires can_edit_plan) shows up as zero rows instead of
+   * looking like success.
+   */
+  async deleteResult(id: string): Promise<void> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Results are unavailable because the database is not configured.');
+    }
+
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('results')
+      .delete()
+      .eq('id', id)
+      .select('id');
+
+    if (error) {
+      console.error('[result] Delete failed:', error.message, '| details:', error.details);
+      throw new Error(
+        error.code === '42501'
+          ? "You don't have permission to delete results."
+          : `Could not delete this result: ${error.message || 'unknown error'}`
+      );
+    }
+
+    if (!data || data.length === 0) {
+      throw new Error("You don't have permission to delete results.");
+    }
   }
 
   async getTotalRevenueByInitiative(initiativeId: string): Promise<number> {

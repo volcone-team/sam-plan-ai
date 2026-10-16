@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { CheckCircle, Settings, ShieldAlert, ToggleLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RoleManagement } from "./role-management";
+import { LegalLinksSettings } from './legal-links-settings';
 
 /* ------------------------------------------------------------------
    Types
@@ -488,6 +489,18 @@ export function AdminSettings() {
             </button>
           </div>
         </div>
+      </section>
+      )}
+
+      {/*
+        Legal links, on the Platform tab beside the other app_settings values.
+        Separate component because it owns its own load, validation and save —
+        folding it into handleSaveSettings would couple the signup checkbox's
+        links to a form that also writes unrelated settings.
+      */}
+      {activeSettingsTab === 'platform' && (
+      <section aria-label="Legal links" className="mt-6">
+        <LegalLinksSettings />
       </section>
       )}
 

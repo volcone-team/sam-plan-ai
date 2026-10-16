@@ -16,6 +16,8 @@ import {
   shouldClearComp,
   interpretClaim,
   isEnding,
+  shouldClearPauseOnSync,
+  PAUSE_CLEAR_PATCH,
 } from "@/lib/billing/webhook-logic";
 
 export const runtime = "nodejs";
@@ -256,7 +258,7 @@ async function syncSubscription(
   // grace from the first-ever one and deny access instantly). Unit-tested.
   const { data: existing } = await db
     .from("subscriptions")
-    .select("past_due_since")
+    .select("past_due_since, is_paused, paused_at")
     .eq("company_id", companyId)
     .maybeSingle();
 
@@ -299,6 +301,26 @@ async function syncSubscription(
     patch.is_comped = false;
     patch.comped_until = null;
     patch.comped_reason = null;
+  }
+
+  /**
+   * "Buying a plan ends the pause." A paused company with no live
+   * subscription may buy through Checkout (see canPurchaseWhilePaused); when
+   * that new subscription lands here, the pause is cleared. A paused
+   * subscription that already existed — pause_collection set, or created
+   * before the pause — is never lifted by a sync. See shouldClearPauseOnSync.
+   */
+  if (
+    shouldClearPauseOnSync({
+      isPaused: existing?.is_paused === true,
+      pausedAt: (existing?.paused_at as string | null) ?? null,
+      incomingStatus: sub.status,
+      incomingCreated: sub.created,
+      incomingHasPauseCollection: !!sub.pause_collection,
+    })
+  ) {
+    Object.assign(patch, PAUSE_CLEAR_PATCH);
+    console.log("[stripe/webhook] New subscription", sub.id, "ends the pause for company", companyId);
   }
 
   const { error } = await db.from("subscriptions").update(patch).eq("company_id", companyId);

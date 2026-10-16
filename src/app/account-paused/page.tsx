@@ -2,7 +2,9 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
+import Link from "next/link";
 import { PauseCircle, Mail } from "lucide-react";
+import { canPurchaseWhilePaused } from "@/lib/billing/live-subscription";
 import { BrandLogo } from "@/components/brand-logo";
 import { ResumePlanButton } from "@/components/billing/resume-plan-button";
 import { SwitchAccountLink } from "@/components/auth/switch-account-link";
@@ -71,6 +73,11 @@ interface PauseState {
   resumesAt: string | null;
   /** Only an owner may restart billing, matching the resume route. */
   isOwner: boolean;
+  /**
+   * No live Stripe subscription behind the pause (and not comped), so buying
+   * a plan ends it. User decision: "Buying a plan ends the pause".
+   */
+  canBuyToEndPause: boolean;
 }
 
 /**
@@ -80,7 +87,13 @@ interface PauseState {
  * whether a "restart my plan" button appears at all.
  */
 async function loadPauseState(): Promise<PauseState> {
-  const DENIED: PauseState = { paused: true, origin: null, resumesAt: null, isOwner: false };
+  const DENIED: PauseState = {
+    paused: true,
+    origin: null,
+    resumesAt: null,
+    isOwner: false,
+    canBuyToEndPause: false,
+  };
 
   try {
     const cookieStore = await cookies();
@@ -122,14 +135,22 @@ async function loadPauseState(): Promise<PauseState> {
 
     const { data: sub } = await db
       .from("subscriptions")
-      .select("is_paused, pause_origin, pause_resumes_at")
+      .select(
+        "is_paused, pause_origin, pause_resumes_at, is_comped, " +
+        "stripe_subscription_id, stripe_mode, stripe_status, status"
+      )
       .eq("company_id", companyId)
       .maybeSingle();
 
-    const row = sub as {
+    const row = sub as unknown as {
       is_paused?: boolean | null;
       pause_origin?: string | null;
       pause_resumes_at?: string | null;
+      is_comped?: boolean | null;
+      stripe_subscription_id?: string | null;
+      stripe_mode?: string | null;
+      stripe_status?: string | null;
+      status?: string | null;
     } | null;
 
     return {
@@ -138,6 +159,7 @@ async function loadPauseState(): Promise<PauseState> {
       resumesAt: row?.pause_resumes_at ?? null,
       // Same rule as /api/billing/resume: a missing role means sole owner.
       isOwner: !me?.role || me.role === "owner",
+      canBuyToEndPause: canPurchaseWhilePaused(row),
     };
   } catch (err) {
     /*
@@ -243,6 +265,33 @@ export default async function AccountPausedPage() {
               To continue, please contact your administrator.
             </p>
           )}
+
+          {/*
+            NO LIVE SUBSCRIPTION BEHIND THE PAUSE: buying a plan ends it.
+            User decision, "Buying a plan ends the pause". The webhook clears
+            the pause when the new subscription lands. Shown only when there is
+            nothing live to resume; a paused paid subscription still needs an
+            administrator (or the customer's own restart button above).
+          */}
+          {pause.canBuyToEndPause &&
+            (pause.isOwner ? (
+              <div className="mt-5 rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))] px-4 py-4 text-sm text-foreground">
+                <p>
+                  There is no active subscription on this account. Choosing a
+                  plan restores access straight away and ends the pause.
+                </p>
+                <Link
+                  href="/choose-plan"
+                  className="mt-3 inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))] focus-visible:ring-offset-2"
+                >
+                  Choose a plan
+                </Link>
+              </div>
+            ) : (
+              <p className="mt-5 rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))] px-4 py-3 text-sm text-[hsl(var(--foreground-muted))]">
+                The account owner can restore access by choosing a plan.
+              </p>
+            ))}
 
           {!selfPaused && contactEmail ? (
             <a

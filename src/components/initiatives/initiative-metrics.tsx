@@ -135,7 +135,8 @@ function MetricCard({ metric, loading }: { metric: MetricData; loading: boolean 
 
   const formatValue = (val: number) => {
     if (format === 'percent') return `${val.toFixed(1)}%`;
-    return val.toLocaleString();
+    // Fixed locale so separators don't vary by browser; fractions kept as before.
+    return val.toLocaleString('en-US');
   };
 
   const progressPercent = actual !== null && projected > 0

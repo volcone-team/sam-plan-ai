@@ -24,7 +24,8 @@ export interface InitiativeCardProps {
    */
   difficulty?: Partial<DifficultyDimensions>;
   /**
-   * Actual revenue and spend for the current year, summed from `results`.
+   * Actual revenue for the current year, summed from `results`, and actual
+   * spend, summed from the initiative's recorded expenses.
    * Absent or zero is the normal case before any results are logged.
    */
   actuals?: { revenue: number; spend: number };
@@ -201,9 +202,9 @@ export function InitiativeCard({
   const status = STATUS_STYLES[initiative.status] || STATUS_STYLES.planned;
 
   const actualRevenue = actuals?.revenue || 0;
-  // Matches the existing actuals convention: prefer logged results, fall back to
-  // the spend recorded on the initiative itself.
-  const spend = actuals?.spend || initiative.actualSpend || 0;
+  // D2: actual spend is Σ the initiative's recorded expenses (supplied by the
+  // caller). The hand-typed initiative.actualSpend is not read.
+  const spend = actuals?.spend || 0;
   const expectedRevenue = initiative.revenueScenarios?.better || 0;
   const plannedBudget = initiative.plannedBudget || 0;
   const net = actualRevenue - spend;
@@ -308,8 +309,11 @@ export function InitiativeCard({
 
       {/* Spend */}
       <div className="mt-3 flex items-center gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
-          Spend
+        <span
+          className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]"
+          title="Actual spend (from expenses)"
+        >
+          Spend (expenses)
         </span>
         <div className="min-w-0 flex-1">
           <MiniBar percent={spendPercent} color="bg-emerald-500" />

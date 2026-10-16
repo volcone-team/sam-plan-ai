@@ -20,6 +20,8 @@ import { companyService } from '@/services/company.service';
 import { initiativeTypeService } from '@/services/initiative-type.service';
 import { productService } from '@/services/product.service';
 import { resultService } from '@/services/result.service';
+import { expenseService } from '@/services/expense.service';
+import { sumExpensesByInitiative } from '@/lib/initiative-spend';
 import { rankTopPerformers, type RankedPerformer } from '@/lib/top-performers';
 import type { Initiative, InitiativeType, CreateInitiativeDTO, Result } from '@/types';
 
@@ -33,7 +35,7 @@ export default function InitiativesPage() {
   const router = useRouter();
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [initiativeTypes, setInitiativeTypes] = useState<InitiativeTypeOption[]>([]);
-  /** Actual revenue + spend per initiative for the current year, from results. */
+  /** Per initiative: current-year revenue from results, actual spend from expenses (D2). */
   const [actualsByInitiative, setActualsByInitiative] = useState<
     Map<string, { revenue: number; spend: number }>
   >(new Map());
@@ -128,7 +130,7 @@ export default function InitiativesPage() {
         try {
           const currentYear = new Date().getFullYear();
           const previousYear = currentYear - 1;
-          const [currentYearResults, previousYearResults] = await Promise.all([
+          const [currentYearResults, previousYearResults, allExpenses] = await Promise.all([
             resultService.getResultsByDateRange(
               new Date(currentYear, 0, 1),
               new Date(currentYear, 11, 31),
@@ -139,17 +141,24 @@ export default function InitiativesPage() {
               new Date(previousYear, 11, 31),
               companyId
             ),
+            expenseService.getAllExpenses(),
           ]);
 
-          // Per-initiative actual revenue + spend for the current year.
+          // Per-initiative actual revenue for the current year (from results)
+          // and actual spend (D2: Σ the initiative's recorded expenses).
+          const spendById = sumExpensesByInitiative(allExpenses);
           const actuals = new Map<string, { revenue: number; spend: number }>();
           for (const r of currentYearResults) {
             const key = (r as Result & { initiativeId?: string }).initiativeId || '';
             if (!key) continue;
             const cur = actuals.get(key) || { revenue: 0, spend: 0 };
             cur.revenue += r.actualRevenue || 0;
-            cur.spend += r.actualSpend || 0;
             actuals.set(key, cur);
+          }
+          for (const [id, spend] of spendById) {
+            const cur = actuals.get(id) || { revenue: 0, spend: 0 };
+            cur.spend = spend;
+            actuals.set(id, cur);
           }
           setActualsByInitiative(actuals);
 

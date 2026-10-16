@@ -140,6 +140,9 @@ export function WeeklyPlanner() {
   // Quick result entry form
   const [showResultForm, setShowResultForm] = useState(false);
   const [resultRevenue, setResultRevenue] = useState('');
+  /** Which initiative the result is for; '' means the company as a whole. */
+  const [resultInitiativeId, setResultInitiativeId] = useState('');
+  const [resultError, setResultError] = useState<string | null>(null);
   const [resultSpend, setResultSpend] = useState('');
   const [resultSaved, setResultSaved] = useState(false);
 
@@ -273,10 +276,22 @@ export function WeeklyPlanner() {
     const spend = parseFloat(resultSpend) || 0;
     if (revenue === 0 && spend === 0) return;
 
+    setResultError(null);
+
     try {
       await resultService.createInitiativeResult({
         companyId: companyId,
-        initiativeId: initiatives[0]?.id || 'general',
+        /*
+         * The chosen initiative, or NULL for a company-level result.
+         *
+         * This used to fall back to the literal string 'general', which is not
+         * a UUID: Postgres rejected the insert with a 400 every time a week
+         * had no initiatives, and the error was reported as "Not found".
+         * `results.initiative_id` is nullable, so NULL is the honest value.
+         * It also silently pinned every result to the FIRST initiative of the
+         * week when there were several; the user now chooses.
+         */
+        initiativeId: resultInitiativeId || null,
         weekStartDate: weekStart,
         weekEndDate: weekEnd,
         actualRevenue: revenue,
@@ -291,6 +306,8 @@ export function WeeklyPlanner() {
       setShowResultForm(false);
     } catch (err) {
       console.error('Failed to save result:', err);
+      // Shown to the user: the save used to fail with no feedback at all.
+      setResultError(err instanceof Error ? err.message : 'Could not save this result.');
     }
   };
 
@@ -596,6 +613,28 @@ export function WeeklyPlanner() {
           </button>
         ) : (
           <form onSubmit={handleResultSubmit} className="space-y-4">
+            {/* Only offered when there is something to attribute it to. */}
+            {initiatives.length > 0 && (
+              <div className="space-y-1.5">
+                <label htmlFor="result-initiative" className="text-sm font-medium">
+                  Initiative
+                </label>
+                <select
+                  id="result-initiative"
+                  value={resultInitiativeId}
+                  onChange={e => setResultInitiativeId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-[var(--radius-lg)] border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/50"
+                >
+                  <option value="">Whole company (not a specific initiative)</option>
+                  {initiatives.map(init => (
+                    <option key={init.id} value={init.id}>{init.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {resultError && (
+              <p role="alert" className="text-sm text-[hsl(var(--destructive))]">{resultError}</p>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label htmlFor="result-revenue" className="text-sm font-medium">

@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { getStripe, loadBillingConfig, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client";
 import { classifyPlanChange, changeTiming } from "@/lib/billing/limits";
 import { findCurrentPhase, scheduleActionFor } from "@/lib/billing/plan-change";
+import { changePlanGuard, type ChangePlanRow } from "@/lib/billing/live-subscription";
 
 export const runtime = "nodejs";
 
@@ -86,15 +87,49 @@ export async function POST(request: Request) {
 
     const { data: sub } = await db
       .from("subscriptions")
-      .select("id, plan_id, billing_cycle, stripe_subscription_id, stripe_mode, stripe_price_id, is_comped")
+      // One literal, not concatenated, so supabase-js can infer the row type.
+      .select("id, plan_id, billing_cycle, stripe_subscription_id, stripe_mode, stripe_price_id, is_comped, stripe_status, status, is_paused")
       .eq("company_id", profile.company_id)
       .maybeSingle();
 
-    if (sub?.is_comped) {
-      // A comped account has no Stripe subscription to modify.
-      return NextResponse.json({ error: "comped_account" }, { status: 400 });
+    /**
+     * Guards BEFORE any Stripe call, decided by a tested pure function:
+     *   comped               -> 400 comped_account (nothing in Stripe to modify)
+     *   no id / other mode   -> 404 no_subscription
+     *   id but not live      -> 409 no_live_subscription. A canceled
+     *                           subscription (kept on the row after a comp was
+     *                           revoked) used to be classified against stale
+     *                           data and answered `no_change`, or sent to
+     *                           Stripe, which refuses to update it (500). The
+     *                           customer must buy through Checkout instead.
+     *   paused + live        -> 403 account_paused (an admin must resume it)
+     */
+    const guardRow: ChangePlanRow | null = sub
+      ? {
+          stripe_subscription_id: sub.stripe_subscription_id as string | null,
+          stripe_mode: sub.stripe_mode as string | null,
+          stripe_status: sub.stripe_status as string | null,
+          status: sub.status as string | null,
+          is_comped: sub.is_comped as boolean | null,
+          is_paused: sub.is_paused as boolean | null,
+        }
+      : null;
+    const guard = changePlanGuard(guardRow);
+    if (!guard.ok) {
+      return NextResponse.json(
+        guard.error === "no_live_subscription"
+          ? {
+              error: guard.error,
+              message:
+                "Your previous subscription has ended, so there is nothing to change. " +
+                "Choose a plan to start a new subscription.",
+            }
+          : { error: guard.error },
+        { status: guard.status }
+      );
     }
     if (!sub?.stripe_subscription_id || sub.stripe_mode !== STRIPE_MODE_TAG) {
+      // Unreachable after the guard; narrows the type for the code below.
       return NextResponse.json({ error: "no_subscription" }, { status: 404 });
     }
 

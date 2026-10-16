@@ -52,6 +52,27 @@ export class InitiativeService {
   /**
    * Get a specific initiative
    */
+  /**
+   * One initiative by id.
+   *
+   * THROWS A MESSAGE THAT SAYS WHAT HAPPENED. This used to swallow the real
+   * Supabase error — logging it to the console and then throwing a bare
+   * "Not found" — so three different situations arrived at the UI
+   * indistinguishable:
+   *
+   *   - the initiative does not exist;
+   *   - it exists but belongs to another company, so RLS hides it
+   *     (`initiatives` SELECT is scoped to `get_user_company_id()`);
+   *   - the query itself failed.
+   *
+   * The second is the common one in practice and the most confusing, because
+   * the row is plainly there in the database when an operator goes looking.
+   * Naming it costs nothing and saves the next person a round of probing.
+   *
+   * Still throws rather than returning null: all three callers are written
+   * around a throw, and changing that contract here would silently turn their
+   * error paths into "render nothing".
+   */
   async getInitiative(id: string): Promise<Initiative> {
     if (isSupabaseConfigured()) {
       try {
@@ -60,19 +81,39 @@ export class InitiativeService {
           .from('initiatives')
           .select('*')
           .eq('id', id)
-          .single();
+          .maybeSingle();
 
-        if (error) console.error("[Supabase initiatives]", (error as any).message, "|details:", (error as any).details, "|hint:", (error as any).hint, "|code:", (error as any).code);
-
-        if (!error && data) {
-          return this.mapRowToInitiative(data);
+        if (error) {
+          console.error("[Supabase initiatives]", (error as any).message, "|details:", (error as any).details, "|hint:", (error as any).hint, "|code:", (error as any).code);
+          throw new Error(
+            `Could not load this initiative: ${(error as any).message || 'the lookup failed'}`
+          );
         }
-      } catch (e) { console.error("[Supabase]", e); }
+
+        if (data) return this.mapRowToInitiative(data);
+
+        /**
+         * `maybeSingle` rather than `single`, so zero rows is a null instead of
+         * an error — which is what lets this case be reported honestly.
+         *
+         * Zero rows means EITHER no such initiative OR one this account cannot
+         * see. The client cannot tell the difference and must not guess: saying
+         * "it does not exist" to someone looking at the right id on the wrong
+         * account sends them hunting for a data bug that is not there.
+         */
+        throw new Error(
+          "This initiative could not be found on your account. It may belong " +
+          "to a different company, or it may have been removed."
+        );
+      } catch (e) {
+        // Re-thrown as-is: the messages above are already the useful ones, and
+        // wrapping them again would bury what went wrong.
+        if (e instanceof Error) throw e;
+        throw new Error(String(e));
+      }
     }
 
-    // Mock data removed - return empty
-    console.log("[initiative] No data in Supabase, returning empty");
-    throw new Error("Not found");
+    throw new Error("Initiatives are unavailable because the database is not configured.");
   }
 
   /**

@@ -19,6 +19,8 @@ import { productService } from '@/services/product.service';
 import { projectionService } from '@/services/projection.service';
 import { initiativeService } from '@/services/initiative.service';
 import type { Product, CreateProductDTO, UpdateProductDTO, RevenueType, ProductTicketTier } from '@/types';
+import { NumberInputRaw } from '@/components/ui/number-input';
+import { formatMoney } from '@/lib/format-money';
 
 type ProductType = 'Service' | 'Course' | 'Membership' | 'Coaching' | 'Digital Product' | 'Subscription';
 
@@ -62,14 +64,6 @@ function inferProductType(product: Product): ProductType {
   return 'Service';
 }
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
 
 interface ProductFormData {
   name: string;
@@ -259,7 +253,7 @@ export default function ProductsPage() {
             <span>Total Projected Revenue (Better scenario)</span>
           </div>
           <p className="mt-1 text-2xl font-semibold text-[hsl(var(--foreground))]">
-            {formatCurrency(totalRevenue)}
+            {formatMoney(totalRevenue)}
           </p>
         </div>
       )}
@@ -284,16 +278,14 @@ export default function ProductsPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-[hsl(var(--foreground-muted))]">
+              <label htmlFor="add-product-price" className="mb-1 block text-xs font-medium text-[hsl(var(--foreground-muted))]">
                 Price
               </label>
-              <input
-                type="number"
+              <NumberInputRaw
+                id="add-product-price"
                 value={addForm.price}
-                onChange={(e) => setAddForm((f) => ({ ...f, price: e.target.value }))}
+                onValueChange={(price) => setAddForm((f) => ({ ...f, price }))}
                 placeholder="0"
-                min="0"
-                step="1"
                 className="w-full rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background))] px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--foreground-muted))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
               />
             </div>
@@ -419,15 +411,13 @@ export default function ProductsPage() {
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-[hsl(var(--foreground-muted))]">
+                      <label htmlFor="edit-product-price" className="mb-1 block text-xs font-medium text-[hsl(var(--foreground-muted))]">
                         Price
                       </label>
-                      <input
-                        type="number"
+                      <NumberInputRaw
+                        id="edit-product-price"
                         value={editForm.price}
-                        onChange={(e) => setEditForm((f) => ({ ...f, price: e.target.value }))}
-                        min="0"
-                        step="1"
+                        onValueChange={(price) => setEditForm((f) => ({ ...f, price }))}
                         className="w-full rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background))] px-3 py-2 text-sm text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
                       />
                     </div>
@@ -569,7 +559,7 @@ export default function ProductsPage() {
 
                 {/* Price */}
                 <p className="mb-3 text-lg font-bold text-[hsl(var(--foreground))]">
-                  {formatCurrency(product.price)}
+                  {formatMoney(product.price)}
                   {product.revenueType === 'recurring' && (
                     <span className="ml-1 text-xs font-normal text-[hsl(var(--foreground-muted))]">
                       /mo
@@ -605,7 +595,7 @@ export default function ProductsPage() {
                   {revenue !== undefined && (
                     <div className="flex items-center gap-1.5 text-xs text-[hsl(var(--foreground-muted))]">
                       <DollarSign className="h-3.5 w-3.5" />
-                      <span>Projected: {formatCurrency(revenue)}</span>
+                      <span>Projected: {formatMoney(revenue)}</span>
                     </div>
                   )}
                   <div className="flex items-center gap-1.5 text-xs text-[hsl(var(--foreground-muted))]">

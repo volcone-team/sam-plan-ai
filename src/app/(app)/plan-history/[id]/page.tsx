@@ -8,6 +8,7 @@ import { cacheInvalidatePrefix, CacheKeys } from '@/lib/client-cache';
 import { useToast } from '@/components/ui/toast';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { usePermission } from '@/hooks/use-permission';
+import { pickMoneyFormatter } from '@/lib/results-tab-totals';
 
 interface SnapshotData {
   id: string;
@@ -24,8 +25,9 @@ interface SnapshotData {
   };
 }
 
+/** Shared formatters: whole dollars, or cents only when the amount has them. */
 function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(amount);
+  return pickMoneyFormatter([amount])(amount);
 }
 
 export default function PlanSnapshotDetailPage() {
@@ -61,11 +63,18 @@ export default function PlanSnapshotDetailPage() {
       console.log("[PlanSnapshot] Restored:", json);
       // The plan changed - drop cached dashboard data so the user sees it.
       cacheInvalidatePrefix(CacheKeys.planPrefix);
+      // Says what actually happened: an empty plan, a partial restore, or all of it.
+      const restored = Number(json.restored) || 0;
+      const skipped = Number(json.skipped) || 0;
+      const fullMessage =
+        restored === 0
+          ? "Plan restored with its revenue targets. This snapshot had no initiatives."
+          : skipped > 0
+            ? `Plan restored — ${restored} of ${restored + skipped} initiatives added. ${skipped} could not be restored.`
+            : `Plan restored — ${restored} initiative${restored === 1 ? "" : "s"} added. Your previous plan was saved to history.`;
       showToast(
-        initiativeId
-          ? "Initiative restored to your current plan."
-          : `Plan restored — ${json.restored} initiative(s) added to your current plan. Your previous plan was saved to history.`,
-        { variant: "success", duration: 5000 }
+        initiativeId ? "Initiative restored to your current plan." : fullMessage,
+        { variant: skipped > 0 ? "info" : "success", duration: 6000 }
       );
       router.push("/year-at-a-glance");
     } catch (err: any) {

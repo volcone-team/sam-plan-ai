@@ -20,6 +20,22 @@ import { resultService } from '@/services/result.service';
 import { expenseService } from '@/services/expense.service';
 import { initiativeService } from '@/services/initiative.service';
 import { initiativeTypeService } from '@/services/initiative-type.service';
+import { NumberInputRaw } from '@/components/ui/number-input';
+import { parseNumberInput } from '@/lib/number-input';
+import { formatNumber } from '@/lib/format-money';
+import {
+  summariseResultsTab,
+  pickMoneyFormatter,
+  type MoneyFormatter,
+} from '@/lib/results-tab-totals';
+
+/** Raw input string → amount. Empty or partial input ("-", ".") counts as 0. */
+function toAmount(raw: string): number {
+  return parseNumberInput(raw) ?? 0;
+}
+
+const numberInputClass =
+  'w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]';
 
 export interface InitiativeResultsProps {
   initiativeId: string;
@@ -54,6 +70,7 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
   const [showAddResult, setShowAddResult] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [metricKeys, setMetricKeys] = useState<string[]>([]);
+  const [resultError, setResultError] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -92,7 +109,7 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
         weekStartDate: new Date(data.weekStartDate),
         weekEndDate: new Date(data.weekEndDate),
         actualRevenue: data.actualRevenue,
-        actualSpend: data.actualSpend,
+        // Spend is recorded as an expense, never on the result (Unit A).
         metrics: data.metrics,
         notes: data.notes,
       });
@@ -103,17 +120,27 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
     }
   };
 
-  const handleUpdateResult = async (id: string, updates: { actualRevenue: number; actualSpend: number; metrics: Record<string, number>; notes: string }) => {
+  const handleUpdateResult = async (id: string, updates: ResultUpdates) => {
     try {
-      await resultService.updateResult(id, updates);
-      setResults(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+      // actualSpend is not sent, so a legacy value is never overwritten with 0.
+      const updated = await resultService.updateResult(id, updates);
+      // Replace with what the database returned, not a local merge.
+      setResults(prev => prev.map(r => (r.id === id ? (updated as InitiativeResult) : r)));
     } catch (err) {
       console.error('Failed to update result:', err);
     }
   };
 
-  const handleDeleteResult = (id: string) => {
-    setResults(prev => prev.filter(r => r.id !== id));
+  const handleDeleteResult = async (id: string) => {
+    setResultError(null);
+    try {
+      await resultService.deleteResult(id);
+      // Only once the database confirms, so a failed delete cannot look like success.
+      setResults(prev => prev.filter(r => r.id !== id));
+    } catch (err) {
+      console.error('Failed to delete result:', err);
+      setResultError(err instanceof Error ? err.message : 'Failed to delete result.');
+    }
   };
 
   const handleDeleteExpense = async (id: string) => {
@@ -151,18 +178,26 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
     );
   }
 
-  // Aggregate totals
-  const totalRevenue = results.reduce((sum, r) => sum + r.actualRevenue, 0);
-  const totalSpend = results.reduce((sum, r) => sum + r.actualSpend, 0);
-  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+  // Totals equal the sum of the rows shown beneath them (summed in cents).
+  const { totalRevenue, totalExpenses, legacySpend, hasLegacySpend } = summariseResultsTab(results, expenses);
+  // One formatter per section, so a total and its rows share precision.
+  const formatRevenue = pickMoneyFormatter(results.map(r => r.actualRevenue));
+  const formatExpense = pickMoneyFormatter(expenses.map(e => e.amount));
+  const formatLegacy = pickMoneyFormatter(results.map(r => r.actualSpend));
 
   return (
     <div className="space-y-8">
       {/* Summary cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <SummaryCard icon={TrendingUp} label="Total Revenue" value={totalRevenue} color="text-green-600" />
-        <SummaryCard icon={DollarSign} label="Total Spend (Results)" value={totalSpend} color="text-blue-600" />
-        <SummaryCard icon={Receipt} label="Total Expenses" value={totalExpenses} color="text-orange-600" />
+      <div className="space-y-2">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <SummaryCard icon={TrendingUp} label="Total Revenue" value={formatRevenue(totalRevenue)} color="text-green-600" />
+          <SummaryCard icon={Receipt} label="Total Expenses" value={formatExpense(totalExpenses)} color="text-orange-600" />
+        </div>
+        {hasLegacySpend && (
+          <p className="text-xs text-[hsl(var(--foreground-muted))]">
+            Legacy spend (from results): {formatLegacy(legacySpend)}. Recorded before spend moved to Expenses. Not included in totals.
+          </p>
+        )}
       </div>
 
       {/* Results Log */}
@@ -185,12 +220,18 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
           <ResultForm metricKeys={metricKeys} onSubmit={handleAddResult} onCancel={() => setShowAddResult(false)} />
         )}
 
+        {resultError && (
+          <p role="alert" className="mb-3 rounded-[var(--radius-md)] border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {resultError}
+          </p>
+        )}
+
         {results.length === 0 && !showAddResult ? (
           <EmptySection message="No results recorded yet. Add weekly results to track initiative performance." />
         ) : (
           <div className="space-y-2">
             {results.map(result => (
-              <ResultRow key={result.id} result={result} metricKeys={metricKeys} onUpdate={handleUpdateResult} onDelete={handleDeleteResult} />
+              <ResultRow key={result.id} result={result} metricKeys={metricKeys} formatRevenue={formatRevenue} formatLegacy={formatLegacy} onUpdate={handleUpdateResult} onDelete={handleDeleteResult} />
             ))}
           </div>
         )}
@@ -221,7 +262,7 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
         ) : (
           <div className="space-y-2">
             {expenses.map(expense => (
-              <ExpenseRow key={expense.id} expense={expense} onDelete={handleDeleteExpense} />
+              <ExpenseRow key={expense.id} expense={expense} formatAmount={formatExpense} onDelete={handleDeleteExpense} />
             ))}
           </div>
         )}
@@ -234,8 +275,7 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
  * Summary Card
  * ───────────────────────────────────────────────── */
 
-function SummaryCard({ icon: Icon, label, value, color }: { icon: typeof DollarSign; label: string; value: number; color: string }) {
-  const formatted = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(value);
+function SummaryCard({ icon: Icon, label, value: formatted, color }: { icon: typeof DollarSign; label: string; value: string; color: string }) {
   return (
     <div className="rounded-[var(--radius-lg)] border border-border bg-card p-5">
       <div className="flex items-center gap-2 mb-2">
@@ -251,18 +291,23 @@ function SummaryCard({ icon: Icon, label, value, color }: { icon: typeof DollarS
  * Result Row
  * ───────────────────────────────────────────────── */
 
-function ResultRow({ result, metricKeys, onUpdate, onDelete }: { result: InitiativeResult; metricKeys: string[]; onUpdate: (id: string, updates: { actualRevenue: number; actualSpend: number; metrics: Record<string, number>; notes: string }) => void; onDelete: (id: string) => void }) {
+interface ResultUpdates {
+  actualRevenue: number;
+  metrics: Record<string, number>;
+  notes: string;
+}
+
+function ResultRow({ result, metricKeys, formatRevenue, formatLegacy, onUpdate, onDelete }: { result: InitiativeResult; metricKeys: string[]; formatRevenue: MoneyFormatter; formatLegacy: MoneyFormatter; onUpdate: (id: string, updates: ResultUpdates) => void; onDelete: (id: string) => void }) {
   const [editing, setEditing] = useState(false);
-  const [editRevenue, setEditRevenue] = useState(result.actualRevenue);
-  const [editSpend, setEditSpend] = useState(result.actualSpend);
+  const [editRevenue, setEditRevenue] = useState(String(result.actualRevenue ?? ''));
   const [editMetrics, setEditMetrics] = useState<Record<string, number>>(result.metrics as Record<string, number> || {});
   const [editNotes, setEditNotes] = useState(result.notes || '');
 
   const formatDate = (date: Date) => new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const formatCurrency = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n);
+  const revenueInputId = `result-revenue-${result.id}`;
 
   function handleSave() {
-    onUpdate(result.id, { actualRevenue: editRevenue, actualSpend: editSpend, metrics: editMetrics, notes: editNotes });
+    onUpdate(result.id, { actualRevenue: toAmount(editRevenue), metrics: editMetrics, notes: editNotes });
     setEditing(false);
   }
 
@@ -287,12 +332,8 @@ function ResultRow({ result, metricKeys, onUpdate, onDelete }: { result: Initiat
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-[hsl(var(--foreground-muted))] mb-1">Revenue</label>
-              <input type="number" value={editRevenue} onChange={e => setEditRevenue(parseFloat(e.target.value) || 0)} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
-            </div>
-            <div>
-              <label className="block text-xs text-[hsl(var(--foreground-muted))] mb-1">Spend</label>
-              <input type="number" value={editSpend} onChange={e => setEditSpend(parseFloat(e.target.value) || 0)} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+              <label htmlFor={revenueInputId} className="block text-xs text-[hsl(var(--foreground-muted))] mb-1">Revenue</label>
+              <NumberInputRaw id={revenueInputId} value={editRevenue} onValueChange={setEditRevenue} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
             </div>
           </div>
           {metricKeys.length > 0 && (
@@ -316,11 +357,13 @@ function ResultRow({ result, metricKeys, onUpdate, onDelete }: { result: Initiat
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             <div>
               <p className="text-xs text-[hsl(var(--foreground-muted))]">Revenue</p>
-              <p className="text-sm font-bold text-green-600">{formatCurrency(result.actualRevenue)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-[hsl(var(--foreground-muted))]">Spend</p>
-              <p className="text-sm font-bold text-blue-600">{formatCurrency(result.actualSpend)}</p>
+              <p className="text-sm font-bold text-green-600">{formatRevenue(result.actualRevenue)}</p>
+              {result.actualSpend > 0 && (
+                // Legacy (D1): read-only, not editable and not in any total.
+                <span className="mt-1 inline-block text-xs bg-[hsl(var(--background-muted))] text-[hsl(var(--foreground-muted))] px-1.5 py-0.5 rounded">
+                  Legacy spend {formatLegacy(result.actualSpend)}
+                </span>
+              )}
             </div>
             {Object.keys(result.metrics).length > 0 && (
               <div>
@@ -328,7 +371,7 @@ function ResultRow({ result, metricKeys, onUpdate, onDelete }: { result: Initiat
                 <div className="flex flex-wrap gap-1.5 mt-0.5">
                   {Object.entries(result.metrics).slice(0, 3).map(([key, val]) => (
                     <span key={key} className="text-xs bg-[hsl(var(--background-muted))] px-1.5 py-0.5 rounded">
-                      {key.replace(/_/g, ' ')}: {typeof val === 'number' && val < 1 ? `${(val * 100).toFixed(0)}%` : val}
+                      {key.replace(/_/g, ' ')}: {typeof val === 'number' && val < 1 ? `${(val * 100).toFixed(0)}%` : formatNumber(val)}
                     </span>
                   ))}
                 </div>
@@ -351,9 +394,8 @@ function ResultRow({ result, metricKeys, onUpdate, onDelete }: { result: Initiat
  * Expense Row
  * ───────────────────────────────────────────────── */
 
-function ExpenseRow({ expense, onDelete }: { expense: Expense; onDelete: (id: string) => void }) {
+function ExpenseRow({ expense, formatAmount, onDelete }: { expense: Expense; formatAmount: MoneyFormatter; onDelete: (id: string) => void }) {
   const formatDate = (date: Date) => new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
-  const formatCurrency = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n);
   const catConfig = categoryColors[expense.category] || categoryColors.other;
 
   return (
@@ -370,7 +412,7 @@ function ExpenseRow({ expense, onDelete }: { expense: Expense; onDelete: (id: st
           <p className="text-xs text-[hsl(var(--foreground-muted))] mt-0.5">{expense.sourceDetails}</p>
         )}
       </div>
-      <p className="text-sm font-bold text-[hsl(var(--foreground))] shrink-0">{formatCurrency(expense.amount)}</p>
+      <p className="text-sm font-bold text-[hsl(var(--foreground))] shrink-0">{formatAmount(expense.amount)}</p>
       <button
         onClick={() => { if (window.confirm('Delete this expense?')) onDelete(expense.id); }}
         className="rounded-[var(--radius-md)] bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 transition-colors shrink-0"
@@ -401,7 +443,6 @@ interface ResultFormData {
   weekStartDate: string;
   weekEndDate: string;
   actualRevenue: number;
-  actualSpend: number;
   metrics: Record<string, number>;
   notes: string;
 }
@@ -417,14 +458,15 @@ function ResultForm({ metricKeys, onSubmit, onCancel }: { metricKeys: string[]; 
     weekStartDate: weekStart.toISOString().split('T')[0],
     weekEndDate: weekEnd.toISOString().split('T')[0],
     actualRevenue: 0,
-    actualSpend: 0,
     metrics: {},
     notes: '',
   });
+  // Held as the raw string NumberInputRaw edits; parsed on submit.
+  const [revenueInput, setRevenueInput] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(formData);
+    onSubmit({ ...formData, actualRevenue: toAmount(revenueInput) });
   };
 
   const handleMetricChange = (key: string, value: number) => {
@@ -453,14 +495,11 @@ function ResultForm({ metricKeys, onSubmit, onCancel }: { metricKeys: string[]; 
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
-          <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">Revenue ($)</label>
-          <input type="number" min="0" step="1" value={formData.actualRevenue} onChange={e => setFormData(p => ({ ...p, actualRevenue: parseFloat(e.target.value) || 0 }))} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">Spend ($)</label>
-          <input type="number" min="0" step="1" value={formData.actualSpend} onChange={e => setFormData(p => ({ ...p, actualSpend: parseFloat(e.target.value) || 0 }))} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+          <label htmlFor="new-result-revenue" className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">Revenue ($)</label>
+          <NumberInputRaw id="new-result-revenue" value={revenueInput} onValueChange={setRevenueInput} placeholder="0" className={numberInputClass} />
         </div>
       </div>
+      <p className="text-xs text-[hsl(var(--foreground-muted))]">Record spend as an expense below.</p>
 
       {/* Dynamic Metrics based on initiative type */}
       {metricKeys.length > 0 && (
@@ -518,11 +557,13 @@ function ExpenseForm({ onSubmit, onCancel }: { onSubmit: (data: ExpenseFormData)
     amount: 0,
     date: new Date().toISOString().split('T')[0],
   });
+  // Held as the raw string NumberInputRaw edits; parsed on submit.
+  const [amountInput, setAmountInput] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.description.trim()) return;
-    onSubmit(formData);
+    onSubmit({ ...formData, amount: toAmount(amountInput) });
   };
 
   return (
@@ -544,8 +585,8 @@ function ExpenseForm({ onSubmit, onCancel }: { onSubmit: (data: ExpenseFormData)
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">Amount ($)</label>
-          <input type="number" min="0" step="1" value={formData.amount} onChange={e => setFormData(p => ({ ...p, amount: parseFloat(e.target.value) || 0 }))} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+          <label htmlFor="new-expense-amount" className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">Amount ($)</label>
+          <NumberInputRaw id="new-expense-amount" value={amountInput} onValueChange={setAmountInput} placeholder="0" className={numberInputClass} />
         </div>
         <div>
           <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">Date</label>

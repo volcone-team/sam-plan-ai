@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { snapshotPlanYear, snapshotPlanTargets } from "@/lib/plan-snapshot-year";
+import { snapshotProducts } from "@/lib/snapshot-products";
 
 /**
  * POST /api/plan/history/[id]/restore
@@ -81,8 +83,23 @@ export async function POST(
     const snapInitiatives: any[] = data.initiatives || [];
     const snapTasks: any[] = data.tasks || [];
 
-    if (snapInitiatives.length === 0) {
-      return NextResponse.json({ error: "This snapshot has no initiatives to restore." }, { status: 400 });
+    /**
+     * AN EMPTY PLAN IS STILL A PLAN WORTH RESTORING.
+     *
+     * This used to refuse any snapshot with no initiatives. But deleting a
+     * plan year captures exactly that: a snapshot holding the year and its
+     * revenue targets with nothing in it. Restoring it recreates the year with
+     * its goals — an empty dashboard the customer can start filling again,
+     * which is the whole reason they clicked restore.
+     *
+     * Refused only when there is genuinely NOTHING to put back: no
+     * initiatives and no plan record either.
+     */
+    if (snapInitiatives.length === 0 && !data.annualPlan) {
+      return NextResponse.json(
+        { error: "This snapshot is empty — there is nothing to restore from it." },
+        { status: 400 }
+      );
     }
 
     // 2. Snapshot the CURRENT plan first (so restore is itself reversible)
@@ -118,6 +135,8 @@ export async function POST(
             projections: curProj || [],
             results: curResults || [],
             expenses: curExpenses || [],
+            // Products are needed to restore initiatives (product_id is NOT NULL).
+            products: await snapshotProducts(admin, companyId),
             snapshotDate: new Date().toISOString(),
           },
         });
@@ -127,16 +146,72 @@ export async function POST(
       console.error("[plan/restore] Pre-restore snapshot failed (non-fatal):", e);
     }
 
-    // 3. Resolve the current annual plan (restored initiatives attach here)
-    const { data: annualPlan } = await admin
+    /**
+     * 3. Resolve the plan row to restore INTO — by the snapshot's own year,
+     *    creating it if the year no longer exists.
+     *
+     * This used to take the company's most recent `annual_plans` row and
+     * refuse outright when there wasn't one. Both halves were wrong:
+     *
+     *   - "No active annual plan to restore into" is exactly the state someone
+     *     restoring from history is usually in. They deleted the plan; getting
+     *     it back is the entire point of the feature. The snapshot already
+     *     carries its own `annualPlan`, so the year can simply be rebuilt.
+     *
+     *   - Picking the LATEST year filed a 2026 snapshot's initiatives under a
+     *     2027 plan whenever one existed, silently relocating a year of work.
+     *
+     * `snapshotPlanYear` answers this from the snapshot rather than from
+     * whatever the database holds now.
+     */
+    const targetYear = snapshotPlanYear(data, new Date().getUTCFullYear());
+
+    const { data: existingPlan } = await admin
       .from("annual_plans")
       .select("id")
       .eq("company_id", companyId)
-      .order("year", { ascending: false })
-      .limit(1)
-      .single();
+      .eq("year", targetYear)
+      .maybeSingle();
 
-    if (!annualPlan) return NextResponse.json({ error: "No active annual plan to restore into." }, { status: 400 });
+    let annualPlan = existingPlan as { id: string } | null;
+
+    if (!annualPlan) {
+      /**
+       * Recreate the year, with the snapshot's own targets.
+       *
+       * `status: "active"` because a restored plan is one the customer intends
+       * to run — leaving it 'draft' would hide it from the views that filter on
+       * active plans, so the restore would appear to have done nothing.
+       */
+      const { data: createdPlan, error: createPlanErr } = await admin
+        .from("annual_plans")
+        .insert({
+          company_id: companyId,
+          year: targetYear,
+          ...snapshotPlanTargets(data),
+          status: "active",
+        })
+        .select("id")
+        .single();
+
+      if (createPlanErr || !createdPlan) {
+        console.error(
+          "[plan/restore] Could not recreate the", targetYear, "plan:",
+          createPlanErr?.message
+        );
+        return NextResponse.json(
+          {
+            error:
+              `Could not recreate your ${targetYear} plan, so nothing was ` +
+              `restored. Please try again.`,
+          },
+          { status: 500 }
+        );
+      }
+
+      annualPlan = createdPlan as { id: string };
+      console.log("[plan/restore] Recreated the", targetYear, "plan to restore into");
+    }
 
     // 4. Build a product-id map. Snapshot initiatives reference old product ids.
     //    Match current products by name; if missing, recreate from snapshot products.
@@ -185,14 +260,63 @@ export async function POST(
       if (liveId) productIdMap.set(sp.id, liveId);
     }
     // Fallback product for initiatives whose product can't be mapped
-    const fallbackProductId = (currentProducts || [])[0]?.id || Array.from(productIdMap.values())[0];
+    let fallbackProductId: string | undefined =
+      (currentProducts || [])[0]?.id || Array.from(productIdMap.values())[0];
+
+    /**
+     * NO PRODUCTS ANYWHERE — create one so the initiatives can come back.
+     *
+     * Snapshots written before products were included carry none, and if the
+     * customer has also deleted their products there is nothing to attach the
+     * initiatives to. `initiatives.product_id` is NOT NULL, so every one used
+     * to be skipped while the screen still reported "Plan restored — 0
+     * initiative(s) added".
+     *
+     * One placeholder is better than losing the plan. It is named plainly so
+     * the customer knows to rename it, and only created when there are
+     * initiatives that actually need it.
+     */
+    const needsProduct = (onlyInitiativeId
+      ? snapInitiatives.filter((i) => i.id === onlyInitiativeId)
+      : snapInitiatives
+    ).some((i) => !productIdMap.get(i.product_id));
+
+    if (!fallbackProductId && needsProduct) {
+      const { data: placeholder, error: placeholderErr } = await admin
+        .from("products")
+        .insert({
+          company_id: companyId,
+          name: "Restored product (rename me)",
+          description: "Created when restoring a plan whose products had been deleted.",
+          price: 0,
+          revenue_type: "one-time",
+          ticket_tier: "mid",
+          is_active: true,
+          display_order: 0,
+        })
+        .select("id")
+        .single();
+
+      if (placeholderErr || !placeholder) {
+        console.error("[plan/restore] Could not create a placeholder product:", placeholderErr?.message);
+        return NextResponse.json(
+          { error: "Could not restore: your products were deleted and a replacement could not be created." },
+          { status: 500 }
+        );
+      }
+      fallbackProductId = placeholder.id as string;
+      console.log("[plan/restore] Created a placeholder product to restore into");
+    }
 
     // 5. Which snapshot initiatives to restore
     const initiativesToRestore = onlyInitiativeId
       ? snapInitiatives.filter((i) => i.id === onlyInitiativeId)
       : snapInitiatives;
 
-    if (initiativesToRestore.length === 0) {
+    // Only meaningful for a SINGLE-initiative restore. A full restore of an
+    // empty plan (a deleted year with no initiatives) is legitimate and must
+    // fall through to restoring the year and its targets.
+    if (onlyInitiativeId && initiativesToRestore.length === 0) {
       return NextResponse.json({ error: "That initiative was not found in the snapshot." }, { status: 404 });
     }
 
@@ -334,14 +458,36 @@ export async function POST(
     }
 
     console.log(
-      "[plan/restore] Done. initiatives:", restoredCount,
+      "[plan/restore] Done. initiatives:", restoredCount, "of", initiativesToRestore.length,
       "| projections:", projectionsRestored,
       "| targets:", targetsRestored
     );
 
+    /**
+     * Do not report success when nothing came back.
+     *
+     * Individual initiative failures are logged and skipped, which is right
+     * for a partial problem — but if EVERY initiative failed the restore did
+     * not work, and saying "Plan restored" was exactly the misleading message
+     * the customer saw.
+     */
+    if (initiativesToRestore.length > 0 && restoredCount === 0) {
+      return NextResponse.json(
+        {
+          error:
+            `None of the ${initiativesToRestore.length} initiative(s) in this ` +
+            `snapshot could be restored. Your plan as it was before this ` +
+            `attempt is saved in Plan History. Please try again or contact support.`,
+        },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({
       success: true,
       restored: restoredCount,
+      /** So the UI can say "3 of 4" rather than imply everything came back. */
+      skipped: initiativesToRestore.length - restoredCount,
       projectionsRestored,
       targetsRestored,
       mode: onlyInitiativeId ? "single" : "full",

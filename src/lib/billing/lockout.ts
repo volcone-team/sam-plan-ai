@@ -120,6 +120,22 @@ export function lockoutCopy(reason: AccessReason, planName?: string | null): Loc
         cta: "Finish checkout",
       };
 
+    case "paused":
+      /*
+       * Only shown on /choose-plan to a paused account with NO live
+       * subscription (canPurchaseWhilePaused). User decision: "Buying a plan
+       * ends the pause". A paused account that still has a live subscription
+       * never sees this; it goes to /account-paused.
+       */
+      return {
+        title: "Your account is paused",
+        body:
+          "There is no active subscription on this account. Choose a plan to " +
+          "restore access — buying a plan ends the pause. Everything you built " +
+          "is still saved.",
+        cta: "Choose a plan",
+      };
+
     default:
       // Reached only if a new denying reason is added without copy for it.
       // Vague but honest, rather than asserting something that may be false.

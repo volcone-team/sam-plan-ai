@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Bot, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatUsd } from "@/lib/ai-pricing";
+import { formatNumber } from "@/lib/format-money";
+import { NumberInputRaw } from "@/components/ui/number-input";
 
 /**
  * Super-admin AI tools: spend and volume across plan generation and the
@@ -62,9 +64,7 @@ interface ChatSettings {
 
 const WINDOWS = [7, 30, 90] as const;
 
-function formatInt(n: number): string {
-  return n.toLocaleString("en-US");
-}
+const formatInt = formatNumber;
 
 function StatCard({
   label,
@@ -487,12 +487,10 @@ export function AiTools() {
                 everyone while leaving the feature enabled.
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <input
+                <NumberInputRaw
                   id="chat-cap"
-                  type="number"
-                  min={0}
                   value={capDraft}
-                  onChange={(e) => setCapDraft(e.target.value)}
+                  onValueChange={setCapDraft}
                   className="w-40 rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                 />
                 <button
@@ -503,7 +501,7 @@ export function AiTools() {
                   Save
                 </button>
                 <span className="text-xs text-[hsl(var(--foreground-muted))]">
-                  ~{Math.max(1, Math.round(Number(capDraft || 0) / 5000))} messages/day
+                  ~{formatNumber(Math.max(1, Math.round(Number(capDraft || 0) / 5000)))} messages/day
                 </span>
               </div>
             </div>

@@ -13,6 +13,7 @@ import {
   Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { pickMoneyFormatter } from "@/lib/results-tab-totals";
 
 interface CompanyDetail {
   company: {
@@ -35,8 +36,9 @@ interface CompanyDetail {
   annualPlan: { id: string; year: number; baselineRevenue: number; stretchRevenue: number; operatingBudget: number; status: string } | null;
 }
 
+/** Shared formatters: whole dollars, or cents only when the amount has them. */
 function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(amount);
+  return pickMoneyFormatter([amount])(amount);
 }
 
 export function CompanyDetail({ companyId }: { companyId: string }) {

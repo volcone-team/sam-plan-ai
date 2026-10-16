@@ -1,14 +1,18 @@
 'use client';
 import { formatDate } from "@/lib/format-date";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Calendar, Package, Tag, Clock, Zap, Pencil, Loader2 } from 'lucide-react';
 import type { Initiative, InitiativeStatus, UpdateInitiativeDTO } from '@/types';
 import type { InitiativeType } from '@/types/initiative-type.types';
 import { initiativeService } from '@/services/initiative.service';
+import { expenseService } from '@/services/expense.service';
+import { pickMoneyFormatter } from '@/lib/results-tab-totals';
+import { sumExpensesByInitiative } from '@/lib/initiative-spend';
 import { NumberInputRaw } from '@/components/ui/number-input';
 import { DateInput } from '@/components/ui/date-input';
 import { usePermission } from '@/hooks/use-permission';
+import { formatNumber } from '@/lib/format-money';
 
 export interface InitiativeOverviewProps {
   initiative: Initiative;
@@ -82,7 +86,20 @@ export function InitiativeOverview({
   const [eventDate, setEventDate] = useState(toDateInputValue(initiative.eventDate));
   const [trafficInput, setTrafficInput] = useState(numberToInputValue(initiative.trafficInput));
   const [plannedBudget, setPlannedBudget] = useState(numberToInputValue(initiative.plannedBudget));
-  const [actualSpend, setActualSpend] = useState(numberToInputValue(initiative.actualSpend));
+  /** D2: Σ this initiative's recorded expenses; null while loading. */
+  const [expenseSpend, setExpenseSpend] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    expenseService
+      .getExpensesByInitiative(initiative.id)
+      .then((rows) => {
+        // Cents-safe, the same sum the ROI report and initiative cards use.
+        if (!cancelled) setExpenseSpend(sumExpensesByInitiative(rows).get(initiative.id) ?? 0);
+      })
+      .catch(() => { if (!cancelled) setExpenseSpend(0); });
+    return () => { cancelled = true; };
+  }, [initiative.id]);
   const [revenueGood, setRevenueGood] = useState(numberToInputValue(initiative.revenueScenarios?.good));
   const [revenueBetter, setRevenueBetter] = useState(numberToInputValue(initiative.revenueScenarios?.better));
   const [revenueBest, setRevenueBest] = useState(numberToInputValue(initiative.revenueScenarios?.best));
@@ -98,7 +115,6 @@ export function InitiativeOverview({
     setEventDate(toDateInputValue(initiative.eventDate));
     setTrafficInput(numberToInputValue(initiative.trafficInput));
     setPlannedBudget(numberToInputValue(initiative.plannedBudget));
-    setActualSpend(numberToInputValue(initiative.actualSpend));
     setRevenueGood(numberToInputValue(initiative.revenueScenarios?.good));
     setRevenueBetter(numberToInputValue(initiative.revenueScenarios?.better));
     setRevenueBest(numberToInputValue(initiative.revenueScenarios?.best));
@@ -142,7 +158,6 @@ export function InitiativeOverview({
       eventDate: eventDate ? new Date(eventDate) : null,
       trafficInput: trafficInput === '' ? undefined : toNumber(trafficInput),
       plannedBudget: toNumber(plannedBudget),
-      actualSpend: toNumber(actualSpend),
       revenueScenarios: {
         good: toNumber(revenueGood),
         better: toNumber(revenueBetter),
@@ -347,18 +362,14 @@ export function InitiativeOverview({
               />
             </div>
 
-            <div className="space-y-1.5">
-              <label htmlFor="overview-edit-actual-spend" className={labelClass}>
-                Actual spend ($)
-              </label>
-              <NumberInputRaw
-              id="overview-edit-actual-spend"
-              value={actualSpend}
-              onValueChange={setActualSpend}
-                className={inputClass}
-                placeholder="0"
-              />
-            </div>
+            {/* D2: read-only, derived from recorded expenses. Plain text, not a disabled input. */}
+            <dl className="space-y-1.5">
+              <dt className={labelClass}>Actual spend (from expenses)</dt>
+              <dd className="py-2 text-sm font-medium text-[hsl(var(--foreground))] tabular-nums">
+                {expenseSpend === null ? 'Loading…' : pickMoneyFormatter([expenseSpend])(expenseSpend)}
+              </dd>
+              <dd className={helperClass}>Record spending under Results › Expenses.</dd>
+            </dl>
           </div>
 
           {/* Revenue scenarios */}
@@ -501,7 +512,7 @@ export function InitiativeOverview({
                   Expected Registrants
                 </span>
                 <span className="text-sm font-medium text-[hsl(var(--foreground))]">
-                  {initiative.trafficInput.toLocaleString()}
+                  {formatNumber(initiative.trafficInput)}
                 </span>
               </div>
             )}

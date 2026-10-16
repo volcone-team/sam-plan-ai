@@ -27,6 +27,7 @@ import {
 } from "@/lib/workbook/materialise";
 import { sequenceEventDates } from "@/lib/plan-schedule";
 import { toDateOnly } from "@/lib/plan-dates";
+import { snapshotProducts } from "@/lib/snapshot-products";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -717,6 +718,8 @@ async function clearPreviousPlan(
         projections: projectionsFull ?? [],
         results: resultsFull ?? [],
         expenses: expensesFull ?? [],
+        // Products are needed to restore initiatives (product_id is NOT NULL).
+        products: await snapshotProducts(db, companyId),
         snapshotDate: new Date().toISOString(),
       },
     });

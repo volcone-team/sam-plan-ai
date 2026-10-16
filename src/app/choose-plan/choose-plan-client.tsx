@@ -7,6 +7,7 @@ import { BrandLogo } from "@/components/brand-logo";
 import { createClient } from "@/lib/supabase/client";
 import type { LockoutCopy } from "@/lib/billing/lockout";
 import type { AccessReason } from "@/lib/billing/entitlement";
+import { formatMoney, formatNumber } from "@/lib/format-money";
 
 /**
  * The interactive half of the purchase screen.
@@ -31,20 +32,13 @@ export interface PurchasablePlan {
 
 type Cycle = "monthly" | "annual";
 
-function money(amount: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
+const money = formatMoney;
 
 /** -1 means unlimited; 0 means not included on this plan. */
 function limitText(value: number): string {
   if (value < 0) return "Unlimited";
   if (value === 0) return "Not included";
-  return value.toLocaleString();
+  return formatNumber(value);
 }
 
 export function ChoosePlanClient({

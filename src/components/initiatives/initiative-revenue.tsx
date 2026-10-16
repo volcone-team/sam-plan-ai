@@ -5,6 +5,10 @@ import { DollarSign, TrendingUp, BarChart3 } from 'lucide-react';
 import type { Initiative } from '@/types';
 import type { InitiativeType } from '@/types/initiative-type.types';
 import { resultService } from '@/services/result.service';
+import { expenseService } from '@/services/expense.service';
+import { formatMoney } from '@/lib/format-money';
+import { pickMoneyFormatter } from '@/lib/results-tab-totals';
+import { sumExpensesByInitiative } from '@/lib/initiative-spend';
 
 export interface InitiativeRevenueProps {
   initiative: Initiative;
@@ -17,38 +21,37 @@ export interface InitiativeRevenueProps {
  */
 export function InitiativeRevenue({ initiative, initiativeType }: InitiativeRevenueProps) {
   const [totalRevenue, setTotalRevenue] = useState<number>(0);
+  /** D2: actual spend = Σ this initiative's recorded expenses. */
+  const [actualSpend, setActualSpend] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const loadResults = async () => {
-      try {
-        const revenue = await resultService.getTotalRevenueByInitiative(initiative.id);
-        setTotalRevenue(revenue);
-      } catch {
-        // Silently handle - revenue stays at 0
-      } finally {
-        setLoading(false);
+    const loadActuals = async () => {
+      // Independent loads: a failure in one leaves only that figure at 0.
+      const [revenue, spend] = await Promise.allSettled([
+        resultService.getTotalRevenueByInitiative(initiative.id),
+        expenseService.getExpensesByInitiative(initiative.id),
+      ]);
+      if (revenue.status === 'fulfilled') setTotalRevenue(revenue.value);
+      // Cents-safe, the same sum the ROI report and initiative cards use.
+      if (spend.status === 'fulfilled') {
+        setActualSpend(sumExpensesByInitiative(spend.value).get(initiative.id) ?? 0);
       }
+      setLoading(false);
     };
-    loadResults();
+    loadActuals();
   }, [initiative.id]);
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  };
+  // Expenses can carry cents; show the budget line at the precision it needs.
+  const formatSpend = pickMoneyFormatter([actualSpend, initiative.plannedBudget, totalRevenue]);
 
   const budgetUsedPercent = initiative.plannedBudget > 0
-    ? Math.min((initiative.actualSpend / initiative.plannedBudget) * 100, 100)
+    ? Math.min((actualSpend / initiative.plannedBudget) * 100, 100)
     : 0;
-  const isOverBudget = initiative.actualSpend > initiative.plannedBudget;
+  const isOverBudget = actualSpend > initiative.plannedBudget;
 
-  const roi = initiative.actualSpend > 0
-    ? ((totalRevenue - initiative.actualSpend) / initiative.actualSpend) * 100
+  const roi = actualSpend > 0
+    ? ((totalRevenue - actualSpend) / actualSpend) * 100
     : null;
 
   return (
@@ -90,7 +93,7 @@ export function InitiativeRevenue({ initiative, initiativeType }: InitiativeReve
         <div className="mt-4 rounded-[var(--radius-lg)] border border-border bg-card p-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-[hsl(var(--foreground-muted))]">
-              {formatCurrency(initiative.actualSpend)} of {formatCurrency(initiative.plannedBudget)}
+              Actual spend (from expenses): {formatSpend(actualSpend)} of {formatSpend(initiative.plannedBudget)} planned
             </span>
             <span className={`text-sm font-semibold ${isOverBudget ? 'text-[hsl(var(--error))]' : 'text-[hsl(var(--foreground))]'}`}>
               {budgetUsedPercent.toFixed(0)}%
@@ -103,7 +106,7 @@ export function InitiativeRevenue({ initiative, initiativeType }: InitiativeReve
               }`}
               style={{ width: `${Math.min(budgetUsedPercent, 100)}%` }}
               role="progressbar"
-              aria-valuenow={initiative.actualSpend}
+              aria-valuenow={actualSpend}
               aria-valuemin={0}
               aria-valuemax={initiative.plannedBudget}
               aria-label="Budget utilization"
@@ -111,7 +114,7 @@ export function InitiativeRevenue({ initiative, initiativeType }: InitiativeReve
           </div>
           {isOverBudget && (
             <p className="mt-2 text-xs text-[hsl(var(--error))]">
-              Over budget by {formatCurrency(initiative.actualSpend - initiative.plannedBudget)}
+              Over budget by {formatSpend(actualSpend - initiative.plannedBudget)}
             </p>
           )}
 
@@ -125,7 +128,7 @@ export function InitiativeRevenue({ initiative, initiativeType }: InitiativeReve
                 </span>
               </div>
               <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">
-                Revenue: {formatCurrency(totalRevenue)} | Spend: {formatCurrency(initiative.actualSpend)}
+                Revenue: {formatSpend(totalRevenue)} | Spend (expenses): {formatSpend(actualSpend)}
               </p>
             </div>
           )}
@@ -186,13 +189,7 @@ function ScenarioCard({
   description: string;
   accentClass: string;
 }) {
-  const formatCurrency = (n: number) =>
-    new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(n);
+  const formatCurrency = formatMoney;
 
   return (
     <div className={`rounded-[var(--radius-lg)] border border-border bg-card p-5 border-l-4 ${accentClass}`}>
@@ -211,5 +208,6 @@ function formatBenchmarkValue(value: number): string {
   if (value < 1) {
     return `${(value * 100).toFixed(0)}%`;
   }
-  return value.toFixed(1);
+  // Same one decimal as before, now with thousands separators.
+  return value.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }

@@ -9,6 +9,7 @@ import { resultService } from '@/services/result.service';
 import { projectionService } from '@/services/projection.service';
 import type { Projection, Result } from '@/types';
 import { usePlanYears } from '@/hooks/use-plan-years';
+import { formatMoney } from '@/lib/format-money';
 
 // Was the literal 2026, which silently stops being true. Now the shared
 // selected plan year, so reports follow the year filter like every other screen.
@@ -222,19 +223,19 @@ export function RevenueReport() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard
           title="Actual Revenue (YTD)"
-          value={formatCurrency(totalActual)}
+          value={formatMoney(totalActual)}
           icon={DollarSign}
           subtitle="Year to date"
         />
         <SummaryCard
           title="Projected Revenue (YTD)"
-          value={formatCurrency(totalProjected)}
+          value={formatMoney(totalProjected)}
           icon={Target}
           subtitle="Better scenario"
         />
         <SummaryCard
           title="Variance"
-          value={formatCurrency(Math.abs(totalVariance))}
+          value={formatMoney(Math.abs(totalVariance))}
           icon={totalVariance >= 0 ? TrendingUp : TrendingDown}
           subtitle={totalVariance >= 0 ? 'Over target' : 'Under target'}
           variant={totalVariance >= 0 ? 'positive' : 'negative'}
@@ -281,13 +282,13 @@ export function RevenueReport() {
                         isOver ? 'bg-emerald-500' : 'bg-red-400'
                       }`}
                       style={{ height: `${Math.max(actualHeight, 1)}%` }}
-                      title={`Actual: ${formatCurrency(item.actual)}`}
+                      title={`Actual: ${formatMoney(item.actual)}`}
                     />
                     {/* Projected bar */}
                     <div
                       className="w-2/5 rounded-t-sm border-2 border-[hsl(var(--primary))] bg-[hsl(var(--primary)/.1)]"
                       style={{ height: `${Math.max(projectedHeight, 1)}%` }}
-                      title={`Projected: ${formatCurrency(item.projected)}`}
+                      title={`Projected: ${formatMoney(item.projected)}`}
                     />
                   </div>
                   {/* Label */}
@@ -327,10 +328,10 @@ export function RevenueReport() {
                     className="border-b border-border last:border-b-0 hover:bg-[hsl(var(--muted)/.3)] transition-colors"
                   >
                     <td className="px-4 py-3 font-medium">{row.label}</td>
-                    <td className="px-4 py-3 text-right">{formatCurrency(row.projected)}</td>
-                    <td className="px-4 py-3 text-right">{formatCurrency(row.actual)}</td>
+                    <td className="px-4 py-3 text-right">{formatMoney(row.projected)}</td>
+                    <td className="px-4 py-3 text-right">{formatMoney(row.actual)}</td>
                     <td className={`px-4 py-3 text-right font-medium ${isPositive ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {isPositive ? '+' : ''}{formatCurrency(row.variance)}
+                      {isPositive ? '+' : ''}{formatMoney(row.variance)}
                     </td>
                     <td className={`px-4 py-3 text-right font-medium ${isPositive ? 'text-emerald-600' : 'text-red-500'}`}>
                       {isPositive ? '+' : ''}{row.variancePercent.toFixed(1)}%
@@ -358,13 +359,13 @@ export function RevenueReport() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="space-y-1">
             <p className="text-sm text-[hsl(var(--foreground-muted))]">Current Month Revenue</p>
-            <p className="text-xl font-bold">{formatCurrency(currentMonthData.actual)}</p>
+            <p className="text-xl font-bold">{formatMoney(currentMonthData.actual)}</p>
             <p className="text-xs text-[hsl(var(--foreground-muted))]">{currentMonthData.label}</p>
           </div>
           <div className="space-y-1">
             <p className="text-sm text-[hsl(var(--foreground-muted))]">Previous Month Revenue</p>
             <p className="text-xl font-bold">
-              {previousMonthData ? formatCurrency(previousMonthData.actual) : '—'}
+              {previousMonthData ? formatMoney(previousMonthData.actual) : '—'}
             </p>
             <p className="text-xs text-[hsl(var(--foreground-muted))]">
               {previousMonthData ? previousMonthData.label : 'N/A'}
@@ -425,11 +426,4 @@ function SummaryCard({ title, value, icon: Icon, subtitle, variant = 'default', 
 
 // --- Utility ---
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
+

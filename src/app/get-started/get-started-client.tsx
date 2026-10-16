@@ -7,6 +7,7 @@ import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "@/components/brand-logo";
 import { pathForStep } from "@/lib/billing/signup-flow";
+import { formatMoney, formatNumber } from "@/lib/format-money";
 
 /**
  * Plan selection for a visitor with no account yet.
@@ -33,20 +34,13 @@ export interface SignupPlan {
 
 type Cycle = "monthly" | "annual";
 
-function money(amount: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
+const money = formatMoney;
 
 /** -1 unlimited, 0 not included on this plan. */
 function limitText(value: number): string {
   if (value < 0) return "Unlimited";
   if (value === 0) return "Not included";
-  return value.toLocaleString();
+  return formatNumber(value);
 }
 
 /**

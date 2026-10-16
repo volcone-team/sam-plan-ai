@@ -28,6 +28,8 @@ import { projectionService } from '@/services/projection.service';
 import { initiativeService } from '@/services/initiative.service';
 import { productService } from '@/services/product.service';
 import { resultService } from '@/services/result.service';
+import { expenseService } from '@/services/expense.service';
+import { sumExpensesByInitiative } from '@/lib/initiative-spend';
 import { RegenerateModal } from './regenerate-modal';
 import type { AnnualPlan, QuarterlyPlan, Initiative, Result } from '@/types';
 import { cacheGet, cacheSet, cacheInvalidatePrefix, CacheKeys, TTL } from '@/lib/client-cache';
@@ -232,7 +234,9 @@ export function YearAtAGlance() {
             revenueBetter: i.revenueScenarios?.better ?? 0,
             revenueBest: i.revenueScenarios?.best ?? 0,
             plannedBudget: i.plannedBudget ?? 0,
-            actualSpend: i.actualSpend ?? 0,
+            // actualSpend omitted (D2): the hand-typed field is not read, and
+            // this total's spend is not displayed. Per-initiative spend comes
+            // from expenses below.
           }))
         ));
 
@@ -260,17 +264,26 @@ export function YearAtAGlance() {
         // --- Full-year results power "Where you are" and the initiative cards ---
         const yearStart = new Date(selectedYear, 0, 1);
         const yearEnd = new Date(selectedYear, 11, 31);
-        const yearResults = await resultService.getResultsByDateRange(yearStart, yearEnd, companyId);
+        const [yearResults, allExpenses] = await Promise.all([
+          resultService.getResultsByDateRange(yearStart, yearEnd, companyId),
+          expenseService.getAllExpenses(),
+        ]);
 
-        // Per-initiative actual revenue + spend
+        // Per-initiative actual revenue (results) + actual spend (D2: Σ the
+        // initiative's recorded expenses; the hand-typed field is not read).
+        const spendById = sumExpensesByInitiative(allExpenses);
         const actuals = new Map<string, { revenue: number; spend: number }>();
         for (const r of yearResults) {
           const key = (r as Result & { initiativeId?: string }).initiativeId || '';
           if (!key) continue;
           const cur = actuals.get(key) || { revenue: 0, spend: 0 };
           cur.revenue += r.actualRevenue || 0;
-          cur.spend += r.actualSpend || 0;
           actuals.set(key, cur);
+        }
+        for (const [id, spend] of spendById) {
+          const cur = actuals.get(id) || { revenue: 0, spend: 0 };
+          cur.spend = spend;
+          actuals.set(id, cur);
         }
         setActualsByInitiative(actuals);
 
@@ -381,7 +394,7 @@ export function YearAtAGlance() {
       ['Initiative', 'Kind', 'Status', 'Activation date', 'Planned revenue (better)', 'Actual revenue', 'Planned budget', 'Actual spend', 'Net', 'Good', 'Best'],
       ...initiativeRows.map((i) => {
         const a = actualsByInitiative.get(i.id) || { revenue: 0, spend: 0 };
-        const spend = a.spend || i.actualSpend || 0;
+        const spend = a.spend;
         return [
           i.name,
           i.kind,
@@ -1223,7 +1236,8 @@ function InitiativeSummaryCard({
 }: { initiative: Initiative; actuals: { revenue: number; spend: number } }) {
   const plannedRevenue = initiative.revenueScenarios?.better || 0;
   const plannedSpend = initiative.plannedBudget || 0;
-  const spend = actuals.spend || initiative.actualSpend || 0;
+  // D2: Σ the initiative's recorded expenses; no hand-typed fallback.
+  const spend = actuals.spend || 0;
   const net = actuals.revenue - spend;
   const roi = spend > 0 ? Math.round((net / spend) * 100) : null;
   const health = initiativeHealth(initiative, actuals.revenue);
@@ -1263,7 +1277,7 @@ function InitiativeSummaryCard({
       {/* Spend */}
       <div className="mt-3">
         <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
-          <span>Spend</span>
+          <span title="Actual spend (from expenses)">Spend (expenses)</span>
           <span className="normal-case tracking-normal text-[hsl(var(--foreground-muted))]">
             {formatCurrency(spend)} / {formatCurrency(plannedSpend)}
           </span>
@@ -1276,7 +1290,7 @@ function InitiativeSummaryCard({
         <div className="rounded-[var(--radius-md)] bg-[hsl(var(--background-muted)/0.6)] p-3">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">Net</p>
           <p className={'mt-0.5 text-sm font-bold ' + (net < 0 ? 'text-red-500' : '')}>
-            {net < 0 ? '-' : ''}${Math.abs(net).toLocaleString()}
+            {formatMoney(net)}
           </p>
         </div>
         <div className="rounded-[var(--radius-md)] bg-[hsl(var(--background-muted)/0.6)] p-3">

@@ -10,6 +10,8 @@ import { BrandLogo } from '@/components/brand-logo';
 import { getAppUrl } from '@/lib/app-url';
 import { asPlanId, pathForStep } from '@/lib/billing/signup-flow';
 import { ResendConfirmation } from '@/components/auth/resend-confirmation';
+import { useLegalUrls } from '@/hooks/use-legal-urls';
+import { LegalLink } from '@/components/legal-link';
 import {
   DIAL_CODES,
   DEFAULT_COUNTRY,
@@ -73,10 +75,22 @@ export default function SignupPage() {
     confirmPassword: '',
   });
   /**
-   * Marketing consent. Defaults to UNCHECKED — a pre-ticked box is not
-   * consent, and the stored value has to reflect a deliberate action.
+   * Agreement to the Privacy Policy and Terms. REQUIRED.
+   *
+   * Recorded as a TIMESTAMP server-side rather than a flag, because the
+   * question that gets asked later is "when did they agree", which a boolean
+   * cannot answer.
    */
-  const [marketingConsent, setMarketingConsent] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+
+  /**
+   * Consent to promotional SMS, email and phone, including automated dialing.
+   * OPTIONAL — it cannot be a condition of holding an account.
+   */
+  const [promotionalConsent, setPromotionalConsent] = useState(false);
+
+  /** The policy links, read from admin settings. */
+  const legal = useLegalUrls();
 
   /**
    * The chosen country, held apart from `formData`.
@@ -163,6 +177,16 @@ export default function SignupPage() {
        * The rule depends on the chosen dialling code: exactly 10 digits for
        * +1, 9 or 10 for +44, and so on. See src/lib/phone.ts.
        */
+      /**
+       * Terms are mandatory. `required` on the input covers the normal path;
+       * this is the belt-and-braces check, because the account is created the
+       * moment signUp() succeeds and there is no undo after that point.
+       */
+      if (!termsAccepted) {
+        setError('Please agree to the Privacy Policy and Terms & Conditions to continue.');
+        return;
+      }
+
       const phoneProblem = describeNationalNumberProblem(phoneCode, formData.phone);
       if (phoneProblem) {
         setError(phoneProblem);
@@ -214,6 +238,7 @@ export default function SignupPage() {
 
       setConfirmDestination(destination);
 
+
       // 1. Sign up with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
@@ -245,7 +270,34 @@ export default function SignupPage() {
              * trigger can tell "declined" from "never asked" — the latter is
              * what an invited team member gets, and it must stay distinct.
              */
-            marketing_consent: marketingConsent ? 'true' : 'false',
+            /**
+             * DERIVED from the promotional answer, not its own checkbox any
+             * more. The old email-only question (migration 028) was replaced
+             * on screen by the broader promotional consent below, and agreeing
+             * to that includes agreeing to email — so the historical column
+             * stays truthful instead of reading FALSE for someone who just
+             * said yes to being emailed.
+             *
+             * Derived inline rather than mirrored into state: a setState
+             * during submit would not land before signUp() read it.
+             */
+            marketing_consent: promotionalConsent ? 'true' : 'false',
+            /**
+             * Read by handle_new_user (migration 037) into
+             * profiles.terms_accepted_at and profiles.promotional_consent.
+             *
+             * Strings, not booleans, for the same reason as the consent above:
+             * raw_user_meta_data is JSON read with ->> in the trigger, which
+             * yields text.
+             *
+             * ALWAYS SENT, both of them. The trigger distinguishes "declined"
+             * from "never asked", and an invited team member who never saw
+             * these checkboxes must stay in the second category — recording a
+             * refusal they never gave would be inventing an answer, and
+             * recording an acceptance they never gave would be worse.
+             */
+            terms_accepted: termsAccepted ? 'true' : 'false',
+            promotional_consent: promotionalConsent ? 'true' : 'false',
           },
         },
       });
@@ -625,26 +677,67 @@ export default function SignupPage() {
           </div>
 
           {/*
-            Marketing consent. NOT required and NOT pre-ticked: a pre-ticked
-            box is not consent, and blocking signup on it would make it a
-            condition of service rather than a choice.
+            TWO CHECKBOXES, AND THE DIFFERENCE BETWEEN THEM MATTERS.
+
+            The first is REQUIRED: nobody can hold an account without agreeing
+            to the terms, so it gates the submit.
+
+            The second is OPTIONAL and must stay that way. Consent to be
+            marketed at cannot be a condition of service, and a pre-ticked box
+            is not consent — so it starts unticked and declining it is recorded
+            as an explicit FALSE rather than as silence.
           */}
           <label
-            htmlFor="marketingConsent"
+            htmlFor="termsAccepted"
             className="flex cursor-pointer items-start gap-2.5 text-xs text-[hsl(var(--foreground-muted))]"
           >
             <input
-              id="marketingConsent"
-              name="marketingConsent"
+              id="termsAccepted"
+              name="termsAccepted"
               type="checkbox"
-              checked={marketingConsent}
-              onChange={(e) => setMarketingConsent(e.target.checked)}
+              required
+              checked={termsAccepted}
+              onChange={(e) => setTermsAccepted(e.target.checked)}
               className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-[hsl(var(--primary))]"
             />
             <span>
-              Keep me updated with product news, tips and offers by email. You
-              can unsubscribe at any time. This is optional — leaving it
-              unticked will not affect your account.
+              By checking this box, I agree to the{' '}
+              <LegalLink href={legal.privacyPolicyUrl}>Privacy Policy</LegalLink>{' '}
+              and <LegalLink href={legal.termsUrl}>Terms &amp; Conditions</LegalLink>.
+            </span>
+          </label>
+
+          <label
+            htmlFor="promotionalConsent"
+            className="flex cursor-pointer items-start gap-2.5 text-xs text-[hsl(var(--foreground-muted))]"
+          >
+            <input
+              id="promotionalConsent"
+              name="promotionalConsent"
+              type="checkbox"
+              checked={promotionalConsent}
+              onChange={(e) => setPromotionalConsent(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-[hsl(var(--primary))]"
+            />
+            {/*
+              The client's exact wording, reproduced verbatim. This is the text
+              the consent is given against, so it is not ours to tidy up — the
+              specific mention of an automatic telephone dialing system and the
+              HELP/STOP instructions are what make it a valid TCPA disclosure.
+            */}
+            <span>
+              By checking this box, I agree to receive promotional messages
+              from Advance Your Reach LLC via sms, email, phone and/or text
+              using an automatic telephone dialing system or prerecorded voice
+              message. Message frequency varies. Message and data rates may
+              apply. Text HELP for more info or email is at{' '}
+              <a
+                href="mailto:info@advanceyourreach.com"
+                className="text-[hsl(var(--primary))] hover:underline"
+              >
+                info@advanceyourreach.com
+              </a>
+              . Text STOP to unsubscribe from messages.
             </span>
           </label>
 

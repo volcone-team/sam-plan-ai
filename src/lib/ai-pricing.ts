@@ -14,6 +14,8 @@
  * Keep RATES in sync with https://www.anthropic.com/pricing when models change.
  */
 
+import { formatMoneyPrecise } from "@/lib/format-money";
+
 /** USD per million tokens. */
 export interface ModelRate {
   inputPerMillion: number;
@@ -95,7 +97,7 @@ function sanitizeTokens(value: number | null | undefined): number {
 export function formatUsd(amount: number): string {
   if (!Number.isFinite(amount)) return "$0.00";
   if (amount > 0 && amount < 0.01) return `$${amount.toFixed(4)}`;
-  return `$${amount.toFixed(2)}`;
+  return formatMoneyPrecise(amount);
 }
 
 /**

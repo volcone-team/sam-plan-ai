@@ -108,6 +108,10 @@ export function CancelSubscriptionModal(props: CancelSubscriptionModalProps) {
   return <CancelDialog key="cancel-flow" {...props} />;
 }
 
+/** Shown when claiming a discount fails at the payment provider. */
+const OFFER_FAILED_MESSAGE =
+  "We couldn't apply the discount. Your subscription hasn't changed. Please try again or contact support.";
+
 function money(minor: number | null, currency = 'usd'): string | null {
   if (typeof minor !== 'number' || !Number.isFinite(minor)) return null;
   const symbol = currency.toUpperCase() === 'USD' ? '$' : '';
@@ -595,7 +599,13 @@ function CancelDialog({
             ? explainDiscountBlocker(body.blocker)
             : body?.error === 'redemptions_unavailable'
               ? 'We could not confirm the offer just now. Please try again in a moment.'
-              : describeFailure(body)
+              : body?.error === 'not_permitted' ||
+                  body?.error === 'billing_disabled' ||
+                  body?.error === 'stripe_not_configured'
+                ? describeFailure(body)
+                // stripe_failed and anything unexpected. Never the raw
+                // message: that is Stripe's wording, meant for the logs.
+                : OFFER_FAILED_MESSAGE
         );
         return;
       }

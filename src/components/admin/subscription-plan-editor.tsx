@@ -5,6 +5,8 @@ import { Loader2, Plus, ChevronDown, ChevronRight, Check, Trash2, DollarSign } f
 import { subscriptionPlanService } from '@/services/subscription-plan.service';
 import { LIMIT_KEYS, FEATURE_KEYS } from '@/types/subscription-plan.types';
 import type { SubscriptionPlanFull } from '@/types/subscription-plan.types';
+import { NumberInputRaw } from '@/components/ui/number-input';
+import { pickMoneyFormatter } from '@/lib/results-tab-totals';
 
 /**
  * Admin Subscription Plans Editor.
@@ -140,8 +142,8 @@ export function SubscriptionPlanEditor() {
           <h3 className="text-sm font-medium">New Subscription Plan</h3>
           <div className="grid grid-cols-3 gap-3">
             <input type="text" required value={newPlan.name} onChange={e => setNewPlan(p => ({ ...p, name: e.target.value }))} placeholder="Plan name" className="rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
-            <input type="number" min="0" value={newPlan.monthlyPrice} onChange={e => setNewPlan(p => ({ ...p, monthlyPrice: e.target.value }))} placeholder="Monthly $" className="rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
-            <input type="number" min="0" value={newPlan.annualPrice} onChange={e => setNewPlan(p => ({ ...p, annualPrice: e.target.value }))} placeholder="Annual $" className="rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+            <NumberInputRaw value={newPlan.monthlyPrice} onValueChange={monthlyPrice => setNewPlan(p => ({ ...p, monthlyPrice }))} placeholder="Monthly $" aria-label="Monthly price ($)" className="rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+            <NumberInputRaw value={newPlan.annualPrice} onValueChange={annualPrice => setNewPlan(p => ({ ...p, annualPrice }))} placeholder="Annual $" aria-label="Annual price ($)" className="rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
           </div>
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setShowAddForm(false)} className="px-3 py-1.5 text-xs border border-border rounded-[var(--radius-md)]">Cancel</button>
@@ -181,8 +183,8 @@ export function SubscriptionPlanEditor() {
                 </div>
               </div>
               <div className="flex items-center gap-3 text-sm">
-                <span className="text-[hsl(var(--foreground-muted))]">${plan.monthlyPrice}/mo</span>
-                <span className="text-[hsl(var(--foreground-muted))]">${plan.annualPrice}/yr</span>
+                <span className="text-[hsl(var(--foreground-muted))]">{pickMoneyFormatter([plan.monthlyPrice])(plan.monthlyPrice)}/mo</span>
+                <span className="text-[hsl(var(--foreground-muted))]">{pickMoneyFormatter([plan.annualPrice])(plan.annualPrice)}/yr</span>
               </div>
             </button>
 
@@ -196,20 +198,20 @@ export function SubscriptionPlanEditor() {
                   </h4>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-[11px] text-[hsl(var(--foreground-muted))]">Monthly price ($)</label>
-                      <input
-                        type="number" min="0" step="1"
+                      <label htmlFor={`plan-${plan.id}-monthly`} className="text-[11px] text-[hsl(var(--foreground-muted))]">Monthly price ($)</label>
+                      <BlurCommitNumberInput
+                        id={`plan-${plan.id}-monthly`}
                         defaultValue={plan.monthlyPrice}
-                        onBlur={e => handleUpdatePrice(plan.id, 'monthlyPrice', e.target.value)}
+                        onCommit={value => handleUpdatePrice(plan.id, 'monthlyPrice', value)}
                         className="w-full mt-1 rounded-[var(--radius-md)] border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-[hsl(var(--primary))]"
                       />
                     </div>
                     <div>
-                      <label className="text-[11px] text-[hsl(var(--foreground-muted))]">Annual price ($)</label>
-                      <input
-                        type="number" min="0" step="1"
+                      <label htmlFor={`plan-${plan.id}-annual`} className="text-[11px] text-[hsl(var(--foreground-muted))]">Annual price ($)</label>
+                      <BlurCommitNumberInput
+                        id={`plan-${plan.id}-annual`}
                         defaultValue={plan.annualPrice}
-                        onBlur={e => handleUpdatePrice(plan.id, 'annualPrice', e.target.value)}
+                        onCommit={value => handleUpdatePrice(plan.id, 'annualPrice', value)}
                         className="w-full mt-1 rounded-[var(--radius-md)] border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-[hsl(var(--primary))]"
                       />
                     </div>
@@ -227,11 +229,11 @@ export function SubscriptionPlanEditor() {
                       const limit = limits.find(l => l.limitKey === lk.key);
                       return (
                         <div key={lk.key}>
-                          <label className="text-[11px] text-[hsl(var(--foreground-muted))]">{lk.label}</label>
-                          <input
-                            type="number"
+                          <label htmlFor={`plan-${plan.id}-limit-${lk.key}`} className="text-[11px] text-[hsl(var(--foreground-muted))]">{lk.label}</label>
+                          <BlurCommitNumberInput
+                            id={`plan-${plan.id}-limit-${lk.key}`}
                             defaultValue={limit?.limitValue ?? 0}
-                            onBlur={e => handleUpdateLimit(plan.id, lk.key, e.target.value)}
+                            onCommit={value => handleUpdateLimit(plan.id, lk.key, value)}
                             className="w-full mt-1 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-[hsl(var(--primary))]"
                           />
                         </div>
@@ -291,5 +293,31 @@ export function SubscriptionPlanEditor() {
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Comma-formatted replacement for the old uncontrolled `<input type="number"
+ * defaultValue onBlur>` fields: holds its own raw string and hands it to
+ * `onCommit` on blur, exactly as `e.target.value` was handed over before.
+ */
+function BlurCommitNumberInput({
+  defaultValue,
+  onCommit,
+  ...props
+}: {
+  id: string;
+  defaultValue: number;
+  onCommit: (value: string) => void;
+  className?: string;
+}) {
+  const [value, setValue] = useState(() => String(defaultValue));
+  return (
+    <NumberInputRaw
+      {...props}
+      value={value}
+      onValueChange={setValue}
+      onBlur={() => onCommit(value)}
+    />
   );
 }

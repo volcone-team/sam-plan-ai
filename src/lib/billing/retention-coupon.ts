@@ -25,16 +25,30 @@ import type { DiscountOfferSpec } from "@/lib/billing/cancellation";
  * new id and leave the old coupon alone for the people already on it.
  */
 
-/** Stripe's "resource does not exist" shape, which is not an error worth rethrowing. */
-function isMissingResource(err: unknown): boolean {
-  const code = (err as { code?: string } | null)?.code;
-  const type = (err as { type?: string } | null)?.type;
-  const message = err instanceof Error ? err.message : String(err);
-  return (
-    code === "resource_missing" ||
-    type === "StripeInvalidRequestError" ||
-    /No such coupon/i.test(message)
-  );
+/** Stripe caps a coupon's `name` at 40 characters and rejects anything longer. */
+export const STRIPE_COUPON_NAME_MAX = 40;
+
+/**
+ * The dashboard name for a retention coupon.
+ *
+ * Kept short because Stripe rejects names over 40 characters, and a rejected
+ * create means the customer's claim fails with a 502. The old prefix
+ * ("SAM Plan AI retention — ") pushed "50% off for 2 months" to 44. The clamp
+ * is a safety net for future titles; the name is cosmetic, so truncating it is
+ * always better than failing the claim.
+ */
+export function retentionCouponName(offer: Pick<DiscountOfferSpec, "title">): string {
+  return `SAM retention — ${offer.title}`.slice(0, STRIPE_COUPON_NAME_MAX).trimEnd();
+}
+
+/**
+ * Stripe's "resource does not exist" shape, the only error that means "create
+ * it". Any other failure (bad key, rate limit, malformed request) is rethrown
+ * rather than treated as missing, so it is not masked by a doomed create.
+ */
+export function isMissingResource(err: unknown): boolean {
+  const e = err as { code?: string; statusCode?: number } | null;
+  return e?.code === "resource_missing" || e?.statusCode === 404;
 }
 
 export async function ensureRetentionCoupon(
@@ -55,6 +69,8 @@ export async function ensureRetentionCoupon(
         `Give the offer a new couponId in DISCOUNT_OFFERS.`
       );
     }
+    // Returned as-is: the name (and every other field) is not compared, so
+    // coupons created under the old, longer name keep working untouched.
     return existing;
   } catch (err) {
     if (!isMissingResource(err)) throw err;
@@ -73,7 +89,7 @@ export async function ensureRetentionCoupon(
    */
   const created = await stripe.coupons.create({
     id: offer.couponId,
-    name: `SAM Plan AI retention — ${offer.title}`,
+    name: retentionCouponName(offer),
     percent_off: offer.percentOff,
     duration: offer.duration,
     ...(offer.duration === "repeating" && offer.durationInMonths

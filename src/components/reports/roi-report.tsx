@@ -9,118 +9,64 @@ import { exportToCSV } from '@/lib/csv-export';
 import { initiativeService } from '@/services/initiative.service';
 import { resultService } from '@/services/result.service';
 import { initiativeTypeService } from '@/services/initiative-type.service';
-import type { Initiative, InitiativeType } from '@/types';
-
-
-interface InitiativeROI {
-  id: string;
-  name: string;
-  typeName: string;
-  revenue: number;
-  spend: number;
-  net: number;
-  roi: number | null;
-  status: string;
-}
-
-interface TypeROI {
-  typeId: string;
-  typeName: string;
-  totalRevenue: number;
-  totalSpend: number;
-  roi: number | null;
-}
+import { expenseService } from '@/services/expense.service';
+import { formatMoney, formatMoneyPrecise } from '@/lib/format-money';
+import {
+  buildRoiReport,
+  sumExpensesByInitiative,
+  type RoiRow,
+  type RoiTypeRow,
+} from '@/lib/initiative-spend';
 
 export function ROIReport() {
   const companyId = useCompanyId() || "";
   const router = useRouter();
-  const [initiativeROIs, setInitiativeROIs] = useState<InitiativeROI[]>([]);
-  const [typeROIs, setTypeROIs] = useState<TypeROI[]>([]);
+  const [initiativeROIs, setInitiativeROIs] = useState<RoiRow[]>([]);
+  const [typeROIs, setTypeROIs] = useState<RoiTypeRow[]>([]);
   const [totalRevenue, setTotalRevenue] = useState(0);
   const [totalSpend, setTotalSpend] = useState(0);
+  const [unattributedSpend, setUnattributedSpend] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!companyId) return;
     async function loadData() {
       setLoading(true);
+      setLoadError(null);
       try {
-        const [initiatives, types] = await Promise.all([
+        // Expenses: same call and RLS scope as Reports > Expenses, loaded once.
+        const [initiatives, types, expenses] = await Promise.all([
           initiativeService.getInitiativesByCompany(companyId),
           initiativeTypeService.getAllInitiativeTypes(),
+          expenseService.getAllExpenses(),
         ]);
 
-        const typeMap = new Map<string, InitiativeType>(types.map(t => [t.id, t]));
-
-        // Get revenue for each initiative
-        const revenuePromises = initiatives.map(i =>
-          resultService.getTotalRevenueByInitiative(i.id)
+        const revenues = await Promise.all(
+          initiatives.map(i => resultService.getTotalRevenueByInitiative(i.id))
         );
-        const revenues = await Promise.all(revenuePromises);
+        const revenueById = new Map<string, number>(
+          initiatives.map((i, idx) => [i.id, revenues[idx]])
+        );
 
-        // Build per-initiative ROI data
-        const roiData: InitiativeROI[] = initiatives.map((initiative, idx) => {
-          const revenue = revenues[idx];
-          const spend = initiative.actualSpend || 0;
-          const net = revenue - spend;
-          const roi = spend > 0 ? ((revenue - spend) / spend) * 100 : null;
-          const type = typeMap.get(initiative.initiativeTypeId);
-
-          return {
-            id: initiative.id,
-            name: initiative.name,
-            typeName: type?.name || 'Unknown',
-            revenue,
-            spend,
-            net,
-            roi,
-            status: initiative.status,
-          };
+        // Actual spend = Σ recorded expenses (D2). Never initiatives.actual_spend.
+        const report = buildRoiReport({
+          initiatives,
+          revenueById,
+          spendById: sumExpensesByInitiative(expenses),
+          typeNameById: new Map<string, string>(types.map(t => [t.id, t.name])),
+          companyExpenseTotal: expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0),
         });
 
-        // Sort by ROI descending (nulls at end)
-        roiData.sort((a, b) => {
-          if (a.roi === null && b.roi === null) return 0;
-          if (a.roi === null) return 1;
-          if (b.roi === null) return -1;
-          return b.roi - a.roi;
-        });
-
-        // Calculate totals
-        const totRev = roiData.reduce((sum, r) => sum + r.revenue, 0);
-        const totSpend = roiData.reduce((sum, r) => sum + r.spend, 0);
-
-        // Group by type
-        const typeGroups = new Map<string, { typeName: string; revenue: number; spend: number }>();
-        for (const item of roiData) {
-          const existing = typeGroups.get(item.typeName) || { typeName: item.typeName, revenue: 0, spend: 0 };
-          existing.revenue += item.revenue;
-          existing.spend += item.spend;
-          typeGroups.set(item.typeName, existing);
-        }
-
-        const typeRoiData: TypeROI[] = Array.from(typeGroups.entries()).map(([key, val]) => ({
-          typeId: key,
-          typeName: val.typeName,
-          totalRevenue: val.revenue,
-          totalSpend: val.spend,
-          roi: val.spend > 0 ? ((val.revenue - val.spend) / val.spend) * 100 : null,
-        }));
-
-        // Sort type ROIs by ROI descending
-        typeRoiData.sort((a, b) => {
-          if (a.roi === null && b.roi === null) return 0;
-          if (a.roi === null) return 1;
-          if (b.roi === null) return -1;
-          return b.roi - a.roi;
-        });
-
-        setInitiativeROIs(roiData);
-        setTypeROIs(typeRoiData);
-        setTotalRevenue(totRev);
-        setTotalSpend(totSpend);
+        setInitiativeROIs(report.rows);
+        setTypeROIs(report.typeRows);
+        setTotalRevenue(report.totalRevenue);
+        setTotalSpend(report.totalSpend);
+        setUnattributedSpend(report.unattributedSpend);
       } catch (err) {
         console.error('Failed to load ROI report data:', err);
+        // Don't fall back to spend 0: say the figures could not be loaded.
+        setLoadError('Could not load ROI data (initiatives, results or expenses). Please try again.');
       } finally {
         setLoading(false);
       }
@@ -145,6 +91,17 @@ export function ROIReport() {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-sm text-[hsl(var(--foreground-muted))]">Loading ROI data...</div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div
+        role="alert"
+        className="rounded-[var(--radius-lg)] border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+      >
+        {loadError}
       </div>
     );
   }
@@ -181,7 +138,7 @@ export function ROIReport() {
             <p className="text-sm font-medium text-[hsl(var(--foreground-muted))]">Total Revenue</p>
             <DollarSign className="h-4 w-4 text-[hsl(var(--foreground-muted))]" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{formatCurrency(totalRevenue)}</p>
+          <p className="mt-2 text-2xl font-bold">{formatMoney(totalRevenue)}</p>
           <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">All initiatives</p>
         </div>
 
@@ -190,8 +147,15 @@ export function ROIReport() {
             <p className="text-sm font-medium text-[hsl(var(--foreground-muted))]">Total Spend</p>
             <DollarSign className="h-4 w-4 text-[hsl(var(--foreground-muted))]" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{formatCurrency(totalSpend)}</p>
-          <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">Actual spend</p>
+          <p className="mt-2 text-2xl font-bold">{formatMoney(totalSpend)}</p>
+          <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">Recorded expenses</p>
+          {unattributedSpend > 0 && (
+            <p className="mt-1 text-xs text-amber-700">
+              {Number.isInteger(unattributedSpend)
+                ? formatMoney(unattributedSpend)
+                : formatMoneyPrecise(unattributedSpend)} of expenses aren&apos;t linked to an initiative in this list.
+            </p>
+          )}
         </div>
 
         <div className="rounded-[var(--radius-lg)] border border-border bg-card p-4">
@@ -204,7 +168,7 @@ export function ROIReport() {
             )}
           </div>
           <p className={`mt-2 text-2xl font-bold ${netProfit >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-            {formatCurrency(netProfit)}
+            {formatMoney(netProfit)}
           </p>
           <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">Revenue − Spend</p>
         </div>
@@ -256,12 +220,12 @@ export function ROIReport() {
                     </button>
                   </td>
                   <td className="px-4 py-3 text-[hsl(var(--foreground-muted))]">{row.typeName}</td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(row.revenue)}</td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(row.spend)}</td>
+                  <td className="px-4 py-3 text-right">{formatMoney(row.revenue)}</td>
+                  <td className="px-4 py-3 text-right">{formatMoney(row.spend)}</td>
                   <td className={`px-4 py-3 text-right font-medium ${
                     row.net >= 0 ? 'text-emerald-600' : 'text-red-500'
                   }`}>
-                    {formatCurrency(row.net)}
+                    {formatMoney(row.net)}
                   </td>
                   <td className={`px-4 py-3 text-right font-medium ${
                     row.roi === null ? 'text-gray-400' : row.roi >= 0 ? 'text-emerald-600' : 'text-red-500'
@@ -348,8 +312,8 @@ export function ROIReport() {
                   className="border-b border-border last:border-b-0 hover:bg-[hsl(var(--muted)/.3)] transition-colors"
                 >
                   <td className="px-4 py-3 font-medium">{row.typeName}</td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(row.totalRevenue)}</td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(row.totalSpend)}</td>
+                  <td className="px-4 py-3 text-right">{formatMoney(row.totalRevenue)}</td>
+                  <td className="px-4 py-3 text-right">{formatMoney(row.totalSpend)}</td>
                   <td className={`px-4 py-3 text-right font-semibold ${
                     row.roi === null ? 'text-gray-400' : row.roi >= 0 ? 'text-emerald-600' : 'text-red-500'
                   }`}>
@@ -361,8 +325,8 @@ export function ROIReport() {
             <tfoot>
               <tr className="border-t-2 border-border bg-[hsl(var(--muted)/.3)]">
                 <td className="px-4 py-3 font-semibold">Total</td>
-                <td className="px-4 py-3 text-right font-semibold">{formatCurrency(totalRevenue)}</td>
-                <td className="px-4 py-3 text-right font-semibold">{formatCurrency(totalSpend)}</td>
+                <td className="px-4 py-3 text-right font-semibold">{formatMoney(totalRevenue)}</td>
+                <td className="px-4 py-3 text-right font-semibold">{formatMoney(totalSpend)}</td>
                 <td className={`px-4 py-3 text-right font-bold ${
                   overallROI === null ? 'text-gray-400' : isPositiveROI ? 'text-emerald-600' : 'text-red-500'
                 }`}>
@@ -378,15 +342,6 @@ export function ROIReport() {
 }
 
 // --- Utility ---
-
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
 
 function formatStatus(status: string): string {
   return status

@@ -59,20 +59,46 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
         setLoading(true);
         setError(null);
 
+        /**
+         * TWO PHASES, SEPARATELY FATAL.
+         *
+         * All five fetches used to share one try/catch, so a failure in any of
+         * them rendered "Initiative not found" — including when the initiative
+         * had loaded perfectly and it was the PRODUCT NAME lookup that failed.
+         * That turned a cosmetic gap into an apparently missing record and sent
+         * us looking for the wrong bug.
+         *
+         * Phase 1 is the initiative itself. Without it there is nothing to
+         * show, so a failure here is fatal and its message is surfaced
+         * verbatim — the service now distinguishes "no such initiative on this
+         * account" from "the lookup failed".
+         */
         const initiativeData = await initiativeService.getInitiative(initiativeId);
         setInitiative(initiativeData);
 
-        const [typeData, productData, allTypes, allProducts] = await Promise.all([
+        /**
+         * Phase 2 is decoration: the type, the product name and the lists the
+         * edit form offers. Every one of these is recoverable — a missing
+         * product name costs a label, not the page — so they are settled
+         * individually and never blank the screen.
+         */
+        const [typeData, productData, allTypes, allProducts] = await Promise.allSettled([
           initiativeTypeService.getInitiativeType(initiativeData.initiativeTypeId),
           productService.getProduct(initiativeData.productId),
           initiativeTypeService.getAllInitiativeTypes(),
           productService.getProductsByCompany(initiativeData.companyId),
         ]);
 
-        setInitiativeType(typeData);
-        setProductName(productData.name);
-        setInitiativeTypes(allTypes);
-        setProducts(allProducts.map(p => ({ id: p.id, name: p.name })));
+        if (typeData.status === "fulfilled") setInitiativeType(typeData.value);
+        else console.error("[initiative-detail] initiative type unavailable:", typeData.reason);
+
+        if (productData.status === "fulfilled") setProductName(productData.value.name);
+        else console.error("[initiative-detail] product unavailable:", productData.reason);
+
+        if (allTypes.status === "fulfilled") setInitiativeTypes(allTypes.value);
+        if (allProducts.status === "fulfilled") {
+          setProducts(allProducts.value.map(p => ({ id: p.id, name: p.name })));
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load initiative';
         setError(message);

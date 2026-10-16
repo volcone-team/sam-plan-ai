@@ -4,7 +4,8 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { loadBillingConfig, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client";
 import { evaluateAccess } from "@/lib/billing/entitlement";
-import { requiresPurchase, lockoutCopy } from "@/lib/billing/lockout";
+import { lockoutCopy } from "@/lib/billing/lockout";
+import { decideChoosePlanPage } from "@/lib/billing/billing-gate";
 import { ChoosePlanClient, type PurchasablePlan } from "./choose-plan-client";
 
 export const metadata = {
@@ -75,7 +76,8 @@ export default async function ChoosePlanPage() {
         .select(
           "plan_id, tier, status, stripe_status, is_comped, comped_until, " +
           "trial_ends_at, current_period_end, past_due_since, " +
-          "cancel_at_period_end, is_paused, pause_resumes_at"
+          "cancel_at_period_end, is_paused, pause_resumes_at, " +
+          "stripe_subscription_id, stripe_mode"
         )
         .eq("company_id", companyId)
         .maybeSingle()
@@ -88,6 +90,7 @@ export default async function ChoosePlanPage() {
     current_period_end: string | null; past_due_since: string | null;
     cancel_at_period_end: boolean; is_paused: boolean | null;
     pause_resumes_at: string | null;
+    stripe_subscription_id: string | null; stripe_mode: string | null;
   } | null;
 
   const access = evaluateAccess(
@@ -113,22 +116,41 @@ export default async function ChoosePlanPage() {
   );
 
   /**
-   * A PAUSED account has its own page. It cannot buy its way out — an admin
-   * suspended it — so showing a purchase button here would take money and
-   * leave them locked out regardless.
+   * Where this visitor belongs (decideChoosePlanPage, tested):
+   *
+   * - PAUSED with a live subscription (or comped): its own page. Paying cannot
+   *   lift an admin's pause, so a purchase button would take money and leave
+   *   them locked out.
+   * - PAUSED with NO live subscription: render the plans. User decision,
+   *   "Buying a plan ends the pause" — the webhook clears the pause when the
+   *   new subscription lands.
+   * - Still entitled: nothing to buy here. Without this the page stays
+   *   reachable after payment, so a stale tab or a bookmark shows "your trial
+   *   has ended" to someone with a live subscription.
    */
-  if (access.reason === "paused") {
+  const outcome = decideChoosePlanPage(
+    access,
+    sub
+      ? {
+          is_paused: sub.is_paused,
+          pause_resumes_at: sub.pause_resumes_at,
+          status: sub.status,
+          stripe_status: sub.stripe_status,
+          is_comped: sub.is_comped,
+          comped_until: sub.comped_until,
+          trial_ends_at: sub.trial_ends_at,
+          current_period_end: sub.current_period_end,
+          past_due_since: sub.past_due_since,
+          cancel_at_period_end: sub.cancel_at_period_end,
+          stripe_subscription_id: sub.stripe_subscription_id,
+          stripe_mode: sub.stripe_mode,
+        }
+      : null
+  );
+  if (outcome === "redirect_paused") {
     redirect("/account-paused");
   }
-
-  /**
-   * Still entitled? Then there is nothing to buy here.
-   *
-   * Without this the page stays reachable after payment, so a stale tab or a
-   * bookmark shows "your trial has ended" to someone with a live subscription.
-   * The same bug the paused page had.
-   */
-  if (access.allowed || !requiresPurchase(access.reason)) {
+  if (outcome === "redirect_app") {
     redirect("/year-at-a-glance");
   }
 

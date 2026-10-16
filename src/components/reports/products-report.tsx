@@ -11,6 +11,7 @@ import { resultService } from '@/services/result.service';
 import { initiativeService } from '@/services/initiative.service';
 import type { Product, Result, Initiative } from '@/types';
 import { usePlanYears } from '@/hooks/use-plan-years';
+import { formatMoney } from '@/lib/format-money';
 
 // Was the literal 2026, which silently stops being true. Now the shared
 // selected plan year, so reports follow the year filter like every other screen.
@@ -210,10 +211,10 @@ export function ProductsReport() {
                   <Package className="h-4 w-4 shrink-0 text-[hsl(var(--foreground-muted))]" />
                 )}
               </div>
-              <p className="mt-2 text-2xl font-bold">{formatCurrency(data.actualRevenue)}</p>
+              <p className="mt-2 text-2xl font-bold">{formatMoney(data.actualRevenue)}</p>
               <div className="mt-1 flex items-center justify-between">
                 <p className="text-xs text-[hsl(var(--foreground-muted))]">
-                  Projected: {formatCurrency(data.projectedRevenue)}
+                  Projected: {formatMoney(data.projectedRevenue)}
                 </p>
                 <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${PRODUCT_COLORS_LIGHT[idx % PRODUCT_COLORS_LIGHT.length]}`}>
                   {data.percentOfTotal.toFixed(1)}%
@@ -240,7 +241,7 @@ export function ProductsReport() {
                     key={data.product.id}
                     className={`${PRODUCT_COLORS[idx % PRODUCT_COLORS.length]} transition-all`}
                     style={{ width: `${widthPercent}%` }}
-                    title={`${data.product.name}: ${formatCurrency(data.actualRevenue)} (${data.percentOfTotal.toFixed(1)}%)`}
+                    title={`${data.product.name}: ${formatMoney(data.actualRevenue)} (${data.percentOfTotal.toFixed(1)}%)`}
                   />
                 );
               })}
@@ -260,7 +261,7 @@ export function ProductsReport() {
                     <span className="font-medium">{data.product.name}</span>
                   </div>
                   <div className="flex items-center gap-3 text-[hsl(var(--foreground-muted))]">
-                    <span>{formatCurrency(data.actualRevenue)}</span>
+                    <span>{formatMoney(data.actualRevenue)}</span>
                     <span className="text-xs">({data.percentOfTotal.toFixed(1)}%)</span>
                   </div>
                 </div>
@@ -310,10 +311,10 @@ export function ProductsReport() {
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-right font-medium">{formatCurrency(data.actualRevenue)}</td>
-                    <td className="px-4 py-3 text-right">{formatCurrency(data.projectedRevenue)}</td>
+                    <td className="px-4 py-3 text-right font-medium">{formatMoney(data.actualRevenue)}</td>
+                    <td className="px-4 py-3 text-right">{formatMoney(data.projectedRevenue)}</td>
                     <td className={`px-4 py-3 text-right font-medium ${isPositive ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {isPositive ? '+' : ''}{formatCurrency(data.variance)}
+                      {isPositive ? '+' : ''}{formatMoney(data.variance)}
                     </td>
                     <td className={`px-4 py-3 text-right font-medium ${isPositive ? 'text-emerald-600' : 'text-red-500'}`}>
                       {isPositive ? '+' : ''}{data.variancePercent.toFixed(1)}%
@@ -331,10 +332,10 @@ export function ProductsReport() {
             <tfoot>
               <tr className="border-t-2 border-border bg-[hsl(var(--muted)/.3)]">
                 <td className="px-4 py-3 font-semibold">Total</td>
-                <td className="px-4 py-3 text-right font-semibold">{formatCurrency(totalActualRevenue)}</td>
-                <td className="px-4 py-3 text-right font-semibold">{formatCurrency(totalProjectedRevenue)}</td>
+                <td className="px-4 py-3 text-right font-semibold">{formatMoney(totalActualRevenue)}</td>
+                <td className="px-4 py-3 text-right font-semibold">{formatMoney(totalProjectedRevenue)}</td>
                 <td className={`px-4 py-3 text-right font-semibold ${totalActualRevenue - totalProjectedRevenue >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                  {totalActualRevenue - totalProjectedRevenue >= 0 ? '+' : ''}{formatCurrency(totalActualRevenue - totalProjectedRevenue)}
+                  {totalActualRevenue - totalProjectedRevenue >= 0 ? '+' : ''}{formatMoney(totalActualRevenue - totalProjectedRevenue)}
                 </td>
                 <td className={`px-4 py-3 text-right font-semibold ${totalActualRevenue - totalProjectedRevenue >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                   {totalProjectedRevenue > 0 ? `${((totalActualRevenue - totalProjectedRevenue) / totalProjectedRevenue * 100).toFixed(1)}%` : '—'}
@@ -361,7 +362,7 @@ export function ProductsReport() {
                     <span className="text-sm font-medium">{data.product.name}</span>
                   </div>
                   <span className="text-xs text-[hsl(var(--foreground-muted))]">
-                    {formatCurrency(data.actualRevenue)} total
+                    {formatMoney(data.actualRevenue)} total
                   </span>
                 </div>
                 {hasData ? (
@@ -375,7 +376,7 @@ export function ProductsReport() {
                             value > 0 ? PRODUCT_COLORS[idx % PRODUCT_COLORS.length] : 'bg-[hsl(var(--muted))]'
                           }`}
                           style={{ height: `${Math.max(height, 4)}%` }}
-                          title={`${MONTH_SHORT[mIdx]}: ${formatCurrency(value)}`}
+                          title={`${MONTH_SHORT[mIdx]}: ${formatMoney(value)}`}
                         />
                       );
                     })}
@@ -407,11 +408,3 @@ const MONTH_SHORT = [
 
 // --- Utility ---
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}

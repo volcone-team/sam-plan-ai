@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { getStripe, loadBillingConfig, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client";
 import { ensurePortalConfiguration } from "@/lib/billing/portal-configuration";
 import { getAppUrl } from "@/lib/app-url";
+import { parsePortalRequest, portalSessionParams } from "@/lib/billing/portal-session";
 
 export const runtime = "nodejs";
 
@@ -26,14 +27,28 @@ export const runtime = "nodejs";
  * Owner-only: the portal changes payment methods and billing details, which is
  * not something any team member should be able to do.
  *
+ * Body (optional):
+ *   none / {}                          → portal homepage (used by /choose-plan)
+ *   { flow: "payment_method_update" }  → deep link to the card-update screen
+ *                                         (Settings → "Update card")
+ * Any other flow is rejected; see src/lib/billing/portal-session.ts.
+ *
  * Responses:
  *   200 { url }
+ *   400 { error: "invalid_body" | "invalid_flow" }
  *   401 { error: "Unauthorized" }
  *   403 { error: "not_permitted" | "billing_disabled" }
  *   404 { error: "no_customer" }
  */
-export async function POST() {
+export async function POST(request: Request) {
   try {
+    // Validated before anything else so a malformed request costs no DB or
+    // Stripe calls. An empty body is valid (no flow).
+    const parsedBody = parsePortalRequest(await request.text());
+    if (!parsedBody.ok) {
+      return NextResponse.json({ error: parsedBody.error }, { status: 400 });
+    }
+
     const cookieStore = await cookies();
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -99,11 +114,18 @@ export async function POST() {
      */
     const configuration = await ensurePortalConfiguration();
 
-    const session = await getStripe().billingPortal.sessions.create({
-      customer: sub.stripe_customer_id,
-      configuration,
-      return_url: `${getAppUrl()}/settings`,
-    });
+    /**
+     * The card-update deep link needs `payment_method_update` enabled in the
+     * configuration, which ensurePortalConfiguration does when it creates it.
+     */
+    const session = await getStripe().billingPortal.sessions.create(
+      portalSessionParams({
+        customer: sub.stripe_customer_id,
+        configuration,
+        appUrl: getAppUrl(),
+        flow: parsedBody.flow,
+      })
+    );
 
     return NextResponse.json({ url: session.url });
   } catch (err: unknown) {
