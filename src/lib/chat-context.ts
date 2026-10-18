@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadLibrary, loadAiContext, renderLibraryForPrompt } from "@/lib/workbook/read";
+import { loadCompanyFit, partitionLibrary } from "@/lib/recommend/company-eligibility";
 import {
   loadAccountSnapshot,
   renderAccountSnapshot,
@@ -60,14 +61,38 @@ export async function buildChatSystemPrompt(
   db: SupabaseClient,
   companyId?: string | null
 ): Promise<string | null> {
-  const [library, context] = await Promise.all([loadLibrary(db), loadAiContext(db)]);
+  const [library, context, fit] = await Promise.all([
+    loadLibrary(db),
+    loadAiContext(db),
+    loadCompanyFit(db, companyId),
+  ]);
 
   if (library.length === 0) {
     console.error("[chat-context] Workbook library is empty — refusing to chat ungrounded");
     return null;
   }
 
-  const rendered = renderLibraryForPrompt(library, context);
+  /**
+   * FIT, then SCORE — for what chat RECOMMENDS only.
+   *
+   * The whole active library stays in the prompt, because chat must still be
+   * able to explain any initiative, including ones this customer already runs
+   * or asks about by name. The recommendable ones are listed first, best
+   * first; the rest are listed separately with the rule's reason and marked
+   * "do not recommend".
+   */
+  const { eligible, ineligible } = partitionLibrary(library, fit.ctx, fit.revenueWeight);
+  const rendered = renderLibraryForPrompt(eligible, context);
+  const notRecommended =
+    ineligible.length > 0
+      ? `
+
+NOT A FIT FOR THIS BUSINESS (${ineligible.length}) — never recommend or suggest these. You may still explain one if the user asks about it by name or already has it in their plan, and say why it is not a fit:
+${renderLibraryForPrompt(ineligible.map((i) => i.entry), context)
+  .split("\n")
+  .map((line, n) => `${line} | NOT A FIT: ${ineligible[n].reason}`)
+  .join("\n")}`
+      : "";
 
   let accountSection = "";
   if (companyId) {
@@ -90,8 +115,8 @@ ${renderAccountSnapshot(snapshot)}`;
 
   return `${CHAT_SYSTEM_PREAMBLE}
 
-INITIATIVE LIBRARY (${library.length} initiatives, authored by the SAM team):
-${rendered}${accountSection}`;
+INITIATIVE LIBRARY (${eligible.length} recommendable initiatives, best first, authored by the SAM team):
+${rendered}${notRecommended}${accountSection}`;
 }
 
 /**

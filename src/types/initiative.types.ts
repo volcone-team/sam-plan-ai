@@ -3,6 +3,8 @@
  * The unit of planning and execution. Everything revolves around initiatives.
  */
 
+import type { InitiativeMetricSet } from '@/lib/metrics/metric-set';
+
 export type InitiativeKind = 'one-time' | 'recurring' | 'evergreen';
 export type InitiativeStatus =
   | 'planned'
@@ -24,6 +26,10 @@ export interface Initiative {
   annualPlanId: string;
   productId: string;
   initiativeTypeId: string;
+  /** Workbook library key it was created from (migration 040); null for custom / older rows. */
+  libraryKey?: string | null;
+  /** What it tracks, frozen at creation (migration 040); null when none. */
+  metricSet?: InitiativeMetricSet | null;
   // Core attributes
   name: string;
   description?: string;

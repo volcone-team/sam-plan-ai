@@ -19,7 +19,16 @@ import type { RepeatFrequency } from "@/lib/intake-forecast";
 import type { InitiativeKind } from "@/types";
 import { productGoal } from "@/lib/intake-forecast";
 import { MAX_RECOMMENDED_INITIATIVES } from "@/lib/recommend/sizing";
-import { loadTaskTemplates } from "@/lib/workbook/read";
+import { loadLibrary, loadTaskTemplates, type LibraryEntry } from "@/lib/workbook/read";
+import {
+  insertWithLibraryKey,
+  resolveInitiativeTypeId,
+  supabaseTypeStore,
+  type TypeSource,
+} from "@/lib/workbook/initiative-type";
+import { SOMETHING_ELSE_KEY } from "@/lib/intake/schema";
+import { defaultLibraryMetricSet } from "@/lib/metrics/library-metric-set";
+import type { InitiativeMetricSet } from "@/lib/metrics/metric-set";
 import {
   materialiseTasks,
   templateRunwayDays,
@@ -97,9 +106,46 @@ export async function POST(request: NextRequest) {
         : []
     );
 
-    const acceptedKeys = Array.isArray(body.acceptedKeys)
-      ? body.acceptedKeys.filter((k): k is string => typeof k === "string")
+    const requestedKeys = Array.isArray(body.acceptedKeys)
+      ? [...new Set(body.acceptedKeys.filter((k): k is string => typeof k === "string" && k !== ""))]
       : [];
+
+    /**
+     * The library, twice: the WHOLE of it to name and type whatever the user
+     * entered (screen 5 can carry an admin-disabled initiative), and the ACTIVE
+     * set to vet what they accepted on the recommendations screen.
+     *
+     * Accepted keys are now chosen from the full active list, not only the
+     * server's shortlist, so the client is posting library keys of its own
+     * choosing. Anything not active is dropped rather than built. When the
+     * active library cannot be read at all, nothing is dropped — refusing the
+     * whole plan over a transient read failure is the worse outcome.
+     */
+    const [fullLibrary, activeLibrary] = await Promise.all([
+      loadLibrary(db, { includeInactive: true }),
+      loadLibrary(db),
+    ]);
+    const libraryByKey = new Map<string, LibraryEntry>(
+      fullLibrary.map((entry) => [entry.initiativeKey, entry])
+    );
+    const activeKeys = new Set(activeLibrary.map((entry) => entry.initiativeKey));
+
+    const acceptedKeys =
+      activeKeys.size > 0 ? requestedKeys.filter((key) => activeKeys.has(key)) : requestedKeys;
+    if (acceptedKeys.length !== requestedKeys.length) {
+      console.warn(
+        "[intake/build] ignored accepted keys that are not active library initiatives:",
+        requestedKeys.filter((key) => !activeKeys.has(key)).join(", ")
+      );
+    }
+
+    const typeSourceFor = (key: string): TypeSource | null => {
+      const entry = libraryByKey.get(key);
+      return entry
+        ? { name: entry.name, oneLiner: entry.oneLiner, difficulty: entry.difficulty }
+        : null;
+    };
+    const typeCache = new Map<string, string>();
 
     const { data: input } = await db
       .from("planning_inputs")
@@ -474,7 +520,9 @@ export async function POST(request: NextRequest) {
     for (const [offset, key] of acceptedKeys.entries()) {
       pending.push({
         libraryKey: key,
-        name: key,
+        // The library's name, not the raw key: this used to write "webinar"
+        // as the initiative's name on the customer's plan.
+        name: libraryByKey.get(key)?.name ?? key,
         desiredEvent: addMonths(planStart, offset),
         productIds: largestProductId ? [largestProductId] : [],
         displayOrder: plannedInitiatives.length + offset,
@@ -552,6 +600,13 @@ export async function POST(request: NextRequest) {
         revenue: item.revenue,
         kind: item.kind,
         repeatFrequency: item.repeatFrequency,
+        typeSource: typeSourceFor(item.libraryKey),
+        typeCache,
+        // Every format and every optional metric: the intake asks no metric
+        // questions. Null when the library row has no metrics.
+        metricSet: item.libraryKey === SOMETHING_ELSE_KEY
+          ? null
+          : defaultLibraryMetricSet(item.libraryKey, libraryByKey.get(item.libraryKey)),
         // Same date handling as generate-plan: counted back from the event,
         // floored at today.
         tasks:
@@ -793,6 +848,12 @@ async function insertInitiative(
     kind: InitiativeKind;
     /** weekly / monthly / quarterly, or null when it does not repeat. */
     repeatFrequency: RepeatFrequency | null;
+    /** Library fields for a type that has to be created; null if not in the library. */
+    typeSource: TypeSource | null;
+    /** Shared across the whole build so a repeated key resolves once. */
+    typeCache: Map<string, string>;
+    /** Stored on every product row (migration 040); null for none. */
+    metricSet: InitiativeMetricSet | null;
   }
 ): Promise<boolean> {
   // Filed under the EVENT's year, not the activation year: an initiative
@@ -803,7 +864,12 @@ async function insertInitiative(
     return false;
   }
 
-  const typeId = await resolveInitiativeType(db, args.libraryKey);
+  const typeId = await resolveInitiativeTypeId(
+    supabaseTypeStore(db, "[intake/build]"),
+    args.libraryKey,
+    args.typeSource,
+    args.typeCache
+  );
   if (!typeId) {
     console.error("[intake/build] no initiative type for", args.libraryKey);
     return false;
@@ -832,9 +898,9 @@ async function insertInitiative(
   }
 
   for (const [index, productId] of args.productIds.entries()) {
-    const { data: created, error } = await db
-      .from("initiatives")
-      .insert({
+    // `library_key` (migration 040) rides along; omitted if the column is absent.
+    const { data: created, error } = await insertWithLibraryKey(
+      {
         company_id: args.companyId,
         annual_plan_id: annualPlanId,
         product_id: productId,
@@ -868,9 +934,11 @@ async function insertInitiative(
         planned_budget: 0,
         actual_spend: 0,
         display_order: args.displayOrder * 10 + index,
-      })
-      .select("id")
-      .single();
+      },
+      args.libraryKey === SOMETHING_ELSE_KEY ? null : args.libraryKey,
+      (row) => db.from("initiatives").insert(row).select("id").single(),
+      args.metricSet
+    );
 
     if (error || !created) {
       console.error("[intake/build] initiative insert failed:", error?.message);
@@ -947,80 +1015,6 @@ async function resolveAnnualPlan(
 
   if (error) {
     console.error("[intake/build] annual plan insert failed:", error.message);
-    return null;
-  }
-
-  return (created?.id as string) ?? null;
-}
-
-/**
- * The `initiative_types` row for a library key, created from the workbook if
- * missing.
- *
- * Same approach generate-plan takes: the workbook library is the source of
- * truth for what initiatives exist, and `initiative_types` is a projection of
- * it. Creating on demand keeps them aligned without a hand-maintained list that
- * drifts every time the workbook is re-uploaded.
- */
-async function resolveInitiativeType(
-  db: SupabaseClient,
-  libraryKey: string
-): Promise<string | null> {
-  /**
-   * ORDER + LIMIT, NOT maybeSingle().
-   *
-   * `maybeSingle()` returns an error when more than one row matches, and
-   * duplicates exist: the old generate-plan lookup filtered on `is_active`, so
-   * a deactivated type was never found and an active clone was inserted
-   * instead — eleven of them accumulated under the `custom` channel. Resolving
-   * a type here would have failed outright for any channel that had collected
-   * one.
-   *
-   * Oldest first, so the row other plans already point at is the one reused.
-   */
-  const { data: existingRows } = await db
-    .from("initiative_types")
-    .select("id")
-    .eq("channel", libraryKey)
-    .order("created_at", { ascending: true })
-    .limit(1);
-
-  const existing = existingRows?.[0];
-  if (existing?.id) return existing.id as string;
-
-  const { data: entry } = await db
-    .from("wb_initiative_library")
-    .select("name, one_liner, difficulty")
-    .eq("initiative_key", libraryKey)
-    .maybeSingle();
-
-  const difficulty = Number(entry?.difficulty) || 3;
-
-  const { data: created, error } = await db
-    .from("initiative_types")
-    .insert({
-      name: (entry?.name as string) ?? libraryKey,
-      channel: libraryKey,
-      description: (entry?.one_liner as string) ?? "",
-      owner: "system",
-      benchmarks: {},
-      project_template: { tasks: [], totalEstimatedHours: 0 },
-      difficulty: {
-        effortToImplement: difficulty,
-        skillExpertiseRequired: difficulty,
-        timeToResults: difficulty,
-        costToRun: difficulty,
-      },
-      ai_context: {},
-      tier: 1,
-      display_order: 99,
-      is_active: true,
-    })
-    .select("id")
-    .single();
-
-  if (error) {
-    console.error("[intake/build] initiative type insert failed:", error.message);
     return null;
   }
 

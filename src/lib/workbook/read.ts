@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TaskTemplate } from "@/lib/workbook/materialise";
+import type { LibraryInitiative } from "@/lib/intake/library";
+import { readStoredMetrics, type StoredMetrics } from "@/lib/metrics/parse-metrics";
 
 /**
  * Reads of the workbook tables (migration 018) for plan generation.
@@ -20,6 +22,26 @@ export interface LibraryEntry {
   ownOrOps: string | null;
   priceTier: string | null;
   needsSalesTeam: string | null;
+  /*
+   * Migration 040. On a database without it these read as null / [] — see
+   * loadLibrary — so every caller can rely on the shape either way.
+   */
+  /** The initiative this is a variant of ("webinar" for "webinar-own"); null on a base listing. */
+  baseKey: string | null;
+  /** S/C/O/R/E, each 1-5 where 5 is best. */
+  speedScore: number | null;
+  costScore: number | null;
+  oddsScore: number | null;
+  revenueScore: number | null;
+  easeScore: number | null;
+  scoreTotal: number | null;
+  idealIndustries: string[];
+  ctaOptions: string[];
+  training: string[];
+  /** The workbook's Metrics cell verbatim. */
+  metricsRaw: string | null;
+  /** Parsed Metrics cell (migration 040 `metrics`). Null when never parsed (stored `[]`) or malformed. */
+  metrics: StoredMetrics | null;
 }
 
 export interface BenchmarkEntry {
@@ -98,16 +120,20 @@ export async function loadLibrary(
   db: SupabaseClient,
   opts?: { includeInactive?: boolean }
 ): Promise<LibraryEntry[]> {
-  const { data, error } = await db
-    .from("wb_initiative_library")
-    .select("initiative_key, workbook_id, name, category, difficulty, speed_to_results, one_liner, own_or_ops, price_tier, needs_sales_team")
-    .order("display_order", { ascending: true });
+  const select = (columns: string) =>
+    db.from("wb_initiative_library").select(columns).order("display_order", { ascending: true });
+
+  let { data, error } = await select(`${LIBRARY_COLUMNS}, ${LIBRARY_COLUMNS_040}`);
+  if (error && isMissingColumnError(error)) {
+    // Migration 040 not applied yet: read the old columns, new fields default.
+    ({ data, error } = await select(LIBRARY_COLUMNS));
+  }
   if (error) {
     console.error("[workbook/read] loadLibrary failed:", error.message);
     return [];
   }
 
-  let rows = data || [];
+  let rows = (data ?? []) as unknown as Record<string, unknown>[];
 
   if (!opts?.includeInactive) {
     const inactive = await loadInactiveInitiativeKeys(db);
@@ -132,27 +158,174 @@ export async function loadLibrary(
     }
   }
 
-  return rows.map((r) => ({
-    initiativeKey: r.initiative_key as string,
-    workbookId: (r.workbook_id as string) ?? null,
-    name: r.name as string,
-    category: (r.category as string) ?? null,
-    difficulty: (r.difficulty as number) ?? null,
-    speedToResults: (r.speed_to_results as string) ?? null,
-    oneLiner: (r.one_liner as string) ?? null,
-    ownOrOps: (r.own_or_ops as string) ?? null,
-    priceTier: (r.price_tier as string) ?? null,
-    needsSalesTeam: (r.needs_sales_team as string) ?? null,
-  }));
+  return rows.map(toLibraryEntry);
 }
 
-/** Task templates for the given initiatives, grouped by key and ordered. */
+const LIBRARY_COLUMNS =
+  "initiative_key, workbook_id, name, category, difficulty, speed_to_results, one_liner, own_or_ops, price_tier, needs_sales_team";
+const LIBRARY_COLUMNS_040 =
+  "base_key, speed_score, cost_score, odds_score, revenue_score, ease_score, score_total, " +
+  "ideal_industries, cta_options, training, metrics_raw, metrics";
+
+/** "This column does not exist" — PostgREST PGRST204 or Postgres 42703. */
+export function isMissingColumnError(err: { code?: string | null; message?: string | null } | null): boolean {
+  if (!err) return false;
+  if (err.code === "PGRST204" || err.code === "42703") return true;
+  const msg = err.message ?? "";
+  return /could not find the '.*' column/i.test(msg) || /column .* does not exist/i.test(msg);
+}
+
+const textOrNull = (v: unknown): string | null => (typeof v === "string" ? v : null);
+const numOrNull = (v: unknown): number | null =>
+  v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
+const textList = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
+
+/**
+ * One wb_initiative_library row to a LibraryEntry. Exported for tests.
+ * Tolerant of a row from before migration 040: absent columns become null / [].
+ */
+export function toLibraryEntry(r: Record<string, unknown>): LibraryEntry {
+  return {
+    initiativeKey: r.initiative_key as string,
+    workbookId: textOrNull(r.workbook_id),
+    name: r.name as string,
+    category: textOrNull(r.category),
+    difficulty: numOrNull(r.difficulty),
+    speedToResults: textOrNull(r.speed_to_results),
+    oneLiner: textOrNull(r.one_liner),
+    ownOrOps: textOrNull(r.own_or_ops),
+    priceTier: textOrNull(r.price_tier),
+    needsSalesTeam: textOrNull(r.needs_sales_team),
+    baseKey: textOrNull(r.base_key),
+    speedScore: numOrNull(r.speed_score),
+    costScore: numOrNull(r.cost_score),
+    oddsScore: numOrNull(r.odds_score),
+    revenueScore: numOrNull(r.revenue_score),
+    easeScore: numOrNull(r.ease_score),
+    scoreTotal: numOrNull(r.score_total),
+    idealIndustries: textList(r.ideal_industries),
+    ctaOptions: textList(r.cta_options),
+    training: textList(r.training),
+    metricsRaw: textOrNull(r.metrics_raw),
+    // `[]` (column default / pre-task-3 rows) and malformed values read as null.
+    metrics: readStoredMetrics(r.metrics),
+  };
+}
+
+/**
+ * LibraryEntry to the shape the intake picker and eligibility rules consume.
+ * `idealIndustries` rides along, so passesIndustry reads the real column.
+ */
+export function toLibraryInitiative(entry: LibraryEntry): LibraryInitiative {
+  return {
+    key: entry.initiativeKey,
+    name: entry.name,
+    category: entry.category,
+    oneLiner: entry.oneLiner,
+    ownOrOps: entry.ownOrOps,
+    priceTier: entry.priceTier,
+    difficulty: entry.difficulty,
+    speedToResults: entry.speedToResults,
+    needsSalesTeam: entry.needsSalesTeam,
+    idealIndustries: entry.idealIndustries,
+    workbookId: entry.workbookId,
+    baseKey: entry.baseKey,
+    speedScore: entry.speedScore,
+    costScore: entry.costScore,
+    oddsScore: entry.oddsScore,
+    revenueScore: entry.revenueScore,
+    easeScore: entry.easeScore,
+    scoreTotal: entry.scoreTotal,
+    ctaOptions: entry.ctaOptions,
+    training: entry.training,
+    metricsRaw: entry.metricsRaw,
+    metrics: entry.metrics,
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Variant fallback for task templates and benchmarks
+ * ------------------------------------------------------------------ */
+
+/**
+ * Base key for each of `keys` that is a variant (migration 040 `base_key`).
+ *
+ * Empty when nothing is a variant, and ALSO when the column does not exist
+ * yet: without 040 no variant link is stored, so there is nothing to fall
+ * back to and behaviour is exactly as before.
+ */
+async function loadBaseKeys(db: SupabaseClient, keys: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (keys.length === 0) return out;
+  const { data, error } = await db
+    .from("wb_initiative_library")
+    .select("initiative_key, base_key")
+    .in("initiative_key", keys);
+  if (error) {
+    if (!isMissingColumnError(error)) {
+      console.error("[workbook/read] loadBaseKeys failed:", error.message);
+    }
+    return out;
+  }
+  for (const r of (data ?? []) as unknown as Record<string, unknown>[]) {
+    const key = textOrNull(r.initiative_key);
+    const base = textOrNull(r.base_key);
+    if (key && base && base !== key) out.set(key, base);
+  }
+  return out;
+}
+
+/**
+ * Rows per requested key, falling back to the BASE initiative's rows for a
+ * variant that has none of its own.
+ *
+ * Templates and benchmarks join to the library by NAME, so "Live Webinar"
+ * listed twice (OPS and OWN) puts every template row on "webinar" and none on
+ * "webinar-own". Resolved here at read time from the stored `base_key` rather
+ * than by duplicating rows at ingest, so one upload holds one copy.
+ *
+ * A variant's OWN rows always win; the base is only consulted when the variant
+ * has none. The result is keyed by the requested key only.
+ */
+export async function withBaseFallback<T>(
+  db: SupabaseClient,
+  keys: string[],
+  fetchRows: (keys: string[]) => Promise<Map<string, T[]>>,
+  rekey: (row: T, key: string) => T = (row) => row
+): Promise<Map<string, T[]>> {
+  const unique = [...new Set(keys.filter(Boolean))];
+  const out = await fetchRows(unique);
+  const missing = unique.filter((k) => !out.has(k));
+  if (missing.length === 0) return out;
+
+  const bases = await loadBaseKeys(db, missing);
+  if (bases.size === 0) return out;
+
+  const baseRows = await fetchRows([...new Set(bases.values())]);
+  for (const [key, base] of bases) {
+    const rows = baseRows.get(base);
+    if (rows && rows.length > 0) out.set(key, rows.map((row) => rekey(row, key)));
+  }
+  return out;
+}
+
+/**
+ * Task templates for the given initiatives, grouped by key and ordered.
+ * A variant with no templates of its own gets its base initiative's.
+ */
 export async function loadTaskTemplates(
   db: SupabaseClient,
   keys: string[]
 ): Promise<Map<string, TaskTemplate[]>> {
+  return withBaseFallback(db, keys, (unique) => fetchTaskTemplates(db, unique));
+}
+
+async function fetchTaskTemplates(
+  db: SupabaseClient,
+  unique: string[]
+): Promise<Map<string, TaskTemplate[]>> {
   const out = new Map<string, TaskTemplate[]>();
-  const unique = [...new Set(keys.filter(Boolean))];
   if (unique.length === 0) return out;
 
   const { data, error } = await db
@@ -183,12 +356,28 @@ export async function loadTaskTemplates(
   return out;
 }
 
+/**
+ * Benchmarks for the given initiatives, grouped by key. A variant with none of
+ * its own gets its base initiative's, re-keyed to the variant so a caller
+ * grouping by `initiativeKey` sees them where it asked.
+ */
 export async function loadBenchmarks(
   db: SupabaseClient,
   keys: string[]
 ): Promise<Map<string, BenchmarkEntry[]>> {
+  return withBaseFallback(
+    db,
+    keys,
+    (unique) => fetchBenchmarks(db, unique),
+    (row, key) => ({ ...row, initiativeKey: key })
+  );
+}
+
+async function fetchBenchmarks(
+  db: SupabaseClient,
+  unique: string[]
+): Promise<Map<string, BenchmarkEntry[]>> {
   const out = new Map<string, BenchmarkEntry[]>();
-  const unique = [...new Set(keys.filter(Boolean))];
   if (unique.length === 0) return out;
 
   const { data, error } = await db
@@ -244,7 +433,8 @@ export async function loadAiContext(db: SupabaseClient): Promise<ContextEntry[]>
  * AI Context is attached where it has been authored.
  */
 export function renderLibraryForPrompt(
-  library: LibraryEntry[],
+  library: ReadonlyArray<Pick<LibraryEntry,
+    "initiativeKey" | "name" | "difficulty" | "speedToResults" | "priceTier" | "ownOrOps" | "oneLiner">>,
   context: ContextEntry[]
 ): string {
   const ctxByKey = new Map(context.map((c) => [c.initiativeKey, c]));

@@ -6,6 +6,9 @@ import {
   passesCapacity,
   passesSalesModel,
   passesIndustry,
+  passesPriceTier,
+  normaliseIndustry,
+  isBroadFit,
   passesActiveAllowlist,
   productCoverage,
   DOMINANT_PRODUCT_SHARE,
@@ -138,8 +141,8 @@ describe("REQ-13.9 — respects budget and hours", () => {
     expect(passesCapacity(REFERRAL, ctx({ hoursPerWeek: 2 })).eligible).toBe(true);
   });
 
-  it("treats a null budget as nothing to spend", () => {
-    expect(passesCapacity(PAID_ADS, ctx({ monthlyBudget: null })).eligible).toBe(false);
+  it("does not exclude on an unknown budget", () => {
+    expect(passesCapacity(PAID_ADS, ctx({ monthlyBudget: null })).eligible).toBe(true);
   });
 });
 
@@ -221,6 +224,11 @@ describe("REQ-13.12 — industry eligibility, honouring Broad fit", () => {
     expect(verdict.reason).toContain("Real Estate & Investing");
   });
 
+  it("does not exclude a targeted initiative when the industry is unknown", () => {
+    const targeted = { ...WEBINAR, idealIndustries: ["E-commerce"] } as LibraryInitiative;
+    expect(passesIndustry(targeted, ctx({ industry: null })).eligible).toBe(true);
+  });
+
   // "Other" is not in the library's vocabulary, so only Broad fit can match it.
   it("rejects a targeted initiative for Other", () => {
     const targeted = { ...WEBINAR, idealIndustries: ["E-commerce"] } as LibraryInitiative;
@@ -238,9 +246,38 @@ describe("REQ-13.12 — industry eligibility, honouring Broad fit", () => {
     const targeted = {
       ...WEBINAR,
       idealIndustries: "E-commerce, Local & Home Services",
-    } as LibraryInitiative;
+    } as unknown as LibraryInitiative;
     expect(passesIndustry(targeted, ctx({ industry: "E-commerce" })).eligible).toBe(true);
     expect(passesIndustry(targeted, ctx({ industry: "SaaS & Tech" })).eligible).toBe(false);
+  });
+
+  it("treats the workbook's long Broad-fit label as Broad fit", () => {
+    for (const label of ["Broad fit — works in most industries", "  BROAD FIT (most)", "broad fit"]) {
+      const broad = { ...WEBINAR, idealIndustries: [label, "Retail"] } as LibraryInitiative;
+      expect(passesIndustry(broad, ctx({ industry: "Network Marketing" })).eligible, label).toBe(true);
+      expect(passesIndustry(broad, ctx({ industry: "Other" })).eligible, label).toBe(true);
+    }
+    // Only a PREFIX counts; a mention elsewhere does not.
+    const notBroad = { ...WEBINAR, idealIndustries: ["Not a broad fit"] } as LibraryInitiative;
+    expect(passesIndustry(notBroad, ctx({ industry: "Retail" })).eligible).toBe(false);
+  });
+
+  it("tolerates &/and, spacing, case and hyphenation", () => {
+    const targeted = {
+      ...WEBINAR,
+      idealIndustries: [" health and  wellness ", "Ecommerce", "Faith Based & Ministry"],
+    } as LibraryInitiative;
+    expect(passesIndustry(targeted, ctx({ industry: "Health & Wellness" })).eligible).toBe(true);
+    expect(passesIndustry(targeted, ctx({ industry: "E-commerce" })).eligible).toBe(true);
+    expect(passesIndustry(targeted, ctx({ industry: "Faith-Based & Ministry" })).eligible).toBe(true);
+    expect(passesIndustry(targeted, ctx({ industry: "Retail" })).eligible).toBe(false);
+  });
+
+  it("normaliseIndustry and isBroadFit", () => {
+    expect(normaliseIndustry("Real Estate & Investing")).toBe(normaliseIndustry("real estate and investing"));
+    expect(normaliseIndustry("SaaS & Tech")).not.toBe(normaliseIndustry("B2B Services & Agencies"));
+    expect(isBroadFit("Broad fit — works in most industries")).toBe(true);
+    expect(isBroadFit("Retail")).toBe(false);
   });
 });
 
@@ -436,5 +473,73 @@ describe("passesActiveAllowlist — the admin toggle backstop", () => {
       inactiveKeys: new Set([WEBINAR.key]),
     });
     expect(kept.map((p) => p.key)).toEqual(["referral"]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * FIT "I" — price tier
+ * ------------------------------------------------------------------ */
+
+describe("passesPriceTier — FIT 'It's the right product'", () => {
+  const LOW_ONLY = entry({ key: "low-only", priceTier: "Low" });
+  const LOW_TO_MID = entry({ key: "low-mid", priceTier: "Low → Mid" });
+  const MID_TO_HIGH = entry({ key: "mid-high", priceTier: "Mid → High" });
+
+  it("allows a product inside the initiative's range", () => {
+    expect(passesPriceTier(LOW_TO_MID, ctx({ productTiers: ["mid"] })).eligible).toBe(true);
+    expect(passesPriceTier(MID_TO_HIGH, ctx({ productTiers: ["high"] })).eligible).toBe(true);
+  });
+
+  it("rejects a product outside it, with a reason", () => {
+    const verdict = passesPriceTier(LOW_ONLY, ctx({ productTiers: ["high"] }));
+    expect(verdict.eligible).toBe(false);
+    expect(verdict.reason).toBe(
+      "This one works best for low-priced offers, and yours are high-priced."
+    );
+  });
+
+  it("passes when ANY product matches (no focus product)", () => {
+    expect(passesPriceTier(LOW_ONLY, ctx({ productTiers: ["high", "low"] })).eligible).toBe(true);
+  });
+
+  it("does not exclude on missing data", () => {
+    // Business side unknown.
+    expect(passesPriceTier(LOW_ONLY, ctx()).eligible).toBe(true);
+    expect(passesPriceTier(LOW_ONLY, ctx({ productTiers: [] })).eligible).toBe(true);
+    // Initiative side blank or unparseable.
+    const blank = entry({ key: "blank", priceTier: null });
+    const junk = entry({ key: "junk", priceTier: "Varies" });
+    expect(passesPriceTier(blank, ctx({ productTiers: ["high"] })).eligible).toBe(true);
+    expect(passesPriceTier(junk, ctx({ productTiers: ["high"] })).eligible).toBe(true);
+  });
+
+  it("runs last: an industry rejection outranks it", () => {
+    const both = entry({ key: "both", priceTier: "Low", idealIndustries: ["E-commerce"] });
+    const verdict = isEligible(both, ctx({ productTiers: ["high"] }));
+    expect(verdict.reason).toMatch(/outside Coaching & Consulting/);
+  });
+
+  it("is applied by isEligible and filterEligible", () => {
+    const c = ctx({ productTiers: ["high"] });
+    expect(isEligible(LOW_ONLY, c).reason).toMatch(/low-priced/);
+    expect(filterEligible([LOW_ONLY, MID_TO_HIGH], c).map((e) => e.key)).toEqual(["mid-high"]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * FIT "T" — the Oct 2026 workbook's sales-team values
+ * ------------------------------------------------------------------ */
+
+describe("passesSalesModel with the live YES / OPTIONAL / NO values", () => {
+  const noCalls = ctx({ whoCloses: NO_SALES_CALLS });
+
+  it("removes YES and keeps OPTIONAL and NO when they take no sales calls", () => {
+    expect(passesSalesModel(entry({ key: "y", needsSalesTeam: "YES" }), noCalls).eligible).toBe(false);
+    expect(passesSalesModel(entry({ key: "o", needsSalesTeam: "OPTIONAL" }), noCalls).eligible).toBe(true);
+    expect(passesSalesModel(entry({ key: "n", needsSalesTeam: "NO" }), noCalls).eligible).toBe(true);
+  });
+
+  it("keeps YES for a founder who closes their own calls", () => {
+    expect(passesSalesModel(entry({ key: "y", needsSalesTeam: "YES" }), ctx({ whoCloses: "me" })).eligible).toBe(true);
   });
 });

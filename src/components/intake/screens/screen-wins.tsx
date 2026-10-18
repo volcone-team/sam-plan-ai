@@ -11,6 +11,7 @@ import {
   type FunnelAnswers,
 } from "@/lib/intake/funnel";
 import { labelFor, type LibraryInitiative } from "@/lib/intake/library";
+import { distinguishingLabelBesideOwnOrOps } from "@/lib/library/display-name";
 import type { InitiativeDraft } from "@/lib/intake/draft";
 import type { FieldErrors, IntakeAnswers } from "@/lib/intake/validation";
 import { trackIntakeEvent, voiceUsed } from "@/lib/intake/events";
@@ -212,6 +213,7 @@ function WinRow({
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm font-medium text-foreground">
           {entry ? labelFor(entry, library) : (key ?? "Unknown")}
+          {entry && <VariantSuffix entry={entry} library={library} />}
         </p>
         <button
           type="button"
@@ -259,6 +261,7 @@ function FailedRow({
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm font-medium text-foreground">
           {entry ? labelFor(entry, library) : (key ?? "Unknown")}
+          {entry && <VariantSuffix entry={entry} library={library} />}
         </p>
         <button
           type="button"
@@ -285,4 +288,19 @@ function asString(value: unknown): string | null {
 
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** The category of one of several same-name initiatives; see display-name.ts. */
+function VariantSuffix({
+  entry,
+  library,
+}: {
+  entry: LibraryInitiative;
+  library: readonly LibraryInitiative[];
+}) {
+  const label = distinguishingLabelBesideOwnOrOps(entry, library);
+  if (!label) return null;
+  return (
+    <span className="block text-xs font-normal text-[hsl(var(--foreground-muted))]">{label}</span>
+  );
 }

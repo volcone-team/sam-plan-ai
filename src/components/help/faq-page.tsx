@@ -1,126 +1,90 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import {
+  BarChart3,
+  BookOpen,
   ChevronDown,
+  CreditCard,
+  HelpCircle,
+  Layers,
+  Rocket,
+  Search,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Users,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { countFaqItems, filterFaq } from '@/lib/faq/faq';
+import { FaqAnswer } from './faq-answer';
+import type {
+  FaqIcon,
+  FaqPublicCategory,
+  FaqPublicItem,
+  FaqPublicResponse,
+} from '@/types/faq.types';
+
+/**
+ * The customer FAQ. Content comes from GET /api/faq (admin-managed, published
+ * only). Answers are plain text rendered by <FaqAnswer>, never as HTML.
+ */
+
+// ─── Icons ───────────────────────────────────────────────────────────────────
+
+const CATEGORY_ICONS: Record<FaqIcon, LucideIcon> = {
   Rocket,
   CreditCard,
   Layers,
   ShieldCheck,
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
+  HelpCircle,
+  BookOpen,
+  Settings,
+  Users,
+  BarChart3,
+  Sparkles,
+};
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Loading ─────────────────────────────────────────────────────────────────
 
-interface FaqItem {
-  question: string;
-  answer: string;
+type LoadState =
+  | { kind: 'loading' }
+  | { kind: 'error' }
+  | { kind: 'not_ready' }
+  | { kind: 'ready'; categories: FaqPublicCategory[] };
+
+function useFaq(): { state: LoadState; retry: () => void } {
+  const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/faq', { cache: 'no-store', signal: controller.signal })
+      .then(async (res) => {
+        if (res.status === 503) return setState({ kind: 'not_ready' });
+        if (!res.ok) return setState({ kind: 'error' });
+        const data = (await res.json()) as FaqPublicResponse;
+        setState({ kind: 'ready', categories: data.categories });
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setState({ kind: 'error' });
+      });
+    return () => controller.abort();
+  }, [attempt]);
+
+  const retry = () => {
+    setState({ kind: 'loading' });
+    setAttempt((n) => n + 1);
+  };
+
+  return { state, retry };
 }
 
-interface FaqCategory {
-  name: string;
-  icon: React.ElementType;
-  items: FaqItem[];
-}
-
-// ─── Data ────────────────────────────────────────────────────────────────────
-
-const faqCategories: FaqCategory[] = [
-  {
-    name: 'Getting Started',
-    icon: Rocket,
-    items: [
-      {
-        question: 'What is SAM Plan AI?',
-        answer:
-          'A revenue operating system that generates personalized annual plans with execution-ready project plans, then drives weekly accountability.',
-      },
-      {
-        question: 'How does the plan get generated?',
-        answer:
-          'You answer 7 questions about your business (revenue goal, products, what\u2019s worked, audience, assets, budget, obstacles). The AI selects 6\u201310 initiatives from our library, calculates revenue projections, and creates project plans.',
-      },
-      {
-        question: 'What\u2019s the difference between Quickstart and Full Plan?',
-        answer:
-          'Quickstart asks ~3 questions for an instant rough plan. Full Plan asks all 7 for a tailored, higher-confidence result. You can always upgrade from Quickstart to Full later.',
-      },
-      {
-        question: 'Can I change my plan after it\u2019s generated?',
-        answer:
-          'Yes. You can add, remove, or swap initiatives from the library at any time. The plan is a living document, not a one-time artifact.',
-      },
-    ],
-  },
-  {
-    name: 'Plans & Billing',
-    icon: CreditCard,
-    items: [
-      {
-        question: 'What are the subscription tiers?',
-        answer:
-          'Starter ($49/mo), Pro ($149/mo), and Mastery ($4,997/yr). Each tier adds more accountability and support.',
-      },
-      {
-        question: 'Is there a free trial?',
-        answer:
-          'Yes, 14-day full-feature free trial. No credit card required to start.',
-      },
-      {
-        question: 'What\u2019s the refund policy?',
-        answer:
-          '30-day money-back guarantee. After 30 days, no refunds on monthly; annual plans are prorated.',
-      },
-    ],
-  },
-  {
-    name: 'Features',
-    icon: Layers,
-    items: [
-      {
-        question: 'What are Good/Better/Best revenue scenarios?',
-        answer:
-          'Three projection levels based on conversion benchmarks: Good (conservative), Better (moderate), Best (aggressive). They show the range of possible outcomes for your plan.',
-      },
-      {
-        question: 'How does the weekly operating cadence work?',
-        answer:
-          'Each week you: (1) Enter results, (2) See where you are vs plan, (3) See what\u2019s due/slipping, (4) Adjust if needed, (5) Set top 1\u20133 priorities.',
-      },
-      {
-        question: 'What initiative types are available?',
-        answer:
-          '9 core types in v1: Webinar, Email Campaign, LinkedIn Outreach, Referral Program, Challenge/Bootcamp, VSL/Sales Page, Paid Ads, Sales Calls, Content & Organic Social.',
-      },
-      {
-        question: 'Where do the benchmarks come from?',
-        answer:
-          'First-party data from real businesses, partner-shared anonymized data, and published industry reports. Never invented.',
-      },
-    ],
-  },
-  {
-    name: 'Data & Privacy',
-    icon: ShieldCheck,
-    items: [
-      {
-        question: 'What data do you share?',
-        answer:
-          'Only anonymized, aggregated conversion rates. Never your company name, revenue, or identifiable information.',
-      },
-      {
-        question: 'Can I opt out of benchmark sharing?',
-        answer:
-          'Yes. Toggle it off in Settings \u2192 Benchmarks at any time.',
-      },
-      {
-        question: 'Is my data secure?',
-        answer:
-          'Yes. We use industry-standard encryption. When Supabase is connected, Row Level Security ensures only you see your data.',
-      },
-    ],
-  },
-];
+const actionClass =
+  'inline-flex items-center gap-1.5 rounded-md bg-[hsl(var(--primary))] px-3 py-1.5 text-xs font-medium text-[hsl(var(--primary-foreground))] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))] focus-visible:ring-offset-2';
 
 // ─── Accordion Item ──────────────────────────────────────────────────────────
 
@@ -129,37 +93,42 @@ function AccordionItem({
   isOpen,
   onToggle,
 }: {
-  item: FaqItem;
+  item: FaqPublicItem;
   isOpen: boolean;
   onToggle: () => void;
 }) {
+  const baseId = useId();
+  const buttonId = `${baseId}-q`;
+  const panelId = `${baseId}-a`;
+
   return (
     <div className="border-b border-[hsl(var(--border))] last:border-b-0">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={isOpen}
-        className="flex w-full items-center justify-between gap-4 py-4 px-1 text-left transition-colors hover:text-[hsl(var(--primary))]"
-      >
-        <span className="text-sm font-medium text-[hsl(var(--foreground))]">
-          {item.question}
-        </span>
-        <ChevronDown
-          className={cn(
-            'h-4 w-4 shrink-0 text-[hsl(var(--foreground-muted))] transition-transform duration-200',
-            isOpen && 'rotate-180'
-          )}
+      <h3>
+        <button
+          id={buttonId}
+          type="button"
+          onClick={onToggle}
+          aria-expanded={isOpen}
+          aria-controls={panelId}
+          className="flex w-full items-center justify-between gap-4 py-4 px-1 text-left transition-colors hover:text-[hsl(var(--primary))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))] rounded-sm"
+        >
+          <span className="text-sm font-medium text-[hsl(var(--foreground))]">
+            {item.question}
+          </span>
+          <ChevronDown
+            aria-hidden="true"
+            className={cn(
+              'h-4 w-4 shrink-0 text-[hsl(var(--foreground-muted))] transition-transform duration-200',
+              isOpen && 'rotate-180'
+            )}
+          />
+        </button>
+      </h3>
+      <div id={panelId} role="region" aria-labelledby={buttonId} hidden={!isOpen}>
+        <FaqAnswer
+          text={item.answer}
+          className="pb-4 px-1 text-sm leading-relaxed text-[hsl(var(--foreground-muted))]"
         />
-      </button>
-      <div
-        className={cn(
-          'overflow-hidden transition-[max-height] duration-300 ease-in-out',
-          isOpen ? 'max-h-96' : 'max-h-0'
-        )}
-      >
-        <p className="pb-4 px-1 text-sm leading-relaxed text-[hsl(var(--foreground-muted))]">
-          {item.answer}
-        </p>
       </div>
     </div>
   );
@@ -167,33 +136,38 @@ function AccordionItem({
 
 // ─── Category Section ────────────────────────────────────────────────────────
 
-function CategorySection({ category }: { category: FaqCategory }) {
-  const [openIndex, setOpenIndex] = useState<number | null>(null);
-  const Icon = category.icon;
+function CategorySection({ category }: { category: FaqPublicCategory }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const Icon = category.icon ? CATEGORY_ICONS[category.icon] : HelpCircle;
+  const headingId = `faq-category-${category.id}`;
+  const count = category.items.length;
 
   return (
-    <section className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
+    <section
+      aria-labelledby={headingId}
+      className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6"
+    >
       {/* Category Header */}
       <div className="mb-4 flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(var(--primary)/0.1)]">
-          <Icon className="h-[18px] w-[18px] text-[hsl(var(--primary))]" />
+          <Icon className="h-[18px] w-[18px] text-[hsl(var(--primary))]" aria-hidden="true" />
         </div>
-        <h2 className="text-base font-semibold text-[hsl(var(--foreground))]">
+        <h2 id={headingId} className="text-base font-semibold text-[hsl(var(--foreground))]">
           {category.name}
         </h2>
         <span className="ml-auto text-xs text-[hsl(var(--foreground-muted))]">
-          {category.items.length} questions
+          {count} question{count === 1 ? '' : 's'}
         </span>
       </div>
 
       {/* Accordion Items */}
-      <div className="divide-y-0">
-        {category.items.map((item, idx) => (
+      <div>
+        {category.items.map((item) => (
           <AccordionItem
-            key={item.question}
+            key={item.id}
             item={item}
-            isOpen={openIndex === idx}
-            onToggle={() => setOpenIndex(openIndex === idx ? null : idx)}
+            isOpen={openId === item.id}
+            onToggle={() => setOpenId(openId === item.id ? null : item.id)}
           />
         ))}
       </div>
@@ -201,28 +175,144 @@ function CategorySection({ category }: { category: FaqCategory }) {
   );
 }
 
+// ─── States ──────────────────────────────────────────────────────────────────
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-6" aria-busy="true">
+      <span className="sr-only" role="status">Loading FAQ…</span>
+      <div className="h-10 animate-pulse rounded-lg bg-[hsl(var(--foreground-muted)/0.12)]" />
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="space-y-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6"
+        >
+          <div className="h-6 w-48 animate-pulse rounded bg-[hsl(var(--foreground-muted)/0.12)]" />
+          {[0, 1, 2].map((j) => (
+            <div key={j} className="h-5 animate-pulse rounded bg-[hsl(var(--foreground-muted)/0.12)]" />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Notice({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-10 text-center">
+      <HelpCircle className="h-8 w-8 text-[hsl(var(--foreground-muted))]" aria-hidden="true" />
+      {children}
+    </div>
+  );
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export function FaqPage() {
-  const totalQuestions = faqCategories.reduce(
-    (acc, cat) => acc + cat.items.length,
-    0
-  );
+  const { state, retry } = useFaq();
+  const [query, setQuery] = useState('');
+  const searchId = useId();
+
+  const categories = useMemo(() => (state.kind === 'ready' ? state.categories : []), [state]);
+  const filtered = useMemo(() => filterFaq(categories, query), [categories, query]);
+
+  if (state.kind === 'loading') return <LoadingSkeleton />;
+
+  if (state.kind === 'not_ready') {
+    return (
+      <Notice>
+        <p className="text-sm text-[hsl(var(--foreground-muted))]">
+          Help articles are being set up. Check back soon.
+        </p>
+      </Notice>
+    );
+  }
+
+  if (state.kind === 'error') {
+    return (
+      <Notice>
+        <p role="alert" className="text-sm text-[hsl(var(--foreground-muted))]">
+          We couldn&rsquo;t load the FAQ.
+        </p>
+        <button type="button" onClick={retry} className={actionClass}>
+          Retry
+        </button>
+      </Notice>
+    );
+  }
+
+  if (categories.length === 0) {
+    return (
+      <Notice>
+        <p className="text-sm text-[hsl(var(--foreground-muted))]">
+          No questions here yet. Can&apos;t find what you&apos;re looking for? Reach out to support.
+        </p>
+      </Notice>
+    );
+  }
+
+  const totalQuestions = countFaqItems(categories);
+  const searching = query.trim() !== '';
+  const matches = countFaqItems(filtered);
 
   return (
     <div className="space-y-6">
       {/* Summary */}
       <p className="text-sm text-[hsl(var(--foreground-muted))]">
-        {totalQuestions} answers across {faqCategories.length} categories.
+        {totalQuestions} answer{totalQuestions === 1 ? '' : 's'} across {categories.length}{' '}
+        categor{categories.length === 1 ? 'y' : 'ies'}.
         Can&apos;t find what you&apos;re looking for? Reach out to support.
       </p>
 
-      {/* Category Cards */}
-      <div className="space-y-6">
-        {faqCategories.map((category) => (
-          <CategorySection key={category.name} category={category} />
-        ))}
+      {/* Search */}
+      <div role="search">
+        <label htmlFor={searchId} className="sr-only">
+          Search the FAQ
+        </label>
+        <div className="relative">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[hsl(var(--foreground-muted))]"
+            aria-hidden="true"
+          />
+          <input
+            id={searchId}
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search questions and answers"
+            autoComplete="off"
+            className="w-full rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] py-2 pl-9 pr-9 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--foreground-muted))] outline-none focus:border-[hsl(var(--primary))] focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))]"
+          />
+          {searching && (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-[hsl(var(--foreground-muted))] hover:text-[hsl(var(--foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))]"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
+        </div>
+        <p aria-live="polite" className={cn('mt-2 text-xs text-[hsl(var(--foreground-muted))]', !searching && 'sr-only')}>
+          {searching ? `${matches} result${matches === 1 ? '' : 's'}` : ''}
+        </p>
       </div>
+
+      {/* Category Cards */}
+      {searching && matches === 0 ? (
+        <Notice>
+          <p className="text-sm text-[hsl(var(--foreground-muted))]">
+            No questions match &ldquo;{query.trim()}&rdquo;. Try different words, or reach out to support.
+          </p>
+        </Notice>
+      ) : (
+        <div className="space-y-6">
+          {filtered.map((category) => (
+            <CategorySection key={category.id} category={category} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

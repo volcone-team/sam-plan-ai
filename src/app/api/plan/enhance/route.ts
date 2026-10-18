@@ -10,6 +10,8 @@ import { loadLibrary, loadAiContext, renderLibraryForPrompt } from "@/lib/workbo
 import { checkEntitlement, recordUsage, statusForCode, serviceClient } from "@/lib/billing/enforce";
 import { LIMIT_KEYS } from "@/lib/billing/limits";
 import { toDateOnly, todayDateOnly } from "@/lib/plan-dates";
+import { loadCompanyFit, partitionLibrary, rejectionReason } from "@/lib/recommend/company-eligibility";
+import { suggestionChannel } from "@/lib/initiatives/suggestion-initiative";
 
 export const maxDuration = 60;
 
@@ -238,12 +240,16 @@ Suggest improvements to this plan as JSON.`;
 
     // Suggestions must come from the workbook library, same as generation.
     let libraryContext = "";
+    // FIT for this company (all-null without a v2 intake: allowlist only).
+    const fit = await loadCompanyFit(billingDb, companyId);
     try {
       const [library, aiContext] = await Promise.all([loadLibrary(supabase), loadAiContext(supabase)]);
-      if (library.length > 0) {
+      // FIT, then SCORE: only what suits this business, best first.
+      const { eligible } = partitionLibrary(library, fit.ctx, fit.revenueWeight);
+      if (eligible.length > 0) {
         libraryContext =
           "\n\nINITIATIVE LIBRARY (the ONLY initiatives you may propose - return libraryKey verbatim):\n" +
-          renderLibraryForPrompt(library, aiContext);
+          renderLibraryForPrompt(eligible, aiContext);
       } else {
         console.error("[plan/enhance] Initiative library is empty - suggestions will not be workbook-grounded.");
       }
@@ -297,8 +303,26 @@ Suggest improvements to this plan as JSON.`;
     const batchId = randomUUID();
     const validTypes = ["new_initiative", "budget_change", "date_change", "target_change", "product_update"];
 
+    /**
+     * FIT, enforced server-side: a new_initiative whose library key fails FIT
+     * (or the allowlist) is dropped here with the rule's reason, rather than
+     * shown and then refused when the user accepts it.
+     */
+    const fullLibraryByKey = new Map(
+      (await loadLibrary(supabase, { includeInactive: true })).map((l) => [l.initiativeKey, l])
+    );
+    const passesFit = (s: { type?: unknown; proposed?: unknown }): boolean => {
+      if (s.type !== "new_initiative") return true;
+      const proposed = s.proposed && typeof s.proposed === "object" ? (s.proposed as Record<string, unknown>) : {};
+      const key = suggestionChannel(proposed);
+      const reason = rejectionReason(fullLibraryByKey.get(key), fit.ctx);
+      if (reason) console.warn("[plan/enhance] Dropped ineligible new_initiative:", key, "|", reason);
+      return !reason;
+    };
+
     const rows = suggestions
       .filter((s: any) => validTypes.includes(s.type))
+      .filter(passesFit)
       .map((s: any) => {
         const name = (s.targetName || "").toLowerCase();
         let targetId: string | null = null;

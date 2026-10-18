@@ -23,7 +23,8 @@ import { resultService } from '@/services/result.service';
 import { expenseService } from '@/services/expense.service';
 import { sumExpensesByInitiative } from '@/lib/initiative-spend';
 import { rankTopPerformers, type RankedPerformer } from '@/lib/top-performers';
-import type { Initiative, InitiativeType, CreateInitiativeDTO, Result } from '@/types';
+import type { Initiative, Result } from '@/types';
+import type { CreateInitiativeRequest } from '@/lib/initiatives/create-request';
 
 
 export default function InitiativesPage() {
@@ -54,7 +55,6 @@ export default function InitiativesPage() {
    * either failed the FK or attached to unrelated data.
    */
   const [annualPlanId, setAnnualPlanId] = useState<string | null>(null);
-  const [fullInitiativeTypes, setFullInitiativeTypes] = useState<InitiativeType[]>([]);
   const [products, setProducts] = useState<Array<{ id: string; name: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -106,7 +106,6 @@ export default function InitiativesPage() {
         }
 
         setInitiatives(initiativesData);
-        setFullInitiativeTypes(typesData);
         setInitiativeTypes(
           typesData.map(t => ({
             id: t.id,
@@ -187,9 +186,32 @@ export default function InitiativesPage() {
     router.push(`/initiatives/${id}`);
   };
 
-  const handleAddInitiative = async (dto: CreateInitiativeDTO) => {
-    const newInitiative = await initiativeService.createInitiative(dto);
+  /**
+   * Created server-side (POST /api/initiatives): a library pick has to be
+   * mapped to an initiative type, which customers cannot write. Errors are
+   * thrown so the panel shows them.
+   */
+  const handleAddInitiative = async (request: CreateInitiativeRequest) => {
+    const response = await fetch('/api/initiatives', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    const body = (await response.json().catch(() => ({}))) as { id?: string; error?: string };
+    if (!response.ok || !body.id) {
+      throw new Error(body.error || `Could not save the initiative (${response.status}).`);
+    }
+    const newInitiative = await initiativeService.getInitiative(body.id);
     setInitiatives(prev => [newInitiative, ...prev]);
+    // Year-at-a-Glance caches its dashboard payload; a new initiative changes it.
+    cacheInvalidatePrefix(CacheKeys.planPrefix);
+    // A newly created type should label the card rather than read "unknown".
+    try {
+      const types = await initiativeTypeService.getAllInitiativeTypes();
+      setInitiativeTypes(types.map(t => ({ id: t.id, name: t.name, channel: t.channel, difficulty: t.difficulty })));
+    } catch {
+      // Cosmetic only.
+    }
   };
 
   const handleRemoveInitiative = async (id: string) => {
@@ -260,9 +282,7 @@ export default function InitiativesPage() {
         open={addPanelOpen && !!annualPlanId}
         onClose={() => setAddPanelOpen(false)}
         onSubmit={handleAddInitiative}
-        initiativeTypes={fullInitiativeTypes}
         products={products}
-        companyId={companyId}
         annualPlanId={annualPlanId ?? ''}
       />
     </PageContainer>

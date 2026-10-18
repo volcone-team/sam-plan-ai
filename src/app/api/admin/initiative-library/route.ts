@@ -95,6 +95,22 @@ export async function GET() {
         speedToResults: entry.speedToResults,
         ownOrOps: entry.ownOrOps,
         needsSalesTeam: entry.needsSalesTeam,
+        // Migration 040 fields (null / [] until it is applied and the
+        // workbook re-uploaded). Not rendered yet — the UI is task 4.
+        workbookId: entry.workbookId,
+        baseKey: entry.baseKey,
+        priceTier: entry.priceTier,
+        speedScore: entry.speedScore,
+        costScore: entry.costScore,
+        oddsScore: entry.oddsScore,
+        revenueScore: entry.revenueScore,
+        easeScore: entry.easeScore,
+        scoreTotal: entry.scoreTotal,
+        idealIndustries: entry.idealIndustries,
+        ctaOptions: entry.ctaOptions,
+        training: entry.training,
+        metricsRaw: entry.metricsRaw,
+        metrics: entry.metrics,
         /**
          * Absent row reads as ACTIVE, matching loadInactiveInitiativeKeys. A
          * freshly uploaded workbook is usable before anyone has visited this

@@ -11,37 +11,51 @@ import {
 import { DateInput } from '@/components/ui/date-input';
 import { NumberInputRaw } from '@/components/ui/number-input';
 import { formatNumber } from '@/lib/format-money';
-import type { InitiativeType, CreateInitiativeDTO, InitiativeKind } from '@/types';
+import { toDateOnly } from '@/lib/plan-dates';
+import type { CreateInitiativeRequest } from '@/lib/initiatives/create-request';
+import type { InitiativeKind } from '@/types';
+import { LibraryInitiativePicker, CUSTOM_CHOICE } from './library-initiative-picker';
+import { useCustomerLibrary } from './use-customer-library';
+import { MetricSetPicker, DEFAULT_METRIC_CHOICE, type MetricChoice } from './metric-set-picker';
+import type { StoredMetrics } from '@/lib/metrics/parse-metrics';
 
 export interface AddInitiativePanelProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (dto: CreateInitiativeDTO) => Promise<void>;
-  initiativeTypes: InitiativeType[];
+  /** Posted to POST /api/initiatives by the caller. */
+  onSubmit: (request: CreateInitiativeRequest) => Promise<void>;
   products: Array<{ id: string; name: string }>;
-  companyId: string;
   annualPlanId: string;
 }
 
 type PanelStep = 'pick-type' | 'configure';
 
+/** What was picked on step one. */
+type Selection =
+  | { kind: 'library'; key: string; name: string; metrics: StoredMetrics | null }
+  | { kind: 'custom' };
+
 /**
  * Slide-over panel for adding a new initiative.
- * Two-step flow: pick initiative type → configure details.
+ * Two-step flow: pick an initiative from the ACTIVE workbook library (or
+ * Custom) → configure details. The type mapping happens server-side.
  */
 export function AddInitiativePanel({
   open,
   onClose,
   onSubmit,
-  initiativeTypes,
   products,
-  companyId,
   annualPlanId,
 }: AddInitiativePanelProps) {
   const [step, setStep] = useState<PanelStep>('pick-type');
-  const [selectedType, setSelectedType] = useState<InitiativeType | null>(null);
+  const [choice, setChoice] = useState<string | null>(null);
+  const [selectedType, setSelectedType] = useState<Selection | null>(null);
+  const library = useCustomerLibrary(open);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [metricChoice, setMetricChoice] = useState<MetricChoice>(DEFAULT_METRIC_CHOICE);
+  /** The library key `metricChoice` belongs to. */
+  const [metricChoiceFor, setMetricChoiceFor] = useState<string | null>(null);
 
   // Form fields
   const [name, setName] = useState('');
@@ -79,7 +93,10 @@ export function AddInitiativePanel({
   const resetForm = () => {
     setSubmitError(null);
     setStep('pick-type');
+    setChoice(null);
     setSelectedType(null);
+    setMetricChoice(DEFAULT_METRIC_CHOICE);
+    setMetricChoiceFor(null);
     setName('');
     setProductId('');
     setKind('one-time');
@@ -119,13 +136,30 @@ export function AddInitiativePanel({
     onClose();
   };
 
-  const handleTypeSelect = (type: InitiativeType) => {
-    setSelectedType(type);
-    setName(type.name);
+  /** Step one's Continue: turn the radio choice into a selection. */
+  const handleContinue = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!choice) return;
+    if (choice === CUSTOM_CHOICE) {
+      setSelectedType({ kind: 'custom' });
+      setName('Custom Initiative');
+    } else {
+      const item = library.initiatives.find(i => i.key === choice);
+      if (!item) return;
+      // A different initiative starts from "track everything" again.
+      // Back then Continue on the same one keeps the choices.
+      if (metricChoiceFor !== item.key) {
+        setMetricChoice(DEFAULT_METRIC_CHOICE);
+        setMetricChoiceFor(item.key);
+      }
+      setSelectedType({ kind: 'library', key: item.key, name: item.name, metrics: item.metrics });
+      setName(item.name);
+    }
     setStep('configure');
   };
 
   const handleBack = () => {
+    // The radio choice is kept, so Back returns to where they were.
     setStep('pick-type');
     setSelectedType(null);
   };
@@ -137,28 +171,40 @@ export function AddInitiativePanel({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const dto: CreateInitiativeDTO = {
-        companyId,
+      // Dates go as YYYY-MM-DD strings. toDateOnly keeps a picked date as the
+      // same calendar day; `new Date('2026-05-01')` used to be UTC midnight,
+      // which is the previous day west of Greenwich.
+      const request: CreateInitiativeRequest = {
+        libraryKey: selectedType.kind === 'library' ? selectedType.key : null,
         annualPlanId,
-        initiativeTypeId: selectedType.id,
         productId: productId || products[0]?.id || '',
         name,
+        description: '',
         kind,
-        activationDate: activationDate ? new Date(activationDate) : new Date(),
+        activationDate: activationDate ? toDateOnly(activationDate) : toDateOnly(new Date()),
         eventDate: eventDateMode === 'exact' && eventDate
-          ? new Date(eventDate)
+          ? toDateOnly(eventDate)
           : eventDateMode === 'month' && eventMonth
-            ? new Date(`${eventYear}-${eventMonth.padStart(2, '0')}-15`)
-            : undefined,
-        trafficInput: trafficInput ? parseInt(trafficInput, 10) : undefined,
+            ? `${eventYear}-${eventMonth.padStart(2, '0')}-15`
+            : null,
+        trafficInput: trafficInput ? parseInt(trafficInput, 10) : null,
         plannedBudget: plannedBudget ? parseFloat(plannedBudget) : 0,
         revenueScenarios: {
           good: initiativeTarget ? parseFloat(initiativeTarget) : 0,
           better: initiativeTarget ? Math.round(parseFloat(initiativeTarget) * 1.1) : 0,
           best: initiativeTarget ? Math.round(parseFloat(initiativeTarget) * 1.25) : 0,
         },
+        // Choices only: the server builds the metric set from the library row.
+        ...(selectedType.kind === 'library'
+          ? {
+              metricSelection: {
+                ...(metricChoice.groupLabels ? { groupLabels: metricChoice.groupLabels } : {}),
+                excludedOptional: metricChoice.excludedOptional,
+              },
+            }
+          : {}),
       };
-      await onSubmit(dto);
+      await onSubmit(request);
       handleClose();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Could not save the initiative.');
@@ -167,19 +213,10 @@ export function AddInitiativePanel({
     }
   };
 
-  const difficultyLabel = (type: InitiativeType) => {
-    const avg =
-      (type.difficulty.effortToImplement +
-        type.difficulty.skillExpertiseRequired +
-        type.difficulty.timeToResults +
-        type.difficulty.costToRun) /
-      4;
-    if (avg <= 3) return 'Easy';
-    if (avg <= 6) return 'Moderate';
-    return 'Complex';
-  };
-
   if (!open) return null;
+
+  const selectedName =
+    selectedType?.kind === 'library' ? selectedType.name : 'Custom Initiative';
 
   return (
     <>
@@ -207,7 +244,7 @@ export function AddInitiativePanel({
             <h2 className="text-lg font-semibold text-[hsl(var(--foreground))]">
               {step === 'pick-type'
                 ? 'Add Initiative'
-                : `Configure: ${selectedType?.name}`}
+                : `Configure: ${selectedName}`}
             </h2>
           </div>
           <button
@@ -222,73 +259,19 @@ export function AddInitiativePanel({
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {step === 'pick-type' && (
-            <div className="space-y-4">
+            // A form, so Enter on a focused radio continues.
+            <form id="pick-initiative-form" onSubmit={handleContinue} className="space-y-4">
               <p className="text-sm text-[hsl(var(--foreground-muted))]">
-                Choose an initiative type to add to your plan.
+                Choose an initiative to add to your plan.
               </p>
-
-              {/* Custom initiative option */}
-              <button
-                onClick={() => {
-                  const customType: InitiativeType = {
-                    id: 'custom-' + Date.now(),
-                    name: 'Custom Initiative',
-                    channel: 'custom',
-                    description: 'Create a custom initiative with your own settings',
-                    owner: 'user',
-                    benchmarks: {},
-                    projectTemplate: { tasks: [], totalEstimatedHours: 0 },
-                    difficulty: { effortToImplement: 5, skillExpertiseRequired: 5, timeToResults: 5, costToRun: 5 },
-                    aiContext: { description: '', sizingGuidance: '', recommendationWeights: {} },
-                    tier: 1,
-                    displayOrder: 999,
-                    isActive: true,
-                    createdAt: new Date(),
-                    updatedAt: new Date(),
-                  };
-                  handleTypeSelect(customType);
-                }}
-                className="group flex w-full items-center gap-3 rounded-[var(--radius-lg)] border border-dashed border-border bg-background p-4 text-left transition-all hover:border-[hsl(var(--primary))] hover:shadow-sm"
-              >
-                <div className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-md)] bg-[hsl(var(--background-muted))] group-hover:bg-[hsl(var(--primary)_/_0.1)]">
-                  <Plus className="h-4 w-4 text-[hsl(var(--foreground-muted))] group-hover:text-[hsl(var(--primary))]" />
-                </div>
-                <div>
-                  <span className="font-medium text-[hsl(var(--foreground))] group-hover:text-[hsl(var(--primary))]">
-                    Custom Initiative
-                  </span>
-                  <p className="text-xs text-[hsl(var(--foreground-muted))]">
-                    Create your own initiative type
-                  </p>
-                </div>
-              </button>
-
-              {/* Initiative types list */}
-              <div className="grid gap-3">
-                {initiativeTypes.filter(t => t.isActive).map(type => (
-                  <button
-                    key={type.id}
-                    onClick={() => handleTypeSelect(type)}
-                    className="group flex items-start gap-4 rounded-[var(--radius-lg)] border border-border bg-background p-4 text-left transition-all hover:border-[hsl(var(--primary))] hover:shadow-sm"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-[hsl(var(--foreground))] group-hover:text-[hsl(var(--primary))] transition-colors">
-                          {type.name}
-                        </span>
-                        <span className="inline-flex items-center rounded-full bg-[hsl(var(--background-muted))] px-2 py-0.5 text-[10px] font-medium text-[hsl(var(--foreground-muted))]">
-                          {difficultyLabel(type)}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))] line-clamp-2">
-                        {type.description}
-                      </p>
-                    </div>
-                    <Plus className="h-5 w-5 flex-shrink-0 text-[hsl(var(--foreground-muted))] group-hover:text-[hsl(var(--primary))] transition-colors" />
-                  </button>
-                ))}
-              </div>
-            </div>
+              <LibraryInitiativePicker
+                initiatives={library.initiatives}
+                value={choice}
+                onChange={setChoice}
+                loading={library.loading}
+                error={library.error}
+              />
+            </form>
           )}
 
           {step === 'configure' && selectedType && (
@@ -874,7 +857,26 @@ export function AddInitiativePanel({
                 />
               </div>
 
-              {/* Tracking Metrics */}
+              {/* What you'll track: the library initiative's standard metrics */}
+              {selectedType.kind === 'library' && (
+                <section aria-labelledby="init-track-heading" className="space-y-2 border-t border-border pt-4">
+                  <h3 id="init-track-heading" className="text-sm font-semibold text-[hsl(var(--foreground))]">
+                    What you&apos;ll track
+                  </h3>
+                  <p className="text-xs text-[hsl(var(--foreground-muted))]">
+                    The numbers you&apos;ll record for this initiative.
+                  </p>
+                  <MetricSetPicker
+                    libraryKey={selectedType.key}
+                    metrics={selectedType.metrics}
+                    value={metricChoice}
+                    onChange={setMetricChoice}
+                  />
+                </section>
+              )}
+
+              {/* Tracking Metrics (custom initiatives; not saved yet) */}
+              {selectedType.kind === 'custom' && (
               <div className="space-y-2 border-t border-border pt-4">
                 <h3 className="text-sm font-semibold text-[hsl(var(--foreground))]">Tracking metrics</h3>
                 <p className="text-xs text-[hsl(var(--foreground-muted))]">
@@ -923,11 +925,34 @@ export function AddInitiativePanel({
                   </button>
                 </div>
               </div>
+              )}
             </form>
           )}
         </div>
 
-        {/* Footer (only on configure step) */}
+        {step === 'pick-type' && (
+          <div className="border-t border-border px-6 py-4">
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="rounded-[var(--radius-md)] border border-border px-4 py-2 text-sm font-medium text-[hsl(var(--foreground-muted))] transition-colors hover:bg-background"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                form="pick-initiative-form"
+                disabled={!choice}
+                className="rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] transition-colors hover:bg-[hsl(var(--primary))]/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Footer on the configure step */}
         {step === 'configure' && (
           <div className="border-t border-border px-6 py-4">
             <div className="flex items-center justify-end gap-3">

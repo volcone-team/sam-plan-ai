@@ -15,6 +15,7 @@ import type {
 } from '@/types';
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
 import { toDateOnly, parseDateOnly } from '@/lib/plan-dates';
+import { readMetricSet } from '@/lib/metrics/metric-set';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -458,6 +459,9 @@ export class InitiativeService {
       companyId: row.company_id as string,
       annualPlanId: row.annual_plan_id as string,
       initiativeTypeId: row.initiative_type_id as string,
+      // Migration 040; absent column or null reads as null.
+      libraryKey: typeof row.library_key === 'string' && row.library_key !== '' ? row.library_key : null,
+      metricSet: readMetricSet(row.metric_set),
       productId: row.product_id as string,
       name: row.name as string,
       description: (row.description as string) || '',

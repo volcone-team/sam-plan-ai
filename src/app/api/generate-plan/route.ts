@@ -11,6 +11,9 @@ import { toDateOnly, clampDayOfMonth, resolvePlanStart, planMonthToCalendar, tod
 import { sequenceEventDates } from "@/lib/plan-schedule";
 import { loadLibrary, loadTaskTemplates, loadAiContext, renderLibraryForPrompt, type LibraryEntry } from "@/lib/workbook/read";
 import { materialiseTasks, materialiseAiTasks, templateRunwayDays } from "@/lib/workbook/materialise";
+import { insertWithLibraryKey, resolveInitiativeTypeId, supabaseTypeStore } from "@/lib/workbook/initiative-type";
+import { defaultLibraryMetricSet } from "@/lib/metrics/library-metric-set";
+import { loadCompanyFit, partitionLibrary, rejectionReason } from "@/lib/recommend/company-eligibility";
 
 // Claude needs more than the default serverless budget to produce a full plan.
 // NOTE: Vercel Hobby caps functions at 10s regardless of this value; Pro honours it.
@@ -390,6 +393,9 @@ Generate a complete revenue plan as JSON.`;
     let workbookContext = "";
     let libraryKeys = new Set<string>();
     let libraryByKey = new Map<string, LibraryEntry>();
+    // FIT for this company (company-eligibility.ts). All-null without a v2
+    // intake, which filters nothing but the admin allowlist.
+    const fit = await loadCompanyFit(billingDb, companyId);
     try {
       const [library, aiContext] = await Promise.all([
         loadLibrary(supabase),
@@ -397,13 +403,22 @@ Generate a complete revenue plan as JSON.`;
       ]);
       libraryKeys = new Set(library.map((l) => l.initiativeKey));
       libraryByKey = new Map(library.map((l) => [l.initiativeKey, l]));
-      if (library.length > 0) {
+      // FIT, then SCORE: the model only sees what suits this business, best first.
+      const { eligible, ineligible } = partitionLibrary(library, fit.ctx, fit.revenueWeight);
+      if (eligible.length > 0) {
         workbookContext =
           "\n\nINITIATIVE LIBRARY (the ONLY initiatives you may choose from - return libraryKey verbatim):\n" +
-          renderLibraryForPrompt(library, aiContext);
-        console.log("[generate-plan] Library:", library.length, "initiatives |", workbookContext.length, "chars");
+          renderLibraryForPrompt(eligible, aiContext);
+        console.log(
+          "[generate-plan] Library:", eligible.length, "eligible of", library.length,
+          "| ineligible:", ineligible.length, "| weight:", fit.revenueWeight,
+          "|", workbookContext.length, "chars"
+        );
       } else {
-        console.error("[generate-plan] Initiative library is EMPTY - has migration 018 been applied and the workbook re-uploaded?");
+        console.error(
+          "[generate-plan] No eligible initiatives (library:", library.length,
+          "| ineligible:", ineligible.length, ") - is the workbook uploaded and anything active?"
+        );
       }
     } catch (wbErr) {
       console.error("[generate-plan] Workbook load failed:", wbErr);
@@ -537,36 +552,14 @@ Generate a complete revenue plan as JSON.`;
     }
 
     /**
-     * 7c. Get or create initiative types for each channel.
-     *
-     * NOT FILTERED ON `is_active`, and that is a bug fix.
-     *
-     * It used to select only active rows, so when an admin deactivated a type
-     * the lookup missed and the insert below created a NEW ACTIVE DUPLICATE of
-     * the row they had just switched off — defeating the toggle and quietly
-     * growing the table every time a plan was generated. (There are 32 rows for
-     * 22 library initiatives today, which is how.)
-     *
-     * Reusing the deactivated row is the right behaviour now that
-     * `initiative_settings` is the real control over what the AI may reference:
-     * `initiative_types.is_active` no longer needs to gate anything here, and
-     * the library has already been filtered to the active set upstream by
-     * loadLibrary. So anything reaching this point is something the admin has
-     * allowed, and it should map onto the existing row rather than a clone.
-     *
-     * Ordered so that if duplicates already exist, the OLDEST wins — the one
-     * other plans are most likely already pointing at.
+     * 7c. Initiative types are resolved per library key by the SHARED helper
+     * (src/lib/workbook/initiative-type.ts), the same one the intake build and
+     * the Add Initiative route use: oldest row with `channel = libraryKey`,
+     * active or not, never reactivated; created once only when none exists.
+     * One cache for the whole plan, so a repeated key costs one lookup.
      */
-    const channelTypeMap = new Map<string, string>();
-    const { data: existingTypes } = await supabase
-      .from("initiative_types")
-      .select("id, channel, is_active, created_at")
-      .order("created_at", { ascending: true });
-
-    for (const t of existingTypes || []) {
-      // First write wins, which with the ordering above is the oldest row.
-      if (!channelTypeMap.has(t.channel)) channelTypeMap.set(t.channel, t.id);
-    }
+    const typeStore = supabaseTypeStore(supabase, "[generate-plan]");
+    const typeCache = new Map<string, string>();
 
     // 7d. Insert initiatives and their tasks
     // Sequence the whole set BEFORE writing any of it. The AI dates each
@@ -578,7 +571,30 @@ Generate a complete revenue plan as JSON.`;
     // Trial accounts are not trimmed specially: a trial grants Starter's limits,
     // and max_initiatives is enforced through the normal entitlement path like
     // any plan. The separate trial cap was removed.
-    const generatedInitiatives = plan.initiatives || [];
+    /**
+     * FIT, enforced server-side. The prompt only listed eligible initiatives,
+     * but the prompt is not enforcement: a library key the model picks that
+     * fails FIT (or the admin allowlist) is REJECTED here with the rule's
+     * reason, the same way /api/intake/recommend re-checks. Keys that are not
+     * library keys at all keep their existing handling below.
+     */
+    const rejectedInitiatives: { libraryKey: string; name: string; reason: string }[] = [];
+    const fullLibraryByKey = new Map(
+      (await loadLibrary(supabase, { includeInactive: true })).map((l) => [l.initiativeKey, l])
+    );
+    const generatedInitiatives = (plan.initiatives || []).filter((gi) => {
+      const key = gi.libraryKey || gi.channel || "";
+      const reason = rejectionReason(fullLibraryByKey.get(key), fit.ctx);
+      if (!reason) return true;
+      rejectedInitiatives.push({ libraryKey: key, name: gi.name, reason });
+      return false;
+    });
+    if (rejectedInitiatives.length > 0) {
+      console.warn(
+        "[generate-plan] Rejected ineligible picks:",
+        rejectedInitiatives.map((r) => `${r.libraryKey} (${r.reason})`).join("; ")
+      );
+    }
 
     // Task templates for everything the model selected. Tasks and their lead
     // times come from here, not from the model.
@@ -624,39 +640,16 @@ Generate a complete revenue plan as JSON.`;
       // `channel` is only read as a fallback for an older cached response.
       const channel = init.libraryKey || init.channel || "custom";
 
-      let typeId = channelTypeMap.get(channel);
-      if (!typeId) {
-        // No initiative_type row for this library entry yet - create one from the
-        // workbook so the library stays the source of truth rather than a
-        // hand-maintained list. Difficulty is the workbook's 1-5 scale.
-        const libDifficulty = libraryByKey.get(channel)?.difficulty ?? 3;
-        const { data: newType } = await supabase
-          .from("initiative_types")
-          .insert({
-            name: libraryByKey.get(channel)?.name
-              || channel.charAt(0).toUpperCase() + channel.slice(1),
-            channel,
-            description: libraryByKey.get(channel)?.oneLiner || "",
-            owner: "system",
-            benchmarks: {},
-            project_template: { tasks: [], totalEstimatedHours: 0 },
-            difficulty: {
-              effortToImplement: libDifficulty,
-              skillExpertiseRequired: libDifficulty,
-              timeToResults: libDifficulty,
-              costToRun: libDifficulty,
-            },
-            ai_context: {},
-            tier: 1,
-            display_order: 99,
-            is_active: true,
-          })
-          .select("id")
-          .single();
-
-        typeId = newType?.id;
-        if (typeId) channelTypeMap.set(channel, typeId);
-      }
+      // Created from the workbook entry when no type has this channel yet.
+      const libEntry = libraryByKey.get(channel);
+      const typeId = await resolveInitiativeTypeId(
+        typeStore,
+        channel,
+        libEntry
+          ? { name: libEntry.name, oneLiner: libEntry.oneLiner, difficulty: libEntry.difficulty }
+          : null,
+        typeCache
+      );
 
       if (!typeId) continue;
 
@@ -674,9 +667,10 @@ Generate a complete revenue plan as JSON.`;
       const activationDate = toDateOnly(activationDateObj);
       const eventDate = toDateOnly(eventDateObj);
 
-      const { data: newInit, error: initErr } = await supabase
-        .from("initiatives")
-        .insert({
+      // `library_key` (migration 040) only for a real library pick; omitted
+      // when the column is absent.
+      const { data: newInit, error: initErr } = await insertWithLibraryKey(
+        {
           company_id: companyId,
           annual_plan_id: annualPlan.id,
           product_id: productId,
@@ -694,9 +688,13 @@ Generate a complete revenue plan as JSON.`;
           planned_budget: init.plannedBudget || 0,
           actual_spend: 0,
           display_order: 0,
-        })
-        .select("id")
-        .single();
+        },
+        libraryKeys.has(channel) ? channel : null,
+        (row) => supabase.from("initiatives").insert(row).select("id").single(),
+        // Every format and optional metric; null when not a library pick or
+        // the row has no metrics.
+        libEntry ? defaultLibraryMetricSet(channel, libEntry) : null
+      );
 
       if (initErr) {
         console.error("[generate-plan] Initiative insert failed:", initErr.message, "| details:", initErr.details, "| hint:", initErr.hint);
@@ -822,7 +820,7 @@ Generate a complete revenue plan as JSON.`;
       userId: check.userId,
       eventType,
       status: "success",
-      initiativesCreated: (plan.initiatives || []).length,
+      initiativesCreated: generatedInitiatives.length,
       durationMs,
       model: MODEL,
       tokensInput,
@@ -844,6 +842,8 @@ Generate a complete revenue plan as JSON.`;
       success: true,
       productsCreated: productIds.length,
       initiativesCreated: generatedInitiatives.length,
+      /** Model picks dropped by FIT, with the rule's reason. Usually empty. */
+      rejectedInitiatives,
     });
   } catch (err: unknown) {
     const e = err as {

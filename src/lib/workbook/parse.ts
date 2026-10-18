@@ -27,6 +27,60 @@ export interface LibraryRow {
   difficulty: number | null; speedToResults: string | null; oneLiner: string | null;
   description: string | null; needsSalesTeam: string | null; priceTier: string | null;
   ownOrOps: string | null; displayOrder: number;
+  /*
+   * Fields from the Oct 2026 library layout (19 columns, S/C/O/R/E scores).
+   * Optional so rows built elsewhere in the old shape still type-check; the
+   * parser always fills them (null / [] when the sheet has no such column).
+   */
+  /** Each 1-5, where 5 is always best. Null when blank or not a whole 1-5. */
+  speedScore?: number | null; costScore?: number | null; oddsScore?: number | null;
+  revenueScore?: number | null; easeScore?: number | null;
+  /** S+C+O+R+E computed here (the sheet's own total is not trusted). Null unless all five are present. */
+  scoreTotal?: number | null;
+  idealIndustries?: string[]; ctaOptions?: string[]; training?: string[];
+  /** The Metrics cell exactly as written, newlines and all. */
+  metricsRaw?: string | null;
+  /**
+   * Set ONLY on a variant listing ("webinar-own"): the key of the initiative
+   * it is a variant of ("webinar"). Task templates and benchmarks join by name,
+   * so they land on the base key; readers fall back to it (see read.ts).
+   * Absent / null on a base listing.
+   */
+  baseKey?: string | null;
+}
+
+/**
+ * Difficulty and text Speed, derived from the S/C/O/R/E scores when the sheet
+ * does not author them.
+ *
+ * The Oct 2026 layout dropped both columns, but eligibility (passesCapacity,
+ * HIGH_EFFORT_DIFFICULTY) reads `difficulty`, and the heuristic ranking and the
+ * recommendation cards read `speedToResults` as "Fast" / "Medium" / "Slow"
+ * (matched by substring in rankHeuristically). Both scales put 5 at the
+ * desirable end, so:
+ *
+ *   difficulty     = 6 - easeScore, clamped to 1-5
+ *   speedToResults = speedScore 5|4 -> "Fast", 3 -> "Medium", 2|1 -> "Slow"
+ *
+ * A value the sheet DOES provide is never overwritten. Pure; the parser output
+ * stays a faithful reading of the sheet, and ingest applies this on the way
+ * into wb_initiative_library, so the derived values are stored even on a
+ * database without migration 040 (which is where the scores themselves live).
+ */
+export function deriveLegacyFields<T extends Pick<LibraryRow, 'difficulty' | 'speedToResults' | 'speedScore' | 'easeScore'>>(
+  row: T
+): T {
+  let { difficulty, speedToResults } = row;
+  const ease = row.easeScore;
+  if (difficulty === null && typeof ease === 'number' && Number.isFinite(ease)) {
+    difficulty = Math.min(5, Math.max(1, Math.round(6 - ease)));
+  }
+  const speed = row.speedScore;
+  if ((speedToResults === null || speedToResults.trim() === '') && typeof speed === 'number' && speed >= 1 && speed <= 5) {
+    speedToResults = speed >= 4 ? 'Fast' : speed >= 3 ? 'Medium' : 'Slow';
+  }
+  if (difficulty === row.difficulty && speedToResults === row.speedToResults) return row;
+  return { ...row, difficulty, speedToResults };
 }
 export interface BenchmarkRow {
   initiativeKey: string; metric: string; conservative: number | null; moderate: number | null;
@@ -157,6 +211,101 @@ const LIBRARY_HEADERS: Record<keyof LibraryColumns, readonly string[]> = {
 };
 
 /**
+ * First header matching any candidate: exact, then prefix, then substring.
+ * Substring is the last resort, and never for very short candidates where it
+ * would match almost anything. Columns in `blocked` are never matched.
+ */
+function findHeader(
+  normalized: readonly string[],
+  candidates: readonly string[],
+  blocked: ReadonlySet<number>
+): number {
+  for (const candidate of candidates) {
+    let found = normalized.findIndex((h, i) => !blocked.has(i) && h === candidate);
+    if (found >= 0) return found;
+    found = normalized.findIndex((h, i) => !blocked.has(i) && h.startsWith(candidate));
+    if (found >= 0) return found;
+    if (candidate.length >= 5) {
+      found = normalized.findIndex((h, i) => !blocked.has(i) && h.includes(candidate));
+      if (found >= 0) return found;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Columns that only exist in the Oct 2026 library layout. -1 when absent:
+ * these have no historical position to fall back to.
+ *
+ * The new layout is ID, Initiative Name, Category, Training, Metrics,
+ * One-line description, Longer Description, Do you need a sales team?,
+ * Primary product price tier, Own / Ops (future), Ideal Industries,
+ * Call to Action Options, Speed (S), Cost (C), Odds (O), Revenue (R), Ease (E),
+ * SCORE total, Weighted SCORE. Difficulty and the text "Speed to ..." are gone.
+ * Weighted SCORE is deliberately not read (it is #REF! on every row).
+ */
+export interface LibraryExtraColumns {
+  training: number;
+  metrics: number;
+  idealIndustries: number;
+  ctaOptions: number;
+  speedScore: number;
+  costScore: number;
+  oddsScore: number;
+  revenueScore: number;
+  easeScore: number;
+  /** The sheet's own SCORE total — used only to cross-check the computed sum. */
+  sheetScoreTotal: number;
+}
+
+export type ScoreField = 'speedScore' | 'costScore' | 'oddsScore' | 'revenueScore' | 'easeScore';
+export const SCORE_FIELDS: readonly ScoreField[] =
+  ['speedScore', 'costScore', 'oddsScore', 'revenueScore', 'easeScore'];
+
+/**
+ * Score headers are matched on the RAW header ("Speed (S)\n5 = really fast"),
+ * because the letter in brackets is what identifies them and normalizeHeader
+ * strips parentheticals. This also keeps "Speed (S)" away from the old
+ * free-text speedToResults field, whose bare "speed" synonym would otherwise
+ * claim it by prefix.
+ */
+const SCORE_HEADER_PATTERNS: Record<ScoreField, RegExp> = {
+  speedScore: /^\s*speed\s*\(\s*s\s*\)/i,
+  costScore: /^\s*cost\s*\(\s*c\s*\)/i,
+  oddsScore: /^\s*odds\s*\(\s*o\s*\)/i,
+  revenueScore: /^\s*revenue\s*\(\s*r\s*\)/i,
+  easeScore: /^\s*ease\s*\(\s*e\s*\)/i,
+};
+
+const LIBRARY_EXTRA_HEADERS: Record<Exclude<keyof LibraryExtraColumns, ScoreField>, readonly string[]> = {
+  training: ['training'],
+  metrics: ['metrics'],
+  idealIndustries: ['ideal industries'],
+  ctaOptions: ['call to action options', 'call to action', 'cta options'],
+  sheetScoreTotal: ['score total'],
+};
+
+export function resolveLibraryExtraColumns(headers?: readonly string[]): LibraryExtraColumns {
+  const raw = (headers ?? []).map((h) => String(h ?? ''));
+  const normalized = raw.map(normalizeHeader);
+  const taken = new Set<number>();
+  const out: LibraryExtraColumns = {
+    training: -1, metrics: -1, idealIndustries: -1, ctaOptions: -1,
+    speedScore: -1, costScore: -1, oddsScore: -1, revenueScore: -1, easeScore: -1,
+    sheetScoreTotal: -1,
+  };
+  for (const field of SCORE_FIELDS) {
+    const found = raw.findIndex((h, i) => !taken.has(i) && SCORE_HEADER_PATTERNS[field].test(h));
+    if (found >= 0) { out[field] = found; taken.add(found); }
+  }
+  for (const field of Object.keys(LIBRARY_EXTRA_HEADERS) as (keyof typeof LIBRARY_EXTRA_HEADERS)[]) {
+    const found = findHeader(normalized, LIBRARY_EXTRA_HEADERS[field], taken);
+    if (found >= 0) { out[field] = found; taken.add(found); }
+  }
+  return out;
+}
+
+/**
  * Map the library sheet's headers onto field positions.
  *
  * Matching is exact first, then prefix, then substring — so "difficulty" finds
@@ -167,39 +316,130 @@ const LIBRARY_HEADERS: Record<keyof LibraryColumns, readonly string[]> = {
  * A column already claimed by an earlier field is not reused, which stops a
  * loose synonym ("name", "category") from stealing a column that a more
  * specific header already matched.
+ *
+ * Columns that belong to the new-layout fields (resolveLibraryExtraColumns) are
+ * off limits, both for matching and as a fallback. In the Oct 2026 layout
+ * Difficulty and Speed-to-results no longer exist, and their historical
+ * positions (3, 4) now hold Training and Metrics; those fields resolve to -1
+ * (read as blank) instead of reading the wrong column.
  */
 export function resolveLibraryColumns(headers?: readonly string[]): LibraryColumns {
   const normalized = (headers ?? []).map(normalizeHeader);
   const resolved = { ...LIBRARY_FALLBACK };
-  const taken = new Set<number>();
+  const extras = resolveLibraryExtraColumns(headers);
+  const reserved = new Set(Object.values(extras).filter((i) => i >= 0));
+  const blocked = new Set<number>(reserved);
 
   // Deterministic order: the declaration order of LIBRARY_HEADERS, which runs
   // most-specific-header first within each field.
   for (const field of Object.keys(LIBRARY_HEADERS) as (keyof LibraryColumns)[]) {
-    const candidates = LIBRARY_HEADERS[field];
-    let found = -1;
-
-    for (const candidate of candidates) {
-      found = normalized.findIndex((h, i) => !taken.has(i) && h === candidate);
-      if (found >= 0) break;
-      found = normalized.findIndex((h, i) => !taken.has(i) && h.startsWith(candidate));
-      if (found >= 0) break;
-      // Substring is the last resort, and never for very short candidates
-      // where it would match almost anything.
-      if (candidate.length >= 5) {
-        found = normalized.findIndex((h, i) => !taken.has(i) && h.includes(candidate));
-        if (found >= 0) break;
-      }
-    }
-
+    const found = findHeader(normalized, LIBRARY_HEADERS[field], blocked);
     if (found >= 0) {
       resolved[field] = found;
-      taken.add(found);
+      blocked.add(found);
+    } else if (reserved.has(resolved[field])) {
+      resolved[field] = -1;
     }
   }
 
   return resolved;
 }
+
+/* ------------------------------------------------------------------ *
+ * AI Context columns, located by HEADER NAME
+ * ------------------------------------------------------------------ */
+
+/**
+ * The AI Context sheet gained a leading ID column and lost "Min. budget" in the
+ * Oct 2026 workbook, so positional reading would key every row by its ID
+ * ("in03") and shift every guidance field by one. -1 means "not on this sheet".
+ */
+export interface AiContextColumns {
+  workbookId: number;
+  initiative: number;
+  whenToUse: number;
+  bestFit: number;
+  minBudget: number;
+  minAssets: number;
+  whyItWorks: number;
+  whatToAvoid: number;
+  sequencingNotes: number;
+}
+
+/** The historical, ID-less layout. */
+const AI_CONTEXT_FALLBACK: AiContextColumns = {
+  workbookId: -1, initiative: 0, whenToUse: 1, bestFit: 2, minBudget: 3,
+  minAssets: 4, whyItWorks: 5, whatToAvoid: 6, sequencingNotes: 7,
+};
+
+const AI_CONTEXT_HEADERS: Record<keyof AiContextColumns, readonly string[]> = {
+  workbookId: ['id', 'initiative id'],
+  initiative: ['initiative', 'initiative name'],
+  whenToUse: ['when to recommend', 'when to use'],
+  bestFit: ['best fit'],
+  minBudget: ['min budget', 'minimum budget'],
+  minAssets: ['min assets', 'minimum assets'],
+  whyItWorks: ['why it works'],
+  whatToAvoid: ['what to avoid'],
+  sequencingNotes: ['sequencing notes', 'sequencing'],
+};
+
+/**
+ * Same matching rules as the library. A field with no header keeps its
+ * historical position only if no matched field already owns that column —
+ * otherwise it is absent (-1). The ID column is never guessed positionally.
+ * With no headers at all, the historical layout is used unchanged.
+ */
+export function resolveAiContextColumns(headers?: readonly string[]): AiContextColumns {
+  if (!headers || headers.length === 0) return { ...AI_CONTEXT_FALLBACK };
+  const normalized = headers.map(normalizeHeader);
+  const taken = new Set<number>();
+  const matched: Partial<AiContextColumns> = {};
+  const fields = Object.keys(AI_CONTEXT_HEADERS) as (keyof AiContextColumns)[];
+  for (const field of fields) {
+    const found = field === 'workbookId'
+      // Exact only: a prefix "id" could match an unrelated header.
+      ? normalized.findIndex((h, i) => !taken.has(i) && AI_CONTEXT_HEADERS.workbookId.includes(h))
+      : findHeader(normalized, AI_CONTEXT_HEADERS[field], taken);
+    if (found >= 0) { matched[field] = found; taken.add(found); }
+  }
+  const out = { ...AI_CONTEXT_FALLBACK };
+  for (const field of fields) {
+    const m = matched[field];
+    if (m !== undefined) out[field] = m;
+    else if (out[field] >= 0 && taken.has(out[field])) out[field] = -1;
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ *
+ * Cell helpers for the new library fields
+ * ------------------------------------------------------------------ */
+
+/** Split a list cell ("A, B; C") into trimmed, non-empty items. */
+export function splitList(raw: unknown): string[] {
+  return String(raw ?? '')
+    .split(/[,;\n]/)
+    .map((s) => s.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+/**
+ * A 1-5 score. Whole numbers only ("4", 4, "4.0"); anything else — blank,
+ * out of range, fractional, text, "#REF!" — is null with the reason.
+ */
+export function parseScore(raw: unknown): { value: number | null; problem: string | null } {
+  const s = String(raw ?? '').trim();
+  if (s === '') return { value: null, problem: 'blank' };
+  if (!/^\d+(\.0+)?$/.test(s)) return { value: null, problem: `"${s}" is not a whole number` };
+  const n = Number(s);
+  if (n < 1 || n > 5) return { value: null, problem: `${n} is outside 1-5` };
+  return { value: n, problem: null };
+}
+
+/** Indices of the non-blank cells in a row. */
+const filledCells = (row: string[]): number[] =>
+  row.reduce<number[]>((acc, c, i) => (String(c ?? '').trim() !== '' ? [...acc, i] : acc), []);
 
 const orNull = (v: string): string | null => (v === '' ? null : v);
 
@@ -211,12 +451,17 @@ export function contentRows(sheet: RawSheet): string[][] {
   return (sheet.rows || []).filter((r) => !isBlankRow(r));
 }
 
-/** "CATEGORY: OTHER PEOPLE'S STAGES - OPS" style banner rows. */
-function isCategoryBanner(row: string[]): boolean {
-  const first = cell(row, 0);
-  if (!first) return false;
-  const rest = row.slice(1).every((c) => String(c ?? '').trim() === '');
-  return rest && /^category\s*:/i.test(first);
+/**
+ * "CATEGORY: OTHER PEOPLE'S STAGES - OPS" style banner rows: one non-blank
+ * cell, starting "CATEGORY:". The old layout put the banner in column 0; the
+ * Oct 2026 layout puts it in column 1 (Initiative Name), so any column counts.
+ * Returns the banner text without the prefix, or null.
+ */
+function categoryBanner(row: string[]): string | null {
+  const filled = filledCells(row);
+  if (filled.length !== 1) return null;
+  const text = cell(row, filled[0]);
+  return /^category\s*:/i.test(text) ? text.replace(/^category\s*:\s*/i, '') : null;
 }
 
 /**
@@ -328,55 +573,179 @@ export function canonicalKey(name: unknown): string {
 
 const findSheet = (sheets: RawSheet[], re: RegExp) => sheets.find((s) => re.test(s.name));
 
-export function parseWorkbook(sheets: RawSheet[]): ParsedWorkbook {
-  const warnings: string[] = [];
-  const out: ParsedWorkbook = { library: [], benchmarks: [], taskTemplates: [], aiContext: [], warnings };
+/* ------------------------------------------------------------------ *
+ * Initiative Library sheet
+ * ------------------------------------------------------------------ */
 
-  // ---- Initiative Library ----
-  const lib = findSheet(sheets, /initiative\s*library/i);
-  if (!lib) warnings.push('No "Initiative Library" sheet found.');
-  else {
-    /**
-     * Columns by HEADER NAME, not position — see resolveLibraryColumns. The
-     * sheet gained a "Cost to Run" column which shifted five fields by one and
-     * corrupted the library silently.
-     */
-    const col = resolveLibraryColumns(lib.headers);
+/**
+ * One library LISTING (before identical duplicates collapse), kept so AI
+ * Context rows — which mirror the library row for row, banners included — can
+ * be attached to the key their listing ended up with.
+ */
+interface LibraryLink {
+  key: string;
+  baseKey: string;
+  workbookId: string | null;
+  banner: string | null;
+}
 
-    // Say so when the sheet does not look like the library at all, rather than
-    // parsing 22 rows of nothing from fallback positions.
-    if ((lib.headers?.length ?? 0) > 0) {
-      const unmatched = (Object.keys(LIBRARY_HEADERS) as (keyof LibraryColumns)[])
-        .filter((field) => !lib.headers?.[col[field]]);
-      if (unmatched.length > 0) {
+const SCORE_LABEL: Record<ScoreField, string> = {
+  speedScore: 'Speed', costScore: 'Cost', oddsScore: 'Odds', revenueScore: 'Revenue', easeScore: 'Ease',
+};
+
+/** Everything that describes the initiative except where it is listed. */
+function rowSignature(r: LibraryRow): string {
+  return JSON.stringify([
+    r.workbookId, r.name, r.difficulty, r.speedToResults, r.oneLiner, r.description,
+    r.needsSalesTeam, r.priceTier, r.ownOrOps, r.speedScore, r.costScore, r.oddsScore,
+    r.revenueScore, r.easeScore, r.idealIndustries, r.ctaOptions, r.training, r.metricsRaw,
+  ]);
+}
+
+const describeRow = (r: LibraryRow): string =>
+  `${r.workbookId ?? 'no ID'}, ${r.ownOrOps ?? 'no Own/Ops'}, ${r.category ?? 'no category'}`;
+
+/**
+ * Key for a second (third, ...) listing of an initiative whose base key is
+ * already held by its first listing.
+ *
+ * Suffixed with the first field that tells the two apart — Own/Ops, then
+ * category, then ID, then combinations — so the key says what the variant is
+ * ("webinar-own") and depends only on the row's content, never its position.
+ * A counter is the last resort, for listings that differ only in detail text,
+ * and is the one case that is order-dependent; it is called out in the reason.
+ */
+function variantKey(
+  row: LibraryRow,
+  canonical: LibraryRow,
+  baseKey: string,
+  used: ReadonlySet<string>
+): { key: string; reason: string } {
+  const own = normalizeKey(row.ownOrOps);
+  const cat = normalizeKey(row.category);
+  const id = normalizeKey(row.workbookId);
+  const candidates: Array<[string, string]> = [];
+  if (own && own !== normalizeKey(canonical.ownOrOps)) candidates.push(['Own/Ops', own]);
+  if (cat && cat !== normalizeKey(canonical.category)) candidates.push(['category', cat]);
+  if (id && id !== normalizeKey(canonical.workbookId)) candidates.push(['ID', id]);
+  if (own && cat) candidates.push(['Own/Ops + category', `${own}-${cat}`]);
+  if (cat && id) candidates.push(['category + ID', `${cat}-${id}`]);
+  for (const [reason, suffix] of candidates) {
+    const key = `${baseKey}-${suffix}`;
+    if (!used.has(key)) return { key, reason };
+  }
+  for (let n = 2; ; n++) {
+    const key = `${baseKey}-${n}`;
+    if (!used.has(key)) return { key, reason: 'listing order — nothing else distinguishes it' };
+  }
+}
+
+function parseLibrarySheet(
+  lib: RawSheet,
+  warnings: string[]
+): { library: LibraryRow[]; links: LibraryLink[] } {
+  /**
+   * Columns by HEADER NAME, not position — see resolveLibraryColumns. The
+   * sheet gained a "Cost to Run" column which shifted five fields by one and
+   * corrupted the library silently.
+   */
+  const col = resolveLibraryColumns(lib.headers);
+  const extra = resolveLibraryExtraColumns(lib.headers);
+  const hasScores = SCORE_FIELDS.some((f) => extra[f] >= 0);
+
+  // Say so when the sheet does not look like the library at all, rather than
+  // parsing 22 rows of nothing from fallback positions.
+  if ((lib.headers?.length ?? 0) > 0) {
+    const fields = Object.keys(LIBRARY_HEADERS) as (keyof LibraryColumns)[];
+    const unmatched = fields.filter((field) => col[field] >= 0 && !lib.headers?.[col[field]]);
+    if (unmatched.length > 0) {
+      warnings.push(
+        `Initiative Library: could not find a header for ${unmatched.join(', ')} — ` +
+        `read from the historical column position instead. Headers seen: ` +
+        `${(lib.headers ?? []).join(' | ')}`
+      );
+    }
+    // The scored layout dropped Difficulty and the text Speed on purpose.
+    const absent = fields.filter((field) =>
+      col[field] < 0 && !(hasScores && (field === 'difficulty' || field === 'speedToResults')));
+    if (absent.length > 0) {
+      warnings.push(
+        `Initiative Library: no column for ${absent.join(', ')} (its historical position ` +
+        `now holds a different column), so it is left blank.`
+      );
+    }
+  }
+
+  const raw = (row: string[], i: number): string => (i < 0 ? '' : String(row[i] ?? ''));
+
+  // ---- 1. Rows ----
+  const listed: Array<{ row: LibraryRow; banner: string | null }> = [];
+  let banner: string | null = null;
+  let order = 0;
+  for (const row of contentRows(lib)) {
+    const bannerText = categoryBanner(row);
+    if (bannerText !== null) { banner = bannerText; continue; }
+
+    const name = cell(row, col.name);
+    const id = cell(row, col.workbookId);
+    if (!name) {                                 // header repeats / stray rows
+      if (id) warnings.push(`Initiative Library: row with ID ${id} has no initiative name — skipped.`);
+      continue;
+    }
+    if (/^initiative\s*name$/i.test(name)) continue;
+
+    // "Sales Team", "DIGITAL MARKETING": a label in the name column and
+    // nothing else. A section heading, not an initiative.
+    const filled = filledCells(row);
+    if (!id && filled.length === 1 && filled[0] === col.name) {
+      warnings.push(
+        `Initiative Library: "${name}" has no ID and no other data — treated as a section heading, not an initiative.`
+      );
+      banner = name;
+      continue;
+    }
+
+    const difficulty = parseNumeric(cell(row, col.difficulty));
+    if (difficulty !== null && (difficulty < 1 || difficulty > 5)) {
+      warnings.push(`Library "${name}": difficulty ${difficulty} outside 1-5, stored as null.`);
+    }
+
+    const scores: Record<ScoreField, number | null> = {
+      speedScore: null, costScore: null, oddsScore: null, revenueScore: null, easeScore: null,
+    };
+    const problems: string[] = [];
+    for (const f of SCORE_FIELDS) {
+      if (extra[f] < 0) continue;
+      const { value, problem } = parseScore(cell(row, extra[f]));
+      scores[f] = value;
+      if (problem) problems.push(`${SCORE_LABEL[f]} ${problem}`);
+    }
+    if (problems.length > 0) {
+      warnings.push(`Library "${name}" (${id || 'no ID'}): ${problems.join('; ')} — stored as null.`);
+    }
+
+    // The sheet's SCORE total is not stored; it is recomputed so one stale
+    // formula cannot disagree with the five scores it is meant to sum.
+    const present = SCORE_FIELDS.map((f) => scores[f]).filter((v): v is number => v !== null);
+    const scoreTotal = present.length === SCORE_FIELDS.length ? present.reduce((a, b) => a + b, 0) : null;
+    if (scoreTotal !== null && extra.sheetScoreTotal >= 0) {
+      const sheetTotal = parseNumeric(cell(row, extra.sheetScoreTotal));
+      if (sheetTotal !== null && sheetTotal !== scoreTotal) {
         warnings.push(
-          `Initiative Library: could not find a header for ${unmatched.join(', ')} — ` +
-          `read from the historical column position instead. Headers seen: ` +
-          `${(lib.headers ?? []).join(' | ')}`
+          `Library "${name}" (${id || 'no ID'}): sheet SCORE total ${sheetTotal} does not match ` +
+          `S+C+O+R+E = ${scoreTotal}; using ${scoreTotal}.`
         );
       }
     }
 
-    let category: string | null = null;
-    let order = 0;
-    for (const row of contentRows(lib)) {
-      if (isCategoryBanner(row)) {
-        category = cell(row, 0).replace(/^category\s*:\s*/i, '');
-        continue;
-      }
-      const name = cell(row, col.name);
-      if (!name) continue;                       // header repeats / stray rows
-      if (/^initiative\s*name$/i.test(name)) continue;
-      const rowCategory = orNull(cell(row, col.category)) || category;
-      const difficulty = parseNumeric(cell(row, col.difficulty));
-      if (difficulty !== null && (difficulty < 1 || difficulty > 5)) {
-        warnings.push(`Library "${name}": difficulty ${difficulty} outside 1-5, stored as null.`);
-      }
-      out.library.push({
+    const metrics = raw(row, extra.metrics);
+    listed.push({
+      banner,
+      row: {
         initiativeKey: canonicalKey(name),
-        workbookId: orNull(cell(row, col.workbookId)),
+        workbookId: orNull(id),
         name,
-        category: rowCategory,
+        category: orNull(cell(row, col.category)) || banner,
         difficulty: difficulty !== null && difficulty >= 1 && difficulty <= 5 ? Math.round(difficulty) : null,
         speedToResults: orNull(cell(row, col.speedToResults)),
         oneLiner: orNull(cell(row, col.oneLiner)),
@@ -385,24 +754,203 @@ export function parseWorkbook(sheets: RawSheet[]): ParsedWorkbook {
         priceTier: orNull(cell(row, col.priceTier)),
         ownOrOps: orNull(cell(row, col.ownOrOps)),
         displayOrder: order++,
-      });
-    }
-    if (out.library.length === 0) warnings.push('Initiative Library parsed to zero rows.');
+        ...scores,
+        scoreTotal,
+        idealIndustries: splitList(raw(row, extra.idealIndustries)),
+        ctaOptions: splitList(raw(row, extra.ctaOptions)),
+        training: splitList(raw(row, extra.training)),
+        // Verbatim: structuring the metrics is a separate step.
+        metricsRaw: metrics.trim() === '' ? null : metrics,
+      },
+    });
+  }
+  if (listed.length === 0) warnings.push('Initiative Library parsed to zero rows.');
 
-    // The library sheet repeats initiatives under several category banners, so
-    // the same initiative appears multiple times. initiative_key is unique in
-    // the database, so collapse duplicates here - keeping the first occurrence,
-    // which is the one with its category banner - rather than failing on insert.
-    const seen = new Set<string>();
-    const deduped: LibraryRow[] = [];
-    let dupes = 0;
-    for (const row of out.library) {
-      if (seen.has(row.initiativeKey)) { dupes++; continue; }
-      seen.add(row.initiativeKey);
-      deduped.push(row);
+  // ---- 2. Identical listings collapse ----
+  // The same initiative is sometimes repeated, word for word, under a second
+  // category banner. initiative_key is unique in the database, so those
+  // collapse onto the first listing, as they always have.
+  const kept: Array<{ row: LibraryRow; baseKey: string }> = [];
+  const keptIndexOf: number[] = [];
+  const bySignature = new Map<string, number>();
+  let dupes = 0;
+  for (const { row } of listed) {
+    const baseKey = row.initiativeKey;
+    const sig = `${baseKey}\u0000${rowSignature(row)}`;
+    const existing = bySignature.get(sig);
+    if (existing !== undefined) { dupes++; keptIndexOf.push(existing); continue; }
+    bySignature.set(sig, kept.length);
+    keptIndexOf.push(kept.length);
+    kept.push({ row, baseKey });
+  }
+  if (dupes > 0) warnings.push(`Initiative Library: collapsed ${dupes} duplicate rows (same initiative listed under multiple categories).`);
+
+  // ---- 3. Distinct listings sharing a key get their own ----
+  // e.g. "Live Webinar" as OPS (guest speaking) and as OWN (hosting). The first
+  // listing keeps the base key — exactly what the parser has always produced,
+  // so admin toggles and existing links stay attached — and later ones are
+  // suffixed. Every base key is reserved up front, so a suffix can never take
+  // a key that a later, differently-named initiative needs.
+  const used = new Set(kept.map((k) => k.baseKey));
+  const canonicalByBase = new Map<string, LibraryRow>();
+  const variantNotes = new Map<string, string[]>();
+  for (const k of kept) {
+    const canonical = canonicalByBase.get(k.baseKey);
+    if (!canonical) { canonicalByBase.set(k.baseKey, k.row); continue; }
+    const { key, reason } = variantKey(k.row, canonical, k.baseKey, used);
+    used.add(key);
+    k.row.initiativeKey = key;
+    k.row.baseKey = k.baseKey;
+    const notes = variantNotes.get(k.baseKey) ?? [];
+    notes.push(`(${describeRow(k.row)}) → "${key}" [by ${reason}]`);
+    variantNotes.set(k.baseKey, notes);
+  }
+  for (const [baseKey, notes] of variantNotes) {
+    const canonical = canonicalByBase.get(baseKey);
+    if (!canonical) continue;
+    warnings.push(
+      `Initiative Library: "${canonical.name}" is listed ${notes.length + 1} times with different details. ` +
+      `The first listing (${describeRow(canonical)}) keeps "${baseKey}"; ${notes.join('; ')}.`
+    );
+  }
+
+  // ---- 4. One ID, several different initiatives ----
+  const byId = new Map<string, LibraryRow[]>();
+  for (const { row } of kept) {
+    if (!row.workbookId) continue;
+    byId.set(row.workbookId, [...(byId.get(row.workbookId) ?? []), row]);
+  }
+  for (const [id, rows] of byId) {
+    if (new Set(rows.map((r) => canonicalKey(r.name))).size < 2) continue;
+    warnings.push(
+      `Initiative Library: ID ${id} is shared by ${rows.length} different listings — ` +
+      `${rows.map((r) => `"${r.name}" → "${r.initiativeKey}"`).join(', ')}. ` +
+      `Each keeps its own key; workbook ID stays ${id} on all of them.`
+    );
+  }
+
+  const links = listed.map(({ row, banner: listedBanner }, i) => ({
+    key: kept[keptIndexOf[i]].row.initiativeKey,
+    baseKey: canonicalKey(row.name),
+    workbookId: row.workbookId,
+    banner: listedBanner,
+  }));
+
+  return { library: kept.map((k) => k.row), links };
+}
+
+/* ------------------------------------------------------------------ *
+ * AI Context sheet
+ * ------------------------------------------------------------------ */
+
+const hasGuidance = (r: AiContextRow): boolean =>
+  [r.whenToUse, r.bestFit, r.minBudget, r.minAssets, r.whyItWorks, r.whatToAvoid, r.sequencingNotes]
+    .some(Boolean);
+
+/**
+ * The library key an AI Context row belongs to.
+ *
+ * Same derivation as the library: the name's base key. When the library has
+ * several listings for that name (OPS and OWN variants), the row's ID narrows
+ * the choice, then the category banner it sits under, then the first listing
+ * not yet claimed — the two sheets list initiatives in the same order, so the
+ * Nth "Live Webinar" context row belongs to the Nth "Live Webinar" listing.
+ * A name with no library listing keeps its base key, as it always has.
+ */
+function linkContextKey(
+  links: readonly LibraryLink[],
+  claimed: Set<number>,
+  baseKey: string,
+  workbookId: string,
+  banner: string | null
+): string {
+  const byName = links.map((_, i) => i).filter((i) => links[i].baseKey === baseKey);
+  if (byName.length === 0) return baseKey;
+  const id = workbookId.toUpperCase();
+  const byId = id ? byName.filter((i) => (links[i].workbookId ?? '').toUpperCase() === id) : [];
+  const pool = byId.length > 0 ? byId : byName;
+  const free = pool.filter((i) => !claimed.has(i));
+  const bannerKey = normalizeKey(banner);
+  const pick = free.find((i) => normalizeKey(links[i].banner) === bannerKey) ?? free[0] ?? pool[0];
+  claimed.add(pick);
+  return links[pick].key;
+}
+
+function parseAiContextSheet(
+  ctx: RawSheet,
+  links: readonly LibraryLink[],
+  warnings: string[]
+): AiContextRow[] {
+  const col = resolveAiContextColumns(ctx.headers);
+  const hasIdColumn = col.workbookId >= 0;
+  const claimed = new Set<number>();
+  const rows: AiContextRow[] = [];
+  const headings: string[] = [];
+  let banner: string | null = null;
+
+  for (const row of contentRows(ctx)) {
+    const bannerText = categoryBanner(row);
+    if (bannerText !== null) { banner = bannerText; continue; }
+    const initiative = cell(row, col.initiative);
+    if (!initiative || /^initiative$/i.test(initiative)) continue;
+    const id = hasIdColumn ? cell(row, col.workbookId) : '';
+
+    // Only a sheet WITH an ID column can tell a section heading from an
+    // initiative whose guidance is simply blank.
+    const filled = filledCells(row);
+    if (hasIdColumn && !id && filled.length === 1 && filled[0] === col.initiative) {
+      headings.push(initiative);
+      banner = initiative;
+      continue;
     }
-    if (dupes > 0) warnings.push(`Initiative Library: collapsed ${dupes} duplicate rows (same initiative listed under multiple categories).`);
-    out.library = deduped;
+
+    rows.push({
+      initiativeKey: linkContextKey(links, claimed, canonicalKey(initiative), id, banner),
+      whenToUse: orNull(cell(row, col.whenToUse)),
+      bestFit: orNull(cell(row, col.bestFit)),
+      minBudget: orNull(cell(row, col.minBudget)),
+      minAssets: orNull(cell(row, col.minAssets)),
+      whyItWorks: orNull(cell(row, col.whyItWorks)),
+      whatToAvoid: orNull(cell(row, col.whatToAvoid)),
+      sequencingNotes: orNull(cell(row, col.sequencingNotes)),
+    });
+  }
+
+  if (headings.length > 0) {
+    warnings.push(`AI Context: skipped ${headings.length} section heading row(s) with no ID: ${headings.join(', ')}.`);
+  }
+
+  // wb_ai_context.initiative_key is UNIQUE: one row per key, preferring the
+  // first that actually carries guidance.
+  const byKey = new Map<string, AiContextRow>();
+  const doubled = new Set<string>();
+  for (const r of rows) {
+    const prev = byKey.get(r.initiativeKey);
+    if (!prev) { byKey.set(r.initiativeKey, r); continue; }
+    doubled.add(r.initiativeKey);
+    if (!hasGuidance(prev) && hasGuidance(r)) byKey.set(r.initiativeKey, r);
+  }
+  if (doubled.size > 0) {
+    warnings.push(
+      `AI Context: more than one row resolved to ${[...doubled].join(', ')} — kept one per initiative ` +
+      `(the first with guidance filled in).`
+    );
+  }
+  return [...byKey.values()];
+}
+
+export function parseWorkbook(sheets: RawSheet[]): ParsedWorkbook {
+  const warnings: string[] = [];
+  const out: ParsedWorkbook = { library: [], benchmarks: [], taskTemplates: [], aiContext: [], warnings };
+  let libraryLinks: LibraryLink[] = [];
+
+  // ---- Initiative Library ----
+  const lib = findSheet(sheets, /initiative\s*library/i);
+  if (!lib) warnings.push('No "Initiative Library" sheet found.');
+  else {
+    const parsedLib = parseLibrarySheet(lib, warnings);
+    out.library = parsedLib.library;
+    libraryLinks = parsedLib.links;
   }
 
   // ---- Benchmarks ----
@@ -480,25 +1028,8 @@ export function parseWorkbook(sheets: RawSheet[]): ParsedWorkbook {
   const ctx = findSheet(sheets, /ai\s*context/i);
   if (!ctx) warnings.push('No "AI Context" sheet found.');
   else {
-    let empty = 0;
-    for (const row of contentRows(ctx)) {
-      const initiative = cell(row, 0);
-      if (!initiative || /^initiative$/i.test(initiative)) continue;
-      const rec = {
-        initiativeKey: canonicalKey(initiative),
-        whenToUse: orNull(cell(row, 1)),
-        bestFit: orNull(cell(row, 2)),
-        minBudget: orNull(cell(row, 3)),
-        minAssets: orNull(cell(row, 4)),
-        whyItWorks: orNull(cell(row, 5)),
-        whatToAvoid: orNull(cell(row, 6)),
-        sequencingNotes: orNull(cell(row, 7)),
-      };
-      const hasAny = [rec.whenToUse, rec.bestFit, rec.minBudget, rec.minAssets,
-        rec.whyItWorks, rec.whatToAvoid, rec.sequencingNotes].some(Boolean);
-      if (!hasAny) empty++;
-      out.aiContext.push(rec);
-    }
+    out.aiContext = parseAiContextSheet(ctx, libraryLinks, warnings);
+    const empty = out.aiContext.filter((r) => !hasGuidance(r)).length;
     if (empty > 0) {
       warnings.push(`AI Context: ${empty} of ${out.aiContext.length} initiatives have no guidance filled in.`);
     }

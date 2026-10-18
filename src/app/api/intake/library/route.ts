@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
@@ -10,6 +11,15 @@ export const dynamic = "force-dynamic";
 
 /**
  * GET /api/intake/library — the initiative list for the screen 5 and 6 pickers.
+ *
+ * TWO SCOPES (task 5, owner: "all ACTIVE initiatives should populate"):
+ *   default          screen 5, "what you're planning". The ACTIVE library
+ *                    only: these picks become plan initiatives, so an
+ *                    admin-disabled one must not be offered.
+ *   ?scope=history   screen 6, what worked / didn't. The whole library,
+ *                    for the reasons below — it is a statement of history.
+ *
+ * The rest of this header explains the history scope.
  *
  * Served from an API route rather than read client-side so the exclusion rules
  * are applied in ONE place. REQ-8.2 drops Maximizers; a picker that filtered
@@ -45,7 +55,7 @@ export const dynamic = "force-dynamic";
  *   200 { initiatives: [...] }
  *   401 { error: "Unauthorized" }
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const cookieStore = await cookies();
     const supabase = createServerClient(
@@ -80,15 +90,17 @@ export async function GET() {
     );
 
     /**
-     * `includeInactive` — see the header. These pickers record the customer's
-     * own history, so the admin's recommendation allowlist does not apply.
+     * `includeInactive` for the history scope only — see the header. Screen 6
+     * records the customer's own history, so the admin allowlist does not
+     * apply there; screen 5 builds the plan, so it does.
      *
      * Deliberately NOT marked up in the response. Which initiatives we are
      * currently willing to recommend is our internal policy, and flagging some
      * of the customer's own activities as second-class would be both confusing
      * and none of their business.
      */
-    const library = await loadLibrary(db, { includeInactive: true });
+    const scope = request.nextUrl.searchParams.get("scope") === "history" ? "history" : "plan";
+    const library = await loadLibrary(db, { includeInactive: scope === "history" });
 
     const excluded = new Set(
       EXCLUDED_PICKER_CATEGORIES.map((c) => c.toLowerCase())

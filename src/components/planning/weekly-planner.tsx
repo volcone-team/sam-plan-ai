@@ -29,6 +29,8 @@ import { resultService } from '@/services/result.service';
 import { updateInitiativeStatusFromTasks } from '@/lib/update-initiative-status';
 import { formatMoney } from '@/lib/format-money';
 import { NumberInputRaw } from '@/components/ui/number-input';
+import { MetricInputs } from '@/components/initiatives/metric-inputs';
+import { metricGroupsOf, parseMetricDraft } from '@/lib/metrics/result-metrics';
 import type { WeeklyPlan, Initiative, Task, TaskStatus, Result } from '@/types';
 
 
@@ -145,6 +147,8 @@ export function WeeklyPlanner() {
   const [resultError, setResultError] = useState<string | null>(null);
   const [resultSpend, setResultSpend] = useState('');
   const [resultSaved, setResultSaved] = useState(false);
+  /** Raw metric text by field id; only used when the chosen initiative has a metric set. */
+  const [resultMetrics, setResultMetrics] = useState<Record<string, string>>({});
 
   const weekEnd = getWeekEnd(weekStart);
 
@@ -274,7 +278,18 @@ export function WeeklyPlanner() {
     e.preventDefault();
     const revenue = parseFloat(resultRevenue) || 0;
     const spend = parseFloat(resultSpend) || 0;
-    if (revenue === 0 && spend === 0) return;
+    // Metrics only for a result logged against an initiative with a metric set.
+    const metricSet = initiatives.find(i => i.id === resultInitiativeId)?.metricSet ?? null;
+    let metrics: Record<string, number> | undefined;
+    if (metricSet) {
+      const draft = parseMetricDraft(metricGroupsOf(metricSet), resultMetrics);
+      if (Object.keys(draft.errors).length > 0) {
+        setResultError('Fix the highlighted metrics before saving.');
+        return;
+      }
+      if (Object.keys(draft.values).length > 0) metrics = draft.values;
+    }
+    if (revenue === 0 && spend === 0 && !metrics) return;
 
     setResultError(null);
 
@@ -296,12 +311,14 @@ export function WeeklyPlanner() {
         weekEndDate: weekEnd,
         actualRevenue: revenue,
         actualSpend: spend,
+        ...(metrics ? { metrics } : {}),
         notes: 'Entered via weekly planner',
       });
       setActualRevenue(prev => prev + revenue);
       setActualSpend(prev => prev + spend);
       setResultRevenue('');
       setResultSpend('');
+      setResultMetrics({});
       setResultSaved(true);
       setShowResultForm(false);
     } catch (err) {
@@ -622,7 +639,7 @@ export function WeeklyPlanner() {
                 <select
                   id="result-initiative"
                   value={resultInitiativeId}
-                  onChange={e => setResultInitiativeId(e.target.value)}
+                  onChange={e => { setResultInitiativeId(e.target.value); setResultMetrics({}); }}
                   className="w-full px-3 py-2 rounded-[var(--radius-lg)] border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/50"
                 >
                   <option value="">Whole company (not a specific initiative)</option>
@@ -661,6 +678,12 @@ export function WeeklyPlanner() {
                 />
               </div>
             </div>
+            {(() => {
+              const set = initiatives.find(i => i.id === resultInitiativeId)?.metricSet;
+              return set ? (
+                <MetricInputs set={set} values={resultMetrics} onChange={setResultMetrics} idPrefix="planner-result" />
+              ) : null;
+            })()}
             <div className="flex items-center gap-3">
               <button
                 type="submit"

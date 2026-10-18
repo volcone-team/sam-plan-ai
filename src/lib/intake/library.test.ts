@@ -140,9 +140,22 @@ describe("groupFor", () => {
    * rather than exceptional. It must still appear: an initiative the user
    * cannot find is worse than one under an odd heading.
    */
-  it("files an unknown or missing category under Other", () => {
-    expect(groupFor(entry({ key: "new", category: "Some New Sheet" }))).toBe("Other");
+  /**
+   * Changed in task 5: an unrecognised category is shown AS WRITTEN rather
+   * than under "Other". The Oct 2026 workbook's categories are all readable
+   * and all unrecognised by the legacy map, so the old rule filed the entire
+   * library under "Other". Only a blank category goes there now.
+   */
+  it("uses an unknown category as written, and files a missing one under Other", () => {
+    expect(groupFor(entry({ key: "new", category: "Some New Sheet" }))).toBe("Some New Sheet");
     expect(groupFor(entry({ key: "none", category: null }))).toBe("Other");
+    expect(groupFor(entry({ key: "blank", category: "  " }))).toBe("Other");
+  });
+
+  // Key overrides were written for the legacy catch-all digital sheet only.
+  it("does not apply legacy key overrides to a current category", () => {
+    expect(groupFor(entry({ key: "referral", category: "Partnerships & Referrals" })))
+      .toBe("Partnerships & Referrals");
   });
 
   it("only ever returns a declared group", () => {
@@ -221,6 +234,21 @@ describe("groupInitiatives", () => {
     const groups = groupInitiatives(ALL).map((g) => g.group);
     const expectedOrder = PICKER_GROUPS.filter((g) => groups.includes(g));
     expect(groups).toEqual(expectedOrder);
+  });
+
+  // The Oct 2026 workbook: readable categories, shown in arrival order.
+  it("groups a current workbook by its own categories, in arrival order, Other last", () => {
+    const current = [
+      entry({ key: "a", category: "Webinars" }),
+      entry({ key: "b", category: "Paid Ads" }),
+      entry({ key: "c", category: null }),
+      entry({ key: "d", category: "Content & Media" }),
+      entry({ key: "e", category: "Webinars" }),
+    ];
+    const groups = groupInitiatives(current);
+    expect(groups.map((g) => g.group)).toEqual(["Webinars", "Paid Ads", "Content & Media", "Other"]);
+    expect(groups[0].initiatives.map((i) => i.key)).toEqual(["a", "e"]);
+    expect(flatKeys(groups)).toHaveLength(current.length);
   });
 
   it("drops empty groups rather than rendering an empty heading", () => {

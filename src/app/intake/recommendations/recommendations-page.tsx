@@ -21,8 +21,15 @@ import { FormError } from "@/components/intake/fields/field";
 import { GapBar } from "@/components/intake/recommendations/gap-bar";
 import {
   RecommendationCard,
+  type CardScore,
   type RecommendationCardData,
 } from "@/components/intake/recommendations/initiative-recommendation-card";
+import type { RecommendationExplanation } from "@/lib/recommend/explain";
+import { distinguishingLabel, type NamedItem } from "@/lib/library/display-name";
+import {
+  AllInitiativesList,
+  type LibraryOption,
+} from "@/components/intake/recommendations/all-initiatives-list";
 
 /**
  * The recommendations screen (REQ-13.1 to REQ-13.16).
@@ -47,6 +54,11 @@ interface ApiRecommendation {
   fromBenchmarks: boolean;
   why: string | null;
   productIds: string[];
+  /** Optional, like the fields below, so an older response still renders. */
+  ownOrOps?: string | null;
+  score?: CardScore;
+  rank?: number;
+  explanation?: RecommendationExplanation;
 }
 
 interface RecommendResponse {
@@ -63,6 +75,15 @@ interface RecommendResponse {
   }[];
   recommended: ApiRecommendation[];
   alternatives: ApiRecommendation[];
+  /** The Revenue weight the order was built with (1 = equal weight). */
+  revenueWeight?: number;
+  /** How many initiatives were ranked; `rank` is a position within it. */
+  eligibleCount?: number;
+  /**
+   * Every active initiative, eligible or not. Optional so a response from
+   * before this field existed still renders (without the browse list).
+   */
+  library?: LibraryOption[];
   planLimit: number | null;
   /** The most initiatives this plan may hold in total, counting the user's own. */
   capacity: number;
@@ -106,6 +127,12 @@ export function RecommendationsPage() {
    * it describes.
    */
   const [capacityNotice, setCapacityNotice] = React.useState<string | null>(null);
+  /**
+   * Where the refused click happened, so the notice renders beside it: the
+   * browse list sits far below the counter, and a notice up there would be
+   * off-screen for someone clicking in the list.
+   */
+  const [noticeAt, setNoticeAt] = React.useState<"top" | "browse">("top");
   /**
    * One CAROUSEL per card slot, and where each slot currently sits.
    *
@@ -219,6 +246,43 @@ export function RecommendationsPage() {
    * number, so it cannot drift out of step with the cards — which is the bug
    * REQ-13.3 would otherwise invite.
    */
+  /** Library keys the user entered themselves; the browse list cannot re-add them. */
+  const ownKeys = React.useMemo(
+    () => new Set((data?.yours ?? []).map((y) => y.key).filter(Boolean)),
+    [data]
+  );
+
+  /**
+   * Everything of OURS in the plan: accepted, not dismissed, and not one of
+   * their own. Accepted keys can now come from the cards OR the full list
+   * below them, so this is read from the accepted set rather than from the
+   * visible shortlist. Insertion order, so the build keeps the order they
+   * chose in.
+   */
+  const selectedKeys = React.useMemo(
+    () => new Set([...accepted].filter((key) => !dismissed.has(key) && !ownKeys.has(key))),
+    [accepted, dismissed, ownKeys]
+  );
+
+  /** Benchmark forecast per key, from whichever list the key came from. */
+  const forecastByKey = React.useMemo(() => {
+    const map = new Map<string, number>();
+    for (const option of data?.library ?? []) map.set(option.key, option.forecast);
+    for (const r of [...(data?.recommended ?? []), ...(data?.alternatives ?? [])]) {
+      map.set(r.key, r.forecast);
+    }
+    return map;
+  }, [data]);
+
+  /**
+   * Every card that can appear, swaps included, so two same-name variants get
+   * subtitles even when a swap is what brings the second one on screen.
+   */
+  const cardSiblings = React.useMemo(
+    () => [...(data?.recommended ?? []), ...(data?.alternatives ?? [])],
+    [data]
+  );
+
   const gap = React.useMemo<GoalGap | null>(() => {
     if (!data) return null;
     return goalGap({
@@ -226,15 +290,11 @@ export function RecommendationsPage() {
       // Only the ones they are keeping contribute — a deselected initiative is
       // not in the plan, so counting its revenue would overstate the forecast.
       yours: data.yours.filter((y) => !droppedOwn.has(y.id)).map((y) => y.forecast),
-      recommended: shortlist
-        .filter((r) => accepted.has(r.key) && !dismissed.has(r.key))
-        .map((r) => r.forecast),
+      recommended: [...selectedKeys].map((key) => forecastByKey.get(key) ?? 0),
     });
-  }, [data, shortlist, accepted, dismissed, droppedOwn]);
+  }, [data, selectedKeys, forecastByKey, droppedOwn]);
 
-  const acceptedCount = shortlist.filter(
-    (r) => accepted.has(r.key) && !dismissed.has(r.key)
-  ).length;
+  const acceptedCount = selectedKeys.size;
   const keptOwnCount = (data?.yours.length ?? 0) - droppedOwn.size;
   const totalInitiatives = keptOwnCount + acceptedCount;
 
@@ -278,7 +338,8 @@ export function RecommendationsPage() {
     data?.planLimit !== undefined &&
     totalInitiatives > data.planLimit;
 
-  const toggleAccept = (key: string) => {
+  const toggleAccept = (key: string, from: "top" | "browse" = "top") => {
+    setNoticeAt(from);
     /**
      * Nothing may be added once the plan is full — but SAY SO.
      *
@@ -328,6 +389,7 @@ export function RecommendationsPage() {
 
     // Re-selecting one of their own is blocked at capacity for the same reason
     // as accepting a recommendation, and gets the same explanation.
+    setNoticeAt("top");
     if (!dropping && atCapacity) {
       setCapacityNotice(
         `A plan holds up to ${capacity} initiatives, and you already have ` +
@@ -424,9 +486,8 @@ export function RecommendationsPage() {
     setBuildError(null);
 
     try {
-      const acceptedKeys = shortlist
-        .filter((r) => accepted.has(r.key) && !dismissed.has(r.key))
-        .map((r) => r.key);
+      // Cards and the full list alike; the server re-checks each is active.
+      const acceptedKeys = [...selectedKeys];
 
       const response = await fetch("/api/intake/build", {
         method: "POST",
@@ -497,9 +558,9 @@ export function RecommendationsPage() {
       <GapBar gap={gap} goal={data.goal} />
 
       {/*
-        Stated plainly rather than hidden. The forecast is still usable — the
-        eligible library is ranked by our own heuristic — but the user should
-        know the figures are not AI-tailored.
+        Stated plainly rather than hidden. The order is SCORE-ranked either
+        way; only the explanations fall back to templates, and the user should
+        know they are not AI-tailored.
       */}
       {data.aiUnavailable && (
         <p className="flex items-start gap-2 rounded-[var(--radius-md)] border border-[hsl(var(--warning)_/_0.4)] bg-[hsl(var(--warning)_/_0.08)] px-3 py-2.5 text-sm text-foreground">
@@ -508,8 +569,9 @@ export function RecommendationsPage() {
             aria-hidden="true"
           />
           <span>
-            {data.aiUnavailable} These suggestions are ranked by speed and
-            effort instead, and you can still build your plan.
+            {data.aiUnavailable} The ranking is unchanged, but the notes on
+            each suggestion are our standard ones rather than written for your
+            business. You can still build your plan.
           </span>
         </p>
       )}
@@ -543,7 +605,7 @@ export function RecommendationsPage() {
         read together, and rendered only after a refusal — sitting at the cap is
         a perfectly good place to be and needs no warning.
       */}
-      {capacityNotice && (
+      {capacityNotice && noticeAt === "top" && (
         <p
           role="status"
           className="flex items-start gap-2 rounded-[var(--radius-md)] border border-[hsl(var(--warning)_/_0.4)] bg-[hsl(var(--warning)_/_0.08)] px-3 py-2.5 text-sm text-foreground"
@@ -621,7 +683,11 @@ export function RecommendationsPage() {
             {shortlist.map((recommendation, slotIndex) => (
               <RecommendationCard
                 key={recommendation.key}
-                data={toCardData(recommendation)}
+                data={toCardData(recommendation, {
+                  siblings: cardSiblings,
+                  eligibleCount: data.eligibleCount ?? null,
+                  revenueWeight: data.revenueWeight ?? 1,
+                })}
                 badge={badge}
                 accepted={accepted.has(recommendation.key)}
                 dismissed={dismissed.has(recommendation.key)}
@@ -642,6 +708,33 @@ export function RecommendationsPage() {
           </div>
         </section>
       )}
+
+      {/*
+        EVERY ACTIVE INITIATIVE, not just our shortlist (owner's rule). Same
+        selection set and same cap as the cards above.
+      */}
+      <AllInitiativesList
+        options={data.library ?? []}
+        recommendedKeys={data.recommended.map((r) => r.key)}
+        selectedKeys={selectedKeys}
+        ownKeys={ownKeys}
+        atCapacity={atCapacity}
+        onToggle={(key) => toggleAccept(key, "browse")}
+        notice={
+          capacityNotice && noticeAt === "browse" ? (
+            <p
+              role="status"
+              className="flex items-start gap-2 rounded-[var(--radius-md)] border border-[hsl(var(--warning)_/_0.4)] bg-[hsl(var(--warning)_/_0.08)] px-3 py-2.5 text-sm text-foreground"
+            >
+              <Info
+                className="mt-0.5 h-4 w-4 shrink-0 text-[hsl(var(--warning))]"
+                aria-hidden="true"
+              />
+              <span>{capacityNotice}</span>
+            </p>
+          ) : null
+        }
+      />
 
       {shortlist.length === 0 && data.yours.length > 0 && (
         <p className="rounded-[var(--radius-md)] border border-border px-4 py-3 text-sm text-[hsl(var(--foreground-muted))]">
@@ -737,8 +830,22 @@ function Frame({ children }: { children: React.ReactNode }) {
   );
 }
 
-function toCardData(recommendation: ApiRecommendation): RecommendationCardData {
+function toCardData(
+  recommendation: ApiRecommendation,
+  opts: {
+    /** Every card that can appear (recommended + alternatives), for same-name subtitles. */
+    siblings: readonly NamedItem[];
+    eligibleCount: number | null;
+    revenueWeight: number;
+  }
+): RecommendationCardData {
   return {
+    subtitle: distinguishingLabel(recommendation, opts.siblings),
+    score: recommendation.score ?? null,
+    rank: recommendation.rank ?? null,
+    eligibleCount: opts.eligibleCount,
+    revenueWeight: opts.revenueWeight,
+    explanation: recommendation.explanation ?? null,
     key: recommendation.key,
     name: recommendation.name,
     oneLiner: recommendation.oneLiner,

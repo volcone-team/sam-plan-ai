@@ -18,6 +18,7 @@
  * caller gets a 500 `plan_links_failed` and can simply save again.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isMissingTableError } from "@/lib/db-errors";
 import {
   categoryFromRow,
   groupPlanIds,
@@ -110,16 +111,10 @@ interface DbError {
 
 /**
  * Is this error "the university tables do not exist" (migration 038 not
- * applied)? PostgREST reports PGRST205 "Could not find the table …"; a raw
- * Postgres error is 42P01 "relation … does not exist".
+ * applied)? Lives in `@/lib/db-errors` (shared with the FAQ); re-exported here
+ * so existing imports keep working.
  */
-export function isMissingTableError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const { code, message } = err as DbError;
-  if (code === "PGRST205" || code === "42P01") return true;
-  const msg = typeof message === "string" ? message : "";
-  return /could not find the table/i.test(msg) || /relation .* does not exist/i.test(msg);
-}
+export { isMissingTableError };
 
 /** Throw the right `UniversityAdminError` for a database error. */
 function fail(err: DbError, context: string): never {

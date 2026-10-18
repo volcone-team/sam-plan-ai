@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UniversityManagement } from "./university-management";
+import { FaqManagement } from "./faq-management";
 
 /* ------------------------------------------------------------------
    Types
@@ -29,8 +30,8 @@ interface ContentItem {
 
 type TabKey = "university" | "faq" | "emails";
 
-/** Tabs still backed by localStorage mocks. University is a real editor. */
-type MockTabKey = Exclude<TabKey, "university">;
+/** Tabs still backed by localStorage mocks. University and FAQ are real editors. */
+type MockTabKey = Exclude<TabKey, "university" | "faq">;
 
 interface TabConfig {
   key: TabKey;
@@ -54,11 +55,6 @@ const TABS: TabConfig[] = [
 ];
 
 const MOCK_DATA: Record<MockTabKey, ContentItem[]> = {
-  faq: [
-    { id: "faq-1", title: "How do I reset my password?", body: "Navigate to Settings > Account > Security and click 'Change Password'. You'll receive a verification email before the change takes effect.", createdAt: "2025-01-10" },
-    { id: "faq-2", title: "What are benchmarks?", body: "Benchmarks are industry-standard performance metrics that SAM Flow uses to set realistic targets for your initiatives. They come from first-party data, published research, and partner networks.", createdAt: "2025-01-12" },
-    { id: "faq-3", title: "Can I export my plan?", body: "Yes! Go to your Year at a Glance view and click the Export button in the top right. You can export as PDF or CSV.", createdAt: "2025-01-18" },
-  ],
   emails: [
     { id: "email-1", title: "Welcome Email", body: "Subject: Welcome to SAM Flow AI\n\nHi {{name}},\n\nWelcome aboard! We're excited to have you. Your account is ready and your first step is to complete the onboarding questionnaire.", createdAt: "2025-01-05" },
     { id: "email-2", title: "Weekly Digest", body: "Subject: Your Weekly SAM Flow Summary\n\nHi {{name}},\n\nHere's your weekly progress update:\n- Initiatives active: {{count}}\n- Tasks completed: {{completed}}\n- Upcoming deadlines: {{deadlines}}", createdAt: "2025-01-08" },
@@ -121,6 +117,8 @@ export function ContentManagement() {
       {/* Tab Content */}
       {activeTab === "university" ? (
         <UniversityManagement />
+      ) : activeTab === "faq" ? (
+        <FaqManagement />
       ) : (
         TABS.map((tab) =>
           tab.key === activeTab ? (

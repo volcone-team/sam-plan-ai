@@ -6,13 +6,27 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   loadLibrary,
   loadAiContext,
-  renderLibraryForPrompt,
   loadInactiveInitiativeKeys,
+  toLibraryInitiative,
+  type ContextEntry,
 } from "@/lib/workbook/read";
 import { classifyAiFailure, aiFailureLogDetail } from "@/lib/ai-errors";
 import { EXCLUDED_PICKER_CATEGORIES } from "@/lib/intake/schema";
 import { filterEligible, isEligible, type EligibilityContext } from "@/lib/recommend/eligibility";
 import { recommendationCount, recommendationCapacity } from "@/lib/recommend/sizing";
+import {
+  eligibilityContextFromIntake,
+  loadLatestIntake,
+} from "@/lib/recommend/company-eligibility";
+import { loadRecommendationWeight } from "@/lib/recommend/weight-setting";
+import { scoreInitiative, type InitiativeScore, type ScoredInitiative } from "@/lib/recommend/score";
+import {
+  parseExplanations,
+  renderShortlistForPrompt,
+  type ParsedExplanation,
+  type RecommendationExplanation,
+} from "@/lib/recommend/explain";
+import { explainRanked, rankForRecommendation, type ExplainedInitiative } from "@/lib/recommend/shortlist";
 import type { LibraryInitiative } from "@/lib/intake/library";
 import {
   forecastForInitiative,
@@ -32,20 +46,28 @@ const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5-20250929";
 /**
  * POST /api/intake/recommend — forecast the user's plan and recommend the rest.
  *
- * THE SHAPE THAT MATTERS: the AI PROPOSES a ranked list and this route DISPOSES.
- * Every candidate is passed through `isEligible` server-side before it reaches
- * the screen, and anything the model invented that is not a real library key is
- * dropped. Prompt instructions are not enforcement — the model can ignore them,
- * and a sales-call initiative recommended to someone who takes no sales calls
- * discredits the whole plan rather than one card.
+ * FIT, THEN SCORE — THE AI EXPLAINS, IT DOES NOT CHOOSE THE ORDER.
  *
- * The route also DEGRADES rather than failing. If the AI is unavailable — and
- * it currently is, the account being out of credit — the eligible library is
- * ranked by our own heuristic instead. A user part-way through an intake should
- * not hit a dead end because of a billing condition on our side.
+ *   1. FIT: the active library is filtered through `isEligible` (eligibility.ts).
+ *   2. SCORE: the survivors are ranked by `rankByScore` with the admin's Revenue
+ *      weight (score.ts, migration 041).
+ *   3. The top N (sizing.ts) plus the swap reserve form the SHORTLIST.
+ *   4. Only the shortlist is sent to Claude, with scores, metrics and AI
+ *      Context, for per-initiative explanations. Its answer is validated
+ *      against the shortlist (explain.ts) — it cannot reorder, add or remove.
+ *
+ * The route DEGRADES rather than failing. If the AI is unavailable the
+ * explanations come from a template built from the scores and AI Context, and
+ * the ORDER IS IDENTICAL, because the AI never decided it. A user part-way
+ * through an intake should not hit a dead end because of a billing condition
+ * on our side.
  *
  * Responses:
- *   200 { gap, yours[], recommended[], planLimit, aiUnavailable }
+ *   200 { gap, yours[], recommended[], alternatives[], revenueWeight, eligibleCount,
+ *         library[], planLimit, capacity, aiUnavailable }
+ *       Each recommendation/alternative carries `score`, `rank` and `explanation`
+ *       as well as the original fields; `why` is `explanation.whyFits`. Each
+ *       library row carries `score` {total, weightedTotal, complete, missing}.
  *   401 { error: "Unauthorized" }
  *   409 { error } — no company, or no saved intake
  */
@@ -55,6 +77,8 @@ interface Recommendation {
   name: string;
   oneLiner: string | null;
   category: string | null;
+  /** OWN / OPS as written; used to tell same-name variants apart on screen. */
+  ownOrOps: string | null;
   difficulty: number | null;
   speedToResults: string | null;
   /** Expected revenue over the plan period. */
@@ -64,10 +88,15 @@ interface Recommendation {
    * numbers, which the card must say (REQ-13.6).
    */
   fromBenchmarks: boolean;
-  /** One line on why it fits, from the model where available. */
+  /** Why it fits: `explanation.whyFits`, kept for the existing card. */
   why: string | null;
   /** Product ids this initiative is suggested to sell. */
   productIds: string[];
+  /** SCORE for this initiative; `missing` lists the letters counted as 3. */
+  score: Pick<InitiativeScore, "total" | "weightedTotal" | "breakdown" | "complete" | "missing">;
+  /** 1-based position in the SCORE ranking of the eligible pool. */
+  rank: number;
+  explanation: RecommendationExplanation;
 }
 
 export async function POST() {
@@ -76,39 +105,17 @@ export async function POST() {
     if ("error" in caller) return caller.error;
     const { db, companyId } = caller;
 
-    const { data: input } = await db
-      .from("planning_inputs")
-      .select("*")
-      .eq("company_id", companyId)
-      .eq("intake_version", 2)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // The same read every FIT-aware feature uses (company-eligibility.ts).
+    const intake = await loadLatestIntake(db, companyId);
 
-    if (!input) {
+    if (!intake) {
       return NextResponse.json(
         { error: "No intake answers saved yet." },
         { status: 409 }
       );
     }
 
-    const planningInputId = input.id as string;
-
-    const [{ data: productRows }, { data: initiativeRows }] = await Promise.all([
-      db
-        .from("intake_products")
-        .select("*")
-        .eq("planning_input_id", planningInputId)
-        .order("display_order"),
-      db
-        .from("intake_initiatives")
-        .select("*")
-        .eq("planning_input_id", planningInputId)
-        .order("display_order"),
-    ]);
-
-    const products = (productRows ?? []) as Record<string, unknown>[];
-    const initiatives = (initiativeRows ?? []) as Record<string, unknown>[];
+    const { input, products, initiatives } = intake;
 
     const horizonMonths = num(input.horizon_months) ?? 12;
     const revenueGoal = num(input.revenue_goal) ?? 0;
@@ -148,11 +155,6 @@ export async function POST() {
 
     /* ---- Eligibility context from the answers ---- */
 
-    const didntWork = initiatives
-      .filter((row) => row.source === "failed")
-      .map((row) => str(row.initiative_key))
-      .filter((key): key is string => key !== null);
-
     /**
      * The admin allowlist, passed into eligibility as the BACKSTOP.
      *
@@ -163,34 +165,19 @@ export async function POST() {
      */
     const inactiveKeys = (await loadInactiveInitiativeKeys(db)) ?? undefined;
 
-    const ctx: EligibilityContext = {
-      industry: str(input.industry),
-      didntWork,
-      monthlyBudget: num(input.monthly_marketing_budget),
-      hoursPerWeek: num(input.weekly_hours),
-      whoCloses: str(input.sales_owner),
-      stage: str(input.growth_stage),
-      inactiveKeys,
-    };
+    // Shared with generate-plan, Enhance, suggestions and chat.
+    const ctx: EligibilityContext = eligibilityContextFromIntake(intake, inactiveKeys);
 
     /* ---- The candidate pool ---- */
 
     const excluded = new Set(EXCLUDED_PICKER_CATEGORIES.map((c) => c.toLowerCase()));
     const alreadyPlanned = new Set(yours.map((y) => y.key));
 
+    // toLibraryInitiative carries idealIndustries, so passesIndustry reads the
+    // real column (empty until a workbook that fills it is uploaded).
     const library: LibraryInitiative[] = (await loadLibrary(db))
       .filter((entry) => !excluded.has((entry.category ?? "").toLowerCase()))
-      .map((entry) => ({
-        key: entry.initiativeKey,
-        name: entry.name,
-        category: entry.category,
-        oneLiner: entry.oneLiner,
-        ownOrOps: entry.ownOrOps,
-        priceTier: entry.priceTier,
-        difficulty: entry.difficulty,
-        speedToResults: entry.speedToResults,
-        needsSalesTeam: entry.needsSalesTeam,
-      }));
+      .map(toLibraryInitiative);
 
     // Never re-recommend something the user already planned themselves.
     const pool = filterEligible(library, ctx).filter(
@@ -234,52 +221,109 @@ export async function POST() {
       "| selection cap:", capacity
     );
 
-    /* ---- Ask the model to rank, then filter its answer ---- */
+    /* ---- SCORE: rank the eligible pool, then shortlist ---- */
 
-    let ranked = pool;
-    let reasons = new Map<string, string>();
+    const revenueWeight = await loadRecommendationWeight(db);
+    // Top `wanted`, then the swap reserve, in SCORE order. The rest of the
+    // ranked pool stays available for swaps, also in SCORE order.
+    const { ranked, shortlist } = rankForRecommendation(pool, { revenueWeight, wanted });
+
+    /* ---- Ask the model to EXPLAIN the shortlist, then validate ---- */
+
+    const aiContext = await loadAiContext(db);
+    const contextByKey = new Map<string, ContextEntry>(aiContext.map((c) => [c.initiativeKey, c]));
+
     let aiUnavailable: string | null = null;
+    let aiParsed: ParsedExplanation[] | null = null;
 
-    if (wanted > 0 && pool.length > 0) {
-      const ai = await rankWithAi({ db, input, pool, ctx, horizonMonths });
-      if (ai.ok) {
-        // The model returns keys; anything it invented is dropped here rather
-        // than trusted, and the eligibility check is re-applied because a
-        // ranked list is still only a suggestion.
-        const byKey = new Map(pool.map((entry) => [entry.key, entry]));
-        const resolved = ai.keys
-          .map((key) => byKey.get(key))
-          .filter((entry): entry is LibraryInitiative => entry !== undefined)
-          .filter((entry) => isEligible(entry, ctx).eligible);
-
-        // Anything the model omitted stays available for swaps, in our order.
-        const seen = new Set(resolved.map((e) => e.key));
-        ranked = [...resolved, ...pool.filter((e) => !seen.has(e.key))];
-        reasons = ai.reasons;
-      } else {
-        aiUnavailable = ai.message;
-        ranked = rankHeuristically(pool);
-      }
+    if (shortlist.length > 0) {
+      const ai = await explainWithAi({ input, shortlist, contextByKey, ctx, horizonMonths });
+      if (ai.ok) aiParsed = ai.explanations;
+      else aiUnavailable = ai.message;
     }
+
+    // Keyed and ORDERED by our ranking: the model cannot reorder, add or remove.
+    // The eligibility re-check is belt-and-braces — the pool is already FIT.
+    const explained = explainRanked(
+      ranked,
+      shortlist.map((s) => s.initiative.key),
+      aiParsed,
+      contextByKey
+    );
+    const items = explained.items.filter((entry) => isEligible(entry.initiative, ctx).eligible);
+
+    console.log(
+      "[intake/recommend] weight:", revenueWeight,
+      "| explained by AI:", aiParsed ? shortlist.length - explained.filled.length : 0,
+      "| templated:", explained.filled.length,
+      "| AI keys ignored:", explained.ignored.length
+    );
 
     /* ---- Forecast the shortlist from benchmarks ---- */
 
     const benchmarkRevenue = await benchmarkRevenuePerProduct(products, horizonMonths);
 
-    const recommended: Recommendation[] = ranked.slice(0, wanted).map((entry) => ({
-      key: entry.key,
-      name: entry.name,
-      oneLiner: entry.oneLiner,
-      category: entry.category,
-      difficulty: entry.difficulty,
-      speedToResults: entry.speedToResults,
+    const toRecommendation = (entry: ExplainedInitiative): Recommendation => ({
+      key: entry.initiative.key,
+      name: entry.initiative.name,
+      oneLiner: entry.initiative.oneLiner,
+      category: entry.initiative.category,
+      ownOrOps: entry.initiative.ownOrOps,
+      difficulty: entry.initiative.difficulty,
+      speedToResults: entry.initiative.speedToResults,
       forecast: benchmarkRevenue.perInitiative,
       // Always true on this path: these are our estimates, not the user's
       // figures, and REQ-13.6 requires the card to say so.
       fromBenchmarks: true,
-      why: reasons.get(entry.key) ?? null,
+      why: entry.explanation.whyFits || null,
       productIds: benchmarkRevenue.productIds,
-    }));
+      score: {
+        total: entry.score.total,
+        weightedTotal: entry.score.weightedTotal,
+        breakdown: entry.score.breakdown,
+        complete: entry.score.complete,
+        missing: entry.score.missing,
+      },
+      rank: entry.rank,
+      explanation: entry.explanation,
+    });
+
+    const recommended: Recommendation[] = items.slice(0, wanted).map(toRecommendation);
+
+    /**
+     * EVERY active initiative, for the "browse all" list under the cards.
+     *
+     * The owner's rule: the customer may pick any active initiative, not only
+     * our shortlist. Eligibility is still computed, but as a LABEL rather than
+     * a filter — an ineligible one is shown with its reason ("You told us this
+     * didn't work") and stays selectable, because the customer knows their
+     * business better than our rules do. The recommendations above remain
+     * eligible-only.
+     *
+     * Same base set as the pool: active (loadLibrary) minus Maximizers.
+     */
+    const libraryOptions = library.map((entry) => {
+      const verdict = isEligible(entry, ctx);
+      // Same scoring and weight as the ranking, so the list cannot disagree
+      // with the cards. Display only: this list is not re-ordered by it.
+      const score = scoreInitiative(entry, { revenueWeight });
+      return {
+        key: entry.key,
+        name: entry.name,
+        category: entry.category,
+        oneLiner: entry.oneLiner,
+        ownOrOps: entry.ownOrOps,
+        eligible: verdict.eligible,
+        reason: verdict.reason,
+        forecast: benchmarkRevenue.perInitiative,
+        score: {
+          total: score.total,
+          weightedTotal: score.weightedTotal,
+          complete: score.complete,
+          missing: score.missing,
+        },
+      };
+    });
 
     const gap = goalGap({
       goal: revenueGoal,
@@ -296,18 +340,16 @@ export async function POST() {
       yours,
       recommended,
       /** The remaining eligible pool, for swaps (D3). */
-      alternatives: ranked.slice(wanted).map((entry) => ({
-        key: entry.key,
-        name: entry.name,
-        oneLiner: entry.oneLiner,
-        category: entry.category,
-        difficulty: entry.difficulty,
-        speedToResults: entry.speedToResults,
-        forecast: benchmarkRevenue.perInitiative,
-        fromBenchmarks: true,
-        why: reasons.get(entry.key) ?? null,
-        productIds: benchmarkRevenue.productIds,
-      })),
+      alternatives: items.slice(wanted).map(toRecommendation),
+      /** The live Revenue weight the order was built with (1 = equal weight). */
+      revenueWeight,
+      /**
+       * How many initiatives were ranked — the eligible pool, less what the
+       * user already planned. `rank` is a position within it.
+       */
+      eligibleCount: ranked.length,
+      /** Every active initiative, eligible or not, for the browse list. */
+      library: libraryOptions,
       planLimit,
       /**
        * The most initiatives this plan may end up with, counting the user's
@@ -326,73 +368,67 @@ export async function POST() {
 }
 
 /* ------------------------------------------------------------------ *
- * The AI step
+ * The AI step — explanations only
  * ------------------------------------------------------------------ */
 
-type RankResult =
-  | { ok: true; keys: string[]; reasons: Map<string, string> }
+type ExplainResult =
+  | { ok: true; explanations: ParsedExplanation[] }
   | { ok: false; message: string };
 
 /**
- * Ask the model to rank the eligible pool.
+ * Ask the model to EXPLAIN the SCORE-ranked shortlist.
  *
- * It is given ONLY the already-eligible candidates, so it cannot propose
- * something the rules have excluded — the filter runs before the prompt as well
- * as after it. That keeps the prompt shorter and means a model that ignores
- * instructions still cannot produce a forbidden recommendation.
+ * It is given ONLY the shortlist — already eligible and already ordered — with
+ * each initiative's scores, metrics and AI Context. It is told not to reorder,
+ * add or remove, but that instruction is not what protects the order: the
+ * caller keys everything by the shortlist (mergeExplanations), so a model that
+ * ignores it changes nothing but its own text.
  *
- * Returns `ok: false` rather than throwing, so the caller can fall back to our
- * own ranking. An intake must not dead-end because of a billing condition on
- * our side.
+ * Returns `ok: false` rather than throwing, so the caller can fall back to the
+ * template explanations. An intake must not dead-end because of a billing
+ * condition on our side.
  */
-async function rankWithAi(args: {
-  db: SupabaseClient;
+async function explainWithAi(args: {
   input: Record<string, unknown>;
-  pool: readonly LibraryInitiative[];
+  shortlist: readonly ScoredInitiative<LibraryInitiative>[];
+  contextByKey: ReadonlyMap<string, ContextEntry>;
   ctx: EligibilityContext;
   horizonMonths: number;
-}): Promise<RankResult> {
+}): Promise<ExplainResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return { ok: false, message: "AI recommendations are not configured." };
   }
 
-  const { input, pool, ctx, horizonMonths } = args;
+  const { input, shortlist, contextByKey, ctx, horizonMonths } = args;
 
   try {
     const anthropic = new Anthropic({ apiKey });
-    const aiContext = await loadAiContext(args.db);
-
-    const candidateList = renderLibraryForPrompt(
-      pool.map((entry) => ({
-        initiativeKey: entry.key,
-        workbookId: null,
-        name: entry.name,
-        category: entry.category,
-        difficulty: entry.difficulty,
-        speedToResults: entry.speedToResults,
-        oneLiner: entry.oneLiner,
-        ownOrOps: entry.ownOrOps,
-        priceTier: entry.priceTier,
-        needsSalesTeam: entry.needsSalesTeam,
-      })),
-      aiContext
-    );
+    const candidateList = renderShortlistForPrompt(shortlist, contextByKey);
 
     const response = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 2000,
+      max_tokens: 3000,
       system:
-        "You rank sales and marketing initiatives for a business.\n\n" +
-        "Return ONLY a JSON array, best first:\n" +
-        '[{"key":"<initiative_key verbatim>","why":"<one short sentence>"}]\n\n' +
+        "You explain why each shortlisted sales and marketing initiative suits a business.\n\n" +
+        "The SHORTLIST below is already ranked by our scoring (SCORE = Speed, Cost, Odds, " +
+        "Revenue, Ease; each 1-5, 5 is best). You do NOT rank, reorder, add or remove " +
+        "initiatives. Explain every one, exactly once.\n\n" +
+        "Return ONLY a JSON object:\n" +
+        '{"explanations":[{"key":"<initiative_key verbatim>","whyFits":"<why this fits THIS business>",' +
+        '"whatToTrack":["<metric>"],"watchOutFor":"<one pitfall or null>",' +
+        '"readinessQuestions":["<yes/no question>"]}]}\n\n' +
         "Rules:\n" +
-        "- Choose ONLY from the candidates given. Never invent a key.\n" +
-        "- `why` speaks to THIS business in one sentence, under 18 words.\n" +
-        "- Rank on fit with their audience, stage, budget and what has already " +
-        "worked for them.\n" +
+        "- Use ONLY the keys given. Never invent a key.\n" +
+        "- `whyFits` speaks to THIS business in 1-2 sentences, under 40 words, grounded in " +
+        "its scores, its WHEN/WHY IT WORKS guidance and their answers.\n" +
+        "- `whatToTrack`: 2-4 items, taken from that initiative's METRICS where listed.\n" +
+        "- `watchOutFor`: one sentence drawn from its AVOID guidance, or null if none is given.\n" +
+        "- `readinessQuestions`: 0-2 yes/no questions drawn from its NEEDS guidance, e.g. " +
+        '"Do you have a talk that has sold from stage?"\n' +
+        "- Never quote a number that is not in the data given.\n" +
         "- No preamble, no code fence, no commentary.\n\n" +
-        `CANDIDATES:\n${candidateList}`,
+        `SHORTLIST:\n${candidateList}`,
       messages: [
         {
           role: "user",
@@ -406,20 +442,12 @@ async function rankWithAi(args: {
       return { ok: false, message: "The AI returned nothing usable." };
     }
 
-    const parsed = parseRanking(block.text);
-    if (parsed.length === 0) {
+    const explanations = parseExplanations(block.text);
+    if (explanations.length === 0) {
       return { ok: false, message: "The AI returned nothing usable." };
     }
 
-    return {
-      ok: true,
-      keys: parsed.map((entry) => entry.key),
-      reasons: new Map(
-        parsed
-          .filter((entry) => entry.why)
-          .map((entry) => [entry.key, entry.why as string])
-      ),
-    };
+    return { ok: true, explanations };
   } catch (err) {
     /**
      * Classified rather than re-thrown. Credit exhaustion arrives as a 400
@@ -428,7 +456,7 @@ async function rankWithAi(args: {
      * prompt".
      */
     const failure = classifyAiFailure(err);
-    console.error("[intake/recommend] AI ranking failed:", aiFailureLogDetail(err));
+    console.error("[intake/recommend] AI explanation failed:", aiFailureLogDetail(err));
     return { ok: false, message: failure.message };
   }
 }
@@ -470,22 +498,21 @@ function describeBusiness(
       : null,
     str(input.challenge_notes) ? `On those challenges: ${str(input.challenge_notes)}` : null,
     str(input.what_worked_notes) ? `What has worked: ${str(input.what_worked_notes)}` : null,
-    // Stated explicitly even though these are already filtered out, so the
-    // model does not propose a near-identical substitute.
+    // Stated so the explanations do not lean on something that already flopped.
     ctx.didntWork.length > 0
       ? `Already tried and failed: ${ctx.didntWork.join(", ")}`
       : null,
   ].filter(Boolean);
 
-  return `Rank the candidate initiatives for this business.\n\n${lines.join("\n")}`;
+  return `Explain each shortlisted initiative for this business.\n\n${lines.join("\n")}`;
 }
 
 /**
  * An audience figure, distinguishing "none" from "not sure".
  *
- * The model is told WHICH it is, because the right initiative differs: a
- * business with no list needs list-building, one that does not know its list
- * size needs measurement.
+ * The model is told WHICH it is, because the right advice differs: a business
+ * with no list needs list-building, one that does not know its list size needs
+ * measurement.
  */
 function audience(
   input: Record<string, unknown>,
@@ -495,73 +522,6 @@ function audience(
   if (input[unknownField] === true) return "they don't know";
   const value = num(input[field]);
   return value === null ? "not given" : String(value);
-}
-
-/** Parse the model's JSON, tolerating a code fence. */
-function parseRanking(text: string): { key: string; why: string | null }[] {
-  const attempt = (raw: string) => {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((entry) => {
-        if (!entry || typeof entry !== "object") return null;
-        const { key, why } = entry as { key?: unknown; why?: unknown };
-        if (typeof key !== "string" || key === "") return null;
-        return { key, why: typeof why === "string" && why !== "" ? why : null };
-      })
-      .filter((e): e is { key: string; why: string | null } => e !== null);
-  };
-
-  try {
-    return attempt(text);
-  } catch {
-    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (fenced) {
-      try {
-        return attempt(fenced[1]);
-      } catch {
-        return [];
-      }
-    }
-    // Last resort: the outermost array in the response.
-    const bare = text.match(/\[[\s\S]*\]/);
-    if (bare) {
-      try {
-        return attempt(bare[0]);
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  }
-}
-
-/* ------------------------------------------------------------------ *
- * Fallback ranking
- * ------------------------------------------------------------------ */
-
-/**
- * Our own ranking, used when the AI is unavailable.
- *
- * Fast results first, then easier to run. Someone part-way through an intake
- * needs a plan they can start on, and the two things that make an initiative
- * startable are how soon it pays and how hard it is — which are the two fields
- * the workbook actually authors for every row.
- */
-function rankHeuristically(pool: readonly LibraryInitiative[]): LibraryInitiative[] {
-  const speedRank = (value: string | null) => {
-    const v = (value ?? "").toLowerCase();
-    if (v.includes("fast")) return 0;
-    if (v.includes("medium") || v.includes("moderate")) return 1;
-    if (v.includes("slow")) return 2;
-    return 1;
-  };
-
-  return [...pool].sort((a, b) => {
-    const bySpeed = speedRank(a.speedToResults) - speedRank(b.speedToResults);
-    if (bySpeed !== 0) return bySpeed;
-    return (a.difficulty ?? 3) - (b.difficulty ?? 3);
-  });
 }
 
 /* ------------------------------------------------------------------ *

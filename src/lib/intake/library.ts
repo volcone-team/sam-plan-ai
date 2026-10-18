@@ -14,6 +14,7 @@
  */
 
 import { EVENT_ONLY_CATEGORIES } from "@/lib/intake/schema";
+import type { StoredMetrics } from "@/lib/metrics/parse-metrics";
 
 /** One initiative as the picker consumes it. */
 export interface LibraryInitiative {
@@ -26,6 +27,30 @@ export interface LibraryInitiative {
   difficulty: number | null;
   speedToResults: string | null;
   needsSalesTeam: string | null;
+  /**
+   * The workbook's "Ideal Industries" (migration 040). Optional: the picker
+   * API does not send it, and a library stored before 040 has none. Absent or
+   * empty means Broad fit — see passesIndustry.
+   */
+  idealIndustries?: readonly string[];
+  /*
+   * The rest of the migration-040 fields, carried for later tasks. Optional for
+   * the same reason; nothing in the picker or the rules reads them yet.
+   */
+  workbookId?: string | null;
+  /** Set on a variant ("webinar-own"): the initiative it varies ("webinar"). */
+  baseKey?: string | null;
+  speedScore?: number | null;
+  costScore?: number | null;
+  oddsScore?: number | null;
+  revenueScore?: number | null;
+  easeScore?: number | null;
+  scoreTotal?: number | null;
+  ctaOptions?: readonly string[];
+  training?: readonly string[];
+  metricsRaw?: string | null;
+  /** Parsed Metrics cell; null when never parsed. See readStoredMetrics. */
+  metrics?: StoredMetrics | null;
 }
 
 /**
@@ -82,17 +107,21 @@ const KEY_TO_GROUP: Record<string, PickerGroup> = {
   "ops-in-person-other-peoples-stages": "Content & Media",
 };
 
-/** Which heading an initiative belongs under. */
-export function groupFor(initiative: LibraryInitiative): PickerGroup {
-  const byKey = KEY_TO_GROUP[initiative.key];
-  if (byKey) return byKey;
-
-  const byCategory = CATEGORY_TO_GROUP[(initiative.category ?? "").toLowerCase()];
-  if (byCategory) return byCategory;
-
-  // An unmapped category still appears, under "Other". A re-uploaded workbook
-  // with a renamed sheet must not make initiatives unfindable.
-  return "Other";
+/**
+ * Which heading an initiative belongs under.
+ *
+ * The legacy sheet-structure categories above are remapped (and the key
+ * overrides apply only to them). ANY OTHER category is used AS WRITTEN: the
+ * Oct 2026 workbook has readable categories ("Paid Ads", "Webinars", "Local
+ * Presence"), and filing all 87 of its initiatives under "Other" — which is
+ * what the old fallback did — made the grouping useless. Only a blank
+ * category lands in "Other".
+ */
+export function groupFor(initiative: LibraryInitiative): string {
+  const raw = (initiative.category ?? "").trim();
+  const byCategory = CATEGORY_TO_GROUP[raw.toLowerCase()];
+  if (byCategory) return KEY_TO_GROUP[initiative.key] ?? byCategory;
+  return raw === "" ? "Other" : raw;
 }
 
 /* ------------------------------------------------------------------ *
@@ -150,7 +179,8 @@ export function labelFor(
  * ------------------------------------------------------------------ */
 
 export interface GroupedInitiatives {
-  group: PickerGroup;
+  /** A PickerGroup for legacy categories, otherwise the category as written. */
+  group: string;
   initiatives: LibraryInitiative[];
 }
 
@@ -208,12 +238,36 @@ export function groupInitiatives(
     return haystack.includes(needle);
   });
 
-  // Built in PICKER_GROUPS order so the headings are stable regardless of the
-  // order rows arrive in, and empty groups are dropped rather than rendered.
-  return PICKER_GROUPS.map((group) => ({
-    group,
-    initiatives: visible.filter((initiative) => groupFor(initiative) === group),
-  })).filter((entry) => entry.initiatives.length > 0);
+  /**
+   * Order: the declared PICKER_GROUPS first (stable whatever order rows
+   * arrive in), then any other category in the order it first appears — the
+   * library arrives in workbook display order — and "Other" last. Empty groups
+   * are dropped rather than rendered.
+   */
+  // The declared order only means something for a legacy workbook; a current
+  // one is shown in its own order (a "Content & Media" category must not jump
+  // ahead just because the legacy list happens to share the name).
+  const legacy = visible.some(
+    (initiative) => CATEGORY_TO_GROUP[(initiative.category ?? "").trim().toLowerCase()] !== undefined
+  );
+  const declared = new Set<string>(legacy ? PICKER_GROUPS : []);
+  const extra: string[] = [];
+  for (const initiative of visible) {
+    const group = groupFor(initiative);
+    if (group !== "Other" && !declared.has(group) && !extra.includes(group)) extra.push(group);
+  }
+  const order = [
+    ...(legacy ? PICKER_GROUPS.filter((group) => group !== "Other") : []),
+    ...extra,
+    "Other",
+  ];
+
+  return order
+    .map((group) => ({
+      group,
+      initiatives: visible.filter((initiative) => groupFor(initiative) === group),
+    }))
+    .filter((entry) => entry.initiatives.length > 0);
 }
 
 /** Flat lookup from key to initiative, for resolving a stored answer. */

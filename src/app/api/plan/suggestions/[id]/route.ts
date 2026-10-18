@@ -3,8 +3,11 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { toDateOnly, clampNotBefore, todayDateOnly, clampDayOfMonth } from "@/lib/plan-dates";
-import { loadTaskTemplates } from "@/lib/workbook/read";
+import { loadLibrary, loadTaskTemplates } from "@/lib/workbook/read";
+import { insertWithLibraryKey, supabaseTypeStore } from "@/lib/workbook/initiative-type";
+import { resolveSuggestionInitiative, suggestionChannel } from "@/lib/initiatives/suggestion-initiative";
 import { materialiseTasks, materialiseAiTasks, templateRunwayDays } from "@/lib/workbook/materialise";
+import { loadCompanyFit, rejectionReason } from "@/lib/recommend/company-eligibility";
 
 /**
  * PATCH /api/plan/suggestions/[id]
@@ -92,6 +95,14 @@ export async function PATCH(
         await applySuggestion(adminClient, companyId, suggestion);
         console.log("[plan/suggestions/id] Applied:", suggestion.suggestion_type);
       } catch (applyErr: any) {
+        if (applyErr instanceof SuggestionRejected) {
+          // Left pending: nothing was applied, and the user can still reject it.
+          console.warn("[plan/suggestions/id] Rejected by FIT:", applyErr.message);
+          return NextResponse.json(
+            { error: applyErr.message, reason: applyErr.message, code: "ineligible" },
+            { status: 409 }
+          );
+        }
         console.error("[plan/suggestions/id] Apply failed:", applyErr?.message || applyErr);
         return NextResponse.json(
           { error: "Could not apply this suggestion: " + (applyErr?.message || "unknown error") },
@@ -117,6 +128,9 @@ export async function PATCH(
     return NextResponse.json({ error: err?.message || "Internal error" }, { status: 500 });
   }
 }
+
+/** An accepted new_initiative whose library key fails FIT; `message` is the rule's reason. */
+class SuggestionRejected extends Error {}
 
 /** Applies an accepted suggestion to the live plan. */
 async function applySuggestion(db: SupabaseClient, companyId: string, s: any): Promise<void> {
@@ -191,21 +205,12 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
   }
 
   if (type === "new_initiative") {
-    const [{ data: annualPlan }, { data: products }, { data: initTypes }] = await Promise.all([
+    const [{ data: annualPlan }, { data: products }, library] = await Promise.all([
       db.from("annual_plans").select("id").eq("company_id", companyId).order("year", { ascending: false }).limit(1).single(),
       db.from("products").select("id").eq("company_id", companyId).eq("is_active", true).order("display_order").limit(1),
-      /**
-       * NOT filtered on `is_active` — same fix as generate-plan.
-       *
-       * Filtering here meant a deactivated type was never found, so the insert
-       * below created an active duplicate of the row an admin had just switched
-       * off. Oldest first, so if duplicates already exist the one other plans
-       * point at wins.
-       */
-      db
-        .from("initiative_types")
-        .select("id, channel, created_at")
-        .order("created_at", { ascending: true }),
+      // Inactive included: the suggestion was made from the library, and its
+      // row still says what the initiative is and tracks.
+      loadLibrary(db, { includeInactive: true }),
     ]);
 
     if (!annualPlan) throw new Error("No annual plan to attach the initiative to");
@@ -214,25 +219,32 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
 
     // The workbook library key IS the channel. `channel` is only a fallback for
     // suggestions generated before the library was wired in.
-    const channel = String(proposed.libraryKey || proposed.channel || "custom");
-    let typeId = (initTypes || []).find((t: any) => t.channel === channel)?.id || (initTypes || [])[0]?.id;
+    const channel = suggestionChannel(proposed);
 
-    if (!typeId) {
-      const { data: newType } = await db.from("initiative_types").insert({
-        name: channel.charAt(0).toUpperCase() + channel.slice(1),
-        channel,
-        owner: "system",
-        benchmarks: {},
-        project_template: { tasks: [], totalEstimatedHours: 0 },
-        // Workbook scale is 1-5, where 5 means "very hard". 3 is the neutral default.
-        difficulty: { effortToImplement: 3, skillExpertiseRequired: 3, timeToResults: 3, costToRun: 3 },
-        ai_context: {},
-        tier: 1,
-        display_order: 99,
-        is_active: true,
-      }).select("id").single();
-      typeId = newType?.id;
-    }
+    /**
+     * FIT, enforced at the point of acceptance. A suggestion can predate a
+     * toggle change or an intake edit, and the model's key was only ever a
+     * proposal, so the key is re-checked against this company's FIT and the
+     * admin allowlist — the same rules /api/intake/recommend applies — and
+     * refused with the rule's reason. Non-library channels are unaffected.
+     */
+    const { ctx } = await loadCompanyFit(db, companyId);
+    const reason = rejectionReason(library.find((e) => e.initiativeKey === channel), ctx);
+    if (reason) throw new SuggestionRejected(reason);
+
+    /**
+     * The shared type rule (src/lib/workbook/initiative-type.ts): the oldest
+     * row with this channel, active or not, else one created once from the
+     * library entry. This used to fall back to the FIRST type in the table
+     * when the channel had none, attaching the initiative to an arbitrary
+     * unrelated type.
+     */
+    const mapping = await resolveSuggestionInitiative(
+      supabaseTypeStore(db, "[plan/suggestions]"),
+      channel,
+      library.find((e) => e.initiativeKey === channel)
+    );
+    const typeId = mapping.typeId;
     if (!typeId) throw new Error("Could not resolve an initiative type");
 
     // AI may return a full ISO date string ("2025-04-30") or a month number (1-12).
@@ -276,7 +288,9 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
 
     console.log("[applySuggestion] new_initiative:", proposed.name, "| channel:", channel, "| date:", activationDate);
 
-    const { data: created, error } = await db.from("initiatives").insert({
+    // `library_key` and `metric_set` (migration 040) ride along; omitted if
+    // the columns are absent.
+    const { data: created, error } = await insertWithLibraryKey({
       company_id: companyId,
       annual_plan_id: annualPlan.id,
       product_id: productId,
@@ -293,7 +307,11 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
       planned_budget: Number(proposed.plannedBudget) || 0,
       actual_spend: 0,
       display_order: 0,
-    }).select("id").single();
+    },
+      mapping.libraryKey,
+      (row) => db.from("initiatives").insert(row).select("id").single(),
+      mapping.metricSet
+    );
     if (error) throw new Error(error.message);
 
     // Attach the project plan: workbook template where it exists, the

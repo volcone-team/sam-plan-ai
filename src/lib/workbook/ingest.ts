@@ -1,5 +1,14 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { parseWorkbook, type RawSheet, type ParsedWorkbook } from "@/lib/workbook/parse";
+import {
+  deriveLegacyFields,
+  parseWorkbook,
+  type LibraryRow,
+  type RawSheet,
+  type ParsedWorkbook,
+} from "@/lib/workbook/parse";
+import { isMissingColumnError } from "@/lib/workbook/read";
+import { parseMetricsCell, toStoredMetrics } from "@/lib/metrics/parse-metrics";
+import { MIGRATION_040_WARNING, metricsWarnings } from "@/lib/workbook/ingest-messages";
 
 /**
  * Workbook ingest: parse the uploaded sheets into the wb_* tables that
@@ -53,6 +62,10 @@ export async function ingestWorkbook(
     aiContext: parsed.aiContext.length,
   };
 
+  /** Tables fully written so far, for an honest message if a later one fails. */
+  const written: string[] = [];
+  let stage = "clearing the wb_* tables";
+
   try {
     // Replace wholesale. Order doesn't matter: there are no FKs between these
     // tables, they join on initiative_key by convention so a partially-filled
@@ -62,13 +75,24 @@ export async function ingestWorkbook(
       if (error) throw new Error(`clearing ${table}: ${error.message}`);
     }
 
+    // ---- Library first, with the migration-040 columns when they exist ----
+    stage = "inserting wb_initiative_library";
+    const library = parsed.library.map(deriveLegacyFields);
+    const libraryRows = library.map(libraryRow);
+    const withScores = await insertLibrary(client, libraryRows);
+    if (!withScores) {
+      parsed.warnings.push(MIGRATION_040_WARNING);
+      console.warn("[workbook/ingest] migration 040 columns missing; library stored without scores.");
+    }
+    // Reported with or without 040: the cell needs fixing either way.
+    parsed.warnings.push(...metricsWarnings(library));
+    written.push("wb_initiative_library");
+
+    // Seeded straight after the library, so a failure in a LATER table cannot
+    // leave new initiatives without a toggle row.
+    await seedInitiativeSettings(client, parsed);
+
     const inserts: Array<[string, Record<string, unknown>[]]> = [
-      ["wb_initiative_library", parsed.library.map((r) => ({
-        initiative_key: r.initiativeKey, workbook_id: r.workbookId, name: r.name,
-        category: r.category, difficulty: r.difficulty, speed_to_results: r.speedToResults,
-        one_liner: r.oneLiner, description: r.description, needs_sales_team: r.needsSalesTeam,
-        price_tier: r.priceTier, own_or_ops: r.ownOrOps, display_order: r.displayOrder,
-      }))],
       ["wb_benchmarks", parsed.benchmarks.map((r) => ({
         initiative_key: r.initiativeKey, metric: r.metric, conservative: r.conservative,
         moderate: r.moderate, aggressive: r.aggressive, unit: r.unit, source: r.source,
@@ -86,17 +110,103 @@ export async function ingestWorkbook(
       }))],
     ];
 
-    // Chunked: 655 task templates in one request is large enough to be worth
-    // splitting, and a single oversized insert is the kind of thing that fails
-    // only in production.
-    const CHUNK = 200;
     for (const [table, rows] of inserts) {
+      stage = `inserting ${table}`;
       for (let i = 0; i < rows.length; i += CHUNK) {
         const { error } = await client.from(table).insert(rows.slice(i, i + CHUNK));
         if (error) throw new Error(`inserting ${table}: ${error.message}`);
       }
+      written.push(table);
     }
 
+    console.log("[workbook/ingest] ok:", JSON.stringify(counts), "| warnings:", parsed.warnings.length);
+    return { ok: true, counts, warnings: parsed.warnings };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[workbook/ingest] write failed:", message);
+    /*
+     * There is no transaction across PostgREST calls. Everything was cleared
+     * up front, so a failure here leaves the tables written so far complete and
+     * the rest EMPTY or partly filled. Say exactly which, so the admin knows
+     * the AI is running on a partial library until the upload is retried.
+     */
+    const untouched = ALL_TABLES.filter((t) => !written.includes(t));
+    parsed.warnings.push(
+      `Ingest stopped while ${stage}. ` +
+      (written.length > 0 ? `Fully written: ${written.join(", ")}. ` : "Nothing was written. ") +
+      `Empty or incomplete: ${untouched.join(", ")}. ` +
+      "The uploaded workbook itself is saved; upload it again to retry."
+    );
+    return { ok: false, counts, warnings: parsed.warnings, error: message };
+  }
+}
+
+const ALL_TABLES = ["wb_initiative_library", "wb_benchmarks", "wb_task_templates", "wb_ai_context"];
+
+// Chunked: 655 task templates in one request is large enough to be worth
+// splitting, and a single oversized insert is the kind of thing that fails
+// only in production.
+const CHUNK = 200;
+
+// Both live in a pure module so the browser-side upload preview can use them.
+export { MIGRATION_040_WARNING, metricsWarnings };
+
+/** Columns that exist only once migration 040 is applied. */
+const MIGRATION_040_COLUMNS = [
+  "base_key", "speed_score", "cost_score", "odds_score", "revenue_score", "ease_score",
+  "score_total", "ideal_industries", "cta_options", "training", "metrics_raw", "metrics",
+] as const;
+
+function libraryRow(r: LibraryRow): Record<string, unknown> {
+  return {
+    initiative_key: r.initiativeKey, workbook_id: r.workbookId, name: r.name,
+    category: r.category, difficulty: r.difficulty, speed_to_results: r.speedToResults,
+    one_liner: r.oneLiner, description: r.description, needs_sales_team: r.needsSalesTeam,
+    price_tier: r.priceTier, own_or_ops: r.ownOrOps, display_order: r.displayOrder,
+    // ---- migration 040 ----
+    base_key: r.baseKey ?? null,
+    speed_score: r.speedScore ?? null, cost_score: r.costScore ?? null,
+    odds_score: r.oddsScore ?? null, revenue_score: r.revenueScore ?? null,
+    ease_score: r.easeScore ?? null, score_total: r.scoreTotal ?? null,
+    ideal_industries: r.idealIndustries ?? [], cta_options: r.ctaOptions ?? [],
+    training: r.training ?? [], metrics_raw: r.metricsRaw ?? null,
+    // Parsed from metrics_raw, versioned so it can be re-parsed later.
+    metrics: toStoredMetrics(parseMetricsCell(r.metricsRaw ?? null)),
+  };
+}
+
+function withoutMigration040(row: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...row };
+  for (const c of MIGRATION_040_COLUMNS) delete out[c];
+  return out;
+}
+
+/**
+ * Insert the library, preferring the full (migration 040) column set.
+ *
+ * The first chunk decides: if it is rejected for a missing column, it and every
+ * later chunk go in with the pre-040 columns instead, so an upload made before
+ * the owner applies 040 still lands. Returns whether the 040 columns were used.
+ * Any other error throws, as before.
+ */
+async function insertLibrary(
+  client: SupabaseClient,
+  rows: Record<string, unknown>[]
+): Promise<boolean> {
+  let full = true;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    let { error } = await client.from("wb_initiative_library").insert(full ? chunk : chunk.map(withoutMigration040));
+    if (error && full && i === 0 && isMissingColumnError(error)) {
+      full = false;
+      ({ error } = await client.from("wb_initiative_library").insert(chunk.map(withoutMigration040)));
+    }
+    if (error) throw new Error(`inserting wb_initiative_library: ${error.message}`);
+  }
+  return full;
+}
+
+async function seedInitiativeSettings(client: SupabaseClient, parsed: ParsedWorkbook): Promise<void> {
     /**
      * Give every initiative a settings row, WITHOUT touching existing ones.
      *
@@ -138,12 +248,4 @@ export async function ingestWorkbook(
         );
       }
     }
-
-    console.log("[workbook/ingest] ok:", JSON.stringify(counts), "| warnings:", parsed.warnings.length);
-    return { ok: true, counts, warnings: parsed.warnings };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[workbook/ingest] write failed:", message);
-    return { ok: false, counts, warnings: parsed.warnings, error: message };
-  }
 }

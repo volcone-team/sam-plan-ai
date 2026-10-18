@@ -1,5 +1,6 @@
 import { AIWorkbook } from "@/components/admin";
 import { InitiativeLibraryToggles } from "@/components/admin/initiative-library-toggles";
+import { RecommendationWeightSetting } from "@/components/admin/recommendation-weight-setting";
 
 export const metadata = {
   title: "AI Workbook | Admin | SAM Flow AI",
@@ -27,6 +28,13 @@ export default function AdminAIWorkbookPage() {
       */}
       <section className="mt-10 border-t border-border pt-8">
         <InitiativeLibraryToggles />
+      </section>
+      {/*
+        Ranking sits after the toggles: the toggles decide WHICH initiatives
+        the AI may use, this decides the ORDER they are offered in.
+      */}
+      <section className="mt-10 border-t border-border pt-8">
+        <RecommendationWeightSetting />
       </section>
     </div>
   );

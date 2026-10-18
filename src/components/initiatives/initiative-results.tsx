@@ -23,6 +23,18 @@ import { initiativeTypeService } from '@/services/initiative-type.service';
 import { NumberInputRaw } from '@/components/ui/number-input';
 import { parseNumberInput } from '@/lib/number-input';
 import { formatNumber } from '@/lib/format-money';
+import type { InitiativeMetricSet } from '@/lib/metrics/metric-set';
+import {
+  draftFromMetrics,
+  formatMetricValue,
+  mergeMetricEdit,
+  metricFieldsFor,
+  metricGroupsOf,
+  parseMetricDraft,
+  summariseMetrics,
+  type MetricFields,
+} from '@/lib/metrics/result-metrics';
+import { MetricInputs, MetricValuesView } from '@/components/initiatives/metric-inputs';
 import {
   summariseResultsTab,
   pickMoneyFormatter,
@@ -69,7 +81,7 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
   const [loading, setLoading] = useState(true);
   const [showAddResult, setShowAddResult] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
-  const [metricKeys, setMetricKeys] = useState<string[]>([]);
+  const [fields, setFields] = useState<MetricFields>({ mode: 'legacy', keys: [] });
   const [resultError, setResultError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -87,12 +99,22 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
       setExpenses(expensesData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
 
       // Load initiative type to get benchmark metric keys
+      // With a metric set, the set decides the fields; without one, the
+      // initiative type's benchmark keys do (legacy, unchanged).
       try {
         const initiative = await initiativeService.getInitiative(initiativeId);
-        const initType = await initiativeTypeService.getInitiativeType(initiative.initiativeTypeId);
-        setMetricKeys(Object.keys(initType.benchmarks));
+        let legacyKeys: string[] = [];
+        if (!initiative.metricSet) {
+          try {
+            const initType = await initiativeTypeService.getInitiativeType(initiative.initiativeTypeId);
+            legacyKeys = Object.keys(initType.benchmarks);
+          } catch {
+            // If we can't load type, just show empty metrics
+          }
+        }
+        setFields(metricFieldsFor(initiative, legacyKeys));
       } catch {
-        // If we can't load type, just show empty metrics
+        // If we can't load the initiative, just show empty metrics
       }
     } catch (err) {
       console.error('Failed to load results/expenses:', err);
@@ -184,6 +206,8 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
   const formatRevenue = pickMoneyFormatter(results.map(r => r.actualRevenue));
   const formatExpense = pickMoneyFormatter(expenses.map(e => e.amount));
   const formatLegacy = pickMoneyFormatter(results.map(r => r.actualSpend));
+  const metricKeys = fields.mode === 'legacy' ? fields.keys : [];
+  const metricSet = fields.mode === 'set' ? fields.set : null;
 
   return (
     <div className="space-y-8">
@@ -199,6 +223,8 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
           </p>
         )}
       </div>
+
+      {metricSet && results.length > 0 && <MetricsSoFar set={metricSet} results={results} />}
 
       {/* Results Log */}
       <section>
@@ -217,7 +243,7 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
         </div>
 
         {showAddResult && (
-          <ResultForm metricKeys={metricKeys} onSubmit={handleAddResult} onCancel={() => setShowAddResult(false)} />
+          <ResultForm metricKeys={metricKeys} metricSet={metricSet} onSubmit={handleAddResult} onCancel={() => setShowAddResult(false)} />
         )}
 
         {resultError && (
@@ -231,7 +257,7 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
         ) : (
           <div className="space-y-2">
             {results.map(result => (
-              <ResultRow key={result.id} result={result} metricKeys={metricKeys} formatRevenue={formatRevenue} formatLegacy={formatLegacy} onUpdate={handleUpdateResult} onDelete={handleDeleteResult} />
+              <ResultRow key={result.id} result={result} metricKeys={metricKeys} metricSet={metricSet} formatRevenue={formatRevenue} formatLegacy={formatLegacy} onUpdate={handleUpdateResult} onDelete={handleDeleteResult} />
             ))}
           </div>
         )}
@@ -288,6 +314,47 @@ function SummaryCard({ icon: Icon, label, value: formatted, color }: { icon: typ
 }
 
 /* ─────────────────────────────────────────────────
+ * Metrics so far (metric-set initiatives only)
+ * ───────────────────────────────────────────────── */
+
+function MetricsSoFar({ set, results }: { set: InitiativeMetricSet; results: InitiativeResult[] }) {
+  const groups = metricGroupsOf(set);
+  const summary = summariseMetrics(set, results);
+  const showHeadings = groups.length >= 2;
+  const any = groups.some(g =>
+    g.fields.some(f => summary.entered[f.id] !== null) || g.derived.some(d => summary.derived[d.id] !== null)
+  );
+  if (!any) return null;
+  return (
+    <section aria-labelledby="metrics-so-far" className="rounded-[var(--radius-lg)] border border-border bg-card p-5 space-y-3">
+      <h2 id="metrics-so-far" className="text-sm font-semibold text-[hsl(var(--foreground))]">Metrics so far</h2>
+      {groups.map((g, gi) => (
+        <div key={`${g.label ?? 'general'}-${gi}`}>
+          {showHeadings && <h3 className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--foreground-muted))] mb-1">{g.label ?? 'General'}</h3>}
+          <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {g.fields.map(f => (
+              <div key={f.id}>
+                <dt className="text-xs text-[hsl(var(--foreground-muted))]">{f.label}</dt>
+                <dd className="text-sm font-semibold">{formatMetricValue(f.kind, f.unit, summary.entered[f.id])}</dd>
+              </div>
+            ))}
+            {g.derived.map(d => (
+              <div key={d.id}>
+                <dt className="text-xs text-[hsl(var(--foreground-muted))]" title={d.formulaText}>{d.label}</dt>
+                <dd className="text-sm font-semibold">{formatMetricValue(d.kind, d.unit, summary.derived[d.id])}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ))}
+      <p className="text-xs text-[hsl(var(--foreground-muted))]">
+        Totals across all weeks. Rates are recalculated from the totals; follower and list counts show the latest week.
+      </p>
+    </section>
+  );
+}
+
+/* ─────────────────────────────────────────────────
  * Result Row
  * ───────────────────────────────────────────────── */
 
@@ -297,17 +364,34 @@ interface ResultUpdates {
   notes: string;
 }
 
-function ResultRow({ result, metricKeys, formatRevenue, formatLegacy, onUpdate, onDelete }: { result: InitiativeResult; metricKeys: string[]; formatRevenue: MoneyFormatter; formatLegacy: MoneyFormatter; onUpdate: (id: string, updates: ResultUpdates) => void; onDelete: (id: string) => void }) {
+function ResultRow({ result, metricKeys, metricSet, formatRevenue, formatLegacy, onUpdate, onDelete }: { result: InitiativeResult; metricKeys: string[]; metricSet: InitiativeMetricSet | null; formatRevenue: MoneyFormatter; formatLegacy: MoneyFormatter; onUpdate: (id: string, updates: ResultUpdates) => void; onDelete: (id: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [editRevenue, setEditRevenue] = useState(String(result.actualRevenue ?? ''));
   const [editMetrics, setEditMetrics] = useState<Record<string, number>>(result.metrics as Record<string, number> || {});
   const [editNotes, setEditNotes] = useState(result.notes || '');
+  // Metric-set initiatives edit raw text, validated on save.
+  const [editDraft, setEditDraft] = useState<Record<string, string>>(() =>
+    metricSet ? draftFromMetrics(metricGroupsOf(metricSet), result.metrics) : {}
+  );
+  const [editError, setEditError] = useState<string | null>(null);
 
   const formatDate = (date: Date) => new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const revenueInputId = `result-revenue-${result.id}`;
 
   function handleSave() {
-    onUpdate(result.id, { actualRevenue: toAmount(editRevenue), metrics: editMetrics, notes: editNotes });
+    let metrics = editMetrics;
+    if (metricSet) {
+      const groups = metricGroupsOf(metricSet);
+      const draft = parseMetricDraft(groups, editDraft);
+      if (Object.keys(draft.errors).length > 0) {
+        setEditError('Fix the highlighted metrics before saving.');
+        return;
+      }
+      // Keys outside the set are kept exactly as stored.
+      metrics = mergeMetricEdit(groups, result.metrics, draft.values);
+    }
+    setEditError(null);
+    onUpdate(result.id, { actualRevenue: toAmount(editRevenue), metrics, notes: editNotes });
     setEditing(false);
   }
 
@@ -336,7 +420,10 @@ function ResultRow({ result, metricKeys, formatRevenue, formatLegacy, onUpdate, 
               <NumberInputRaw id={revenueInputId} value={editRevenue} onValueChange={setEditRevenue} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
             </div>
           </div>
-          {metricKeys.length > 0 && (
+          {metricSet && (
+            <MetricInputs set={metricSet} values={editDraft} onChange={setEditDraft} idPrefix={`edit-${result.id}`} />
+          )}
+          {!metricSet && metricKeys.length > 0 && (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {metricKeys.map(key => (
                 <div key={key}>
@@ -350,6 +437,7 @@ function ResultRow({ result, metricKeys, formatRevenue, formatLegacy, onUpdate, 
             <label className="block text-xs text-[hsl(var(--foreground-muted))] mb-1">Notes</label>
             <input type="text" value={editNotes} onChange={e => setEditNotes(e.target.value)} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
           </div>
+          {editError && <p role="alert" className="text-xs text-red-700">{editError}</p>}
           <button onClick={handleSave} className="px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90">Save</button>
         </div>
       ) : (
@@ -365,7 +453,7 @@ function ResultRow({ result, metricKeys, formatRevenue, formatLegacy, onUpdate, 
                 </span>
               )}
             </div>
-            {Object.keys(result.metrics).length > 0 && (
+            {!metricSet && Object.keys(result.metrics).length > 0 && (
               <div>
                 <p className="text-xs text-[hsl(var(--foreground-muted))]">Metrics</p>
                 <div className="flex flex-wrap gap-1.5 mt-0.5">
@@ -378,6 +466,11 @@ function ResultRow({ result, metricKeys, formatRevenue, formatLegacy, onUpdate, 
               </div>
             )}
           </div>
+          {metricSet && (
+            <div className="mt-3">
+              <MetricValuesView set={metricSet} metrics={result.metrics} />
+            </div>
+          )}
           {result.notes && (
             <p className="mt-2 text-xs text-[hsl(var(--foreground-muted))] flex items-start gap-1">
               <FileText className="h-3 w-3 mt-0.5 shrink-0" />
@@ -447,7 +540,7 @@ interface ResultFormData {
   notes: string;
 }
 
-function ResultForm({ metricKeys, onSubmit, onCancel }: { metricKeys: string[]; onSubmit: (data: ResultFormData) => void; onCancel: () => void }) {
+function ResultForm({ metricKeys, metricSet, onSubmit, onCancel }: { metricKeys: string[]; metricSet: InitiativeMetricSet | null; onSubmit: (data: ResultFormData) => void; onCancel: () => void }) {
   const today = new Date();
   const weekStart = new Date(today);
   weekStart.setDate(today.getDate() - today.getDay() + 1); // Monday
@@ -463,9 +556,23 @@ function ResultForm({ metricKeys, onSubmit, onCancel }: { metricKeys: string[]; 
   });
   // Held as the raw string NumberInputRaw edits; parsed on submit.
   const [revenueInput, setRevenueInput] = useState('');
+  // Metric-set initiatives: raw text by field id, validated on submit.
+  const [metricDraft, setMetricDraft] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (metricSet) {
+      const draft = parseMetricDraft(metricGroupsOf(metricSet), metricDraft);
+      if (Object.keys(draft.errors).length > 0) {
+        setFormError('Fix the highlighted metrics before saving.');
+        return;
+      }
+      setFormError(null);
+      // Blank fields are omitted, never saved as 0.
+      onSubmit({ ...formData, actualRevenue: toAmount(revenueInput), metrics: draft.values });
+      return;
+    }
     onSubmit({ ...formData, actualRevenue: toAmount(revenueInput) });
   };
 
@@ -501,8 +608,15 @@ function ResultForm({ metricKeys, onSubmit, onCancel }: { metricKeys: string[]; 
       </div>
       <p className="text-xs text-[hsl(var(--foreground-muted))]">Record spend as an expense below.</p>
 
-      {/* Dynamic Metrics based on initiative type */}
-      {metricKeys.length > 0 && (
+      {metricSet && (
+        <div>
+          <p className="block text-xs font-semibold text-[hsl(var(--foreground))] mb-2">Metrics</p>
+          <MetricInputs set={metricSet} values={metricDraft} onChange={setMetricDraft} idPrefix="new-result" />
+        </div>
+      )}
+
+      {/* Dynamic Metrics based on initiative type (legacy, no metric set) */}
+      {!metricSet && metricKeys.length > 0 && (
         <div>
           <label className="block text-xs font-semibold text-[hsl(var(--foreground))] mb-2">Conversion Metrics</label>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -530,6 +644,8 @@ function ResultForm({ metricKeys, onSubmit, onCancel }: { metricKeys: string[]; 
         <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">Notes</label>
         <textarea rows={2} value={formData.notes} onChange={e => setFormData(p => ({ ...p, notes: e.target.value }))} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))] resize-none" placeholder="What happened this week..." />
       </div>
+
+      {formError && <p role="alert" className="text-sm text-red-700">{formError}</p>}
 
       <div className="flex justify-end gap-3">
         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm font-medium rounded-[var(--radius-md)] border border-border hover:bg-[hsl(var(--background-muted))]">Cancel</button>

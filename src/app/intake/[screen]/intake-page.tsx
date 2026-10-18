@@ -50,7 +50,9 @@ export function IntakePage({ screen }: { screen: ScreenId }) {
    * unconditionally — hooks cannot be conditional, and fetching 22 rows on the
    * other screens is cheaper than the bug a conditional hook would introduce.
    */
-  const library = useLibrary();
+  // Screen 6 records history, so it may name an admin-disabled initiative;
+  // screen 5 builds the plan and lists the ACTIVE library only.
+  const library = useLibrary(screen === "wins" ? "history" : "plan");
 
   /**
    * Resume where the user left off — ONCE, and never from a finished intake.

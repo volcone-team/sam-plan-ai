@@ -11,6 +11,7 @@ import {
   type LibraryInitiative,
 } from "@/lib/intake/library";
 import { SOMETHING_ELSE_KEY } from "@/lib/intake/schema";
+import { distinguishingLabelBesideOwnOrOps } from "@/lib/library/display-name";
 
 /**
  * Searchable, grouped initiative picker for screens 5 and 6 (REQ-8.1 to
@@ -79,6 +80,7 @@ export function InitiativePicker({
           <p className="truncate text-sm font-medium text-foreground">
             {selected ? labelFor(selected, initiatives) : "Something else"}
           </p>
+          {selected && <VariantLabel initiative={selected} initiatives={initiatives} />}
           {selected?.oneLiner && (
             <p className="mt-0.5 truncate text-xs text-[hsl(var(--foreground-muted))]">
               {selected.oneLiner}
@@ -166,6 +168,7 @@ export function InitiativePicker({
                         <span className="block text-sm font-medium text-foreground">
                           {labelFor(initiative, initiatives)}
                         </span>
+                        <VariantLabel initiative={initiative} initiatives={initiatives} />
                         {initiative.oneLiner && (
                           <span className="mt-0.5 block text-xs text-[hsl(var(--foreground-muted))]">
                             {initiative.oneLiner}
@@ -198,6 +201,24 @@ export function InitiativePicker({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Which of several same-name initiatives this is, e.g. the category of one of
+ * two "Hybrid Events". Own/Ops is left to the label and PlatformBadge.
+ */
+function VariantLabel({
+  initiative,
+  initiatives,
+}: {
+  initiative: LibraryInitiative;
+  initiatives: readonly LibraryInitiative[];
+}) {
+  const label = distinguishingLabelBesideOwnOrOps(initiative, initiatives);
+  if (!label) return null;
+  return (
+    <span className="block text-xs font-medium text-[hsl(var(--foreground-muted))]">{label}</span>
   );
 }
 

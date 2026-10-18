@@ -21,44 +21,64 @@ export interface UseLibrary {
   error: string | null;
 }
 
-export function useLibrary(): UseLibrary {
-  const [initiatives, setInitiatives] = useState<LibraryInitiative[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+/**
+ * `plan` (screen 5): the ACTIVE library — what may go into the plan.
+ * `history` (screen 6): the whole library, admin-disabled included — what the
+ * customer has run before. See /api/intake/library.
+ */
+export type LibraryScope = "plan" | "history";
+
+interface Loaded {
+  scope: LibraryScope;
+  initiatives: LibraryInitiative[];
+  error: string | null;
+}
+
+export function useLibrary(scope: LibraryScope = "plan"): UseLibrary {
+  /**
+   * The last completed load, tagged with its scope. `loading` is DERIVED —
+   * true until a load for the current scope lands — so switching screens
+   * never shows the other scope's list as if it were this one's.
+   */
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
+      let result: Loaded;
       try {
-        const response = await fetch("/api/intake/library", { cache: "no-store" });
+        const url = scope === "history" ? "/api/intake/library?scope=history" : "/api/intake/library";
+        const response = await fetch(url, { cache: "no-store" });
         if (!response.ok) {
           throw new Error(`Could not load the initiative list (${response.status}).`);
         }
 
         const data = (await response.json()) as { initiatives?: LibraryInitiative[] };
-        if (cancelled) return;
-
         const rows = data.initiatives ?? [];
-        if (rows.length === 0) {
-          setError(
-            "No initiatives are available yet. Ask your administrator to upload the workbook."
-          );
-          return;
-        }
-
-        setInitiatives(rows);
+        result =
+          rows.length === 0
+            ? {
+                scope,
+                initiatives: [],
+                error: "No initiatives are available yet. Ask your administrator to upload the workbook.",
+              }
+            : { scope, initiatives: rows, error: null };
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (!cancelled) setLoading(false);
+        result = { scope, initiatives: [], error: err instanceof Error ? err.message : String(err) };
       }
+      if (!cancelled) setLoaded(result);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [scope]);
 
-  return { initiatives, loading, error };
+  const current = loaded?.scope === scope ? loaded : null;
+  return {
+    initiatives: current?.initiatives ?? [],
+    loading: current === null,
+    error: current?.error ?? null,
+  };
 }
