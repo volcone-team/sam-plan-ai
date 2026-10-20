@@ -4,6 +4,12 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { loadBillingConfig } from "@/lib/billing/stripe-client";
 import { evaluateAccess } from "@/lib/billing/entitlement";
+import { needsCallUnlock, type CallGateCompany } from "@/lib/access/call-gate";
+import {
+  loadCallGateSettings,
+  stampCallUnlockForNewCompany,
+} from "@/lib/access/call-gate-settings";
+import { isMissingColumnError } from "@/lib/supabase/missing-column";
 import { WelcomeClient } from "./welcome-client";
 import { ConfirmPayment } from "./confirm-payment";
 
@@ -142,6 +148,82 @@ export default async function WelcomePage({
     redirect(access.reason === "paused" ? "/account-paused" : "/choose-plan");
   }
 
+  /**
+   * THE ONBOARDING CALL GATE (migration 043).
+   *
+   * Reached only once entitlement is settled above, which is what makes this
+   * the thank-you page rather than a second lockout screen: they have paid,
+   * and the one thing left is to meet somebody.
+   *
+   * THIS IS ALSO WHERE THE PAID FLOW GETS STAMPED. Public signup's company row
+   * is written by the `handle_new_user` trigger, and the confirmation link can
+   * land on /auth/confirmed as a hash fragment the server never sees, so no
+   * application code reliably runs at creation. The middleware has a backstop
+   * for the trial flow (which never passes this page); this covers the no-trial
+   * flow, where the company is created at registration and arrives here a few
+   * minutes later, inside the stamp's grace window.
+   *
+   * Service-role client on purpose: `requires_call_unlock` is not writable from
+   * a customer session, and `app_settings` is not readable from one.
+   * `stampCallUnlockForNewCompany` is idempotent, never un-stamps, never
+   * re-locks a company that has been granted access, refuses a company older
+   * than the grace window, and never throws.
+   */
+  const callSettings = await loadCallGateSettings(db);
+
+  let callGateCompany: CallGateCompany | null = null;
+
+  if (companyId) {
+    const { data: companyRow, error: companyError } = await db
+      .from("companies")
+      .select("requires_call_unlock, portal_access_granted_at")
+      .eq("id", companyId)
+      .maybeSingle();
+
+    if (companyError) {
+      // Fails OPEN, like everywhere else in this feature: before 043 is applied
+      // the columns do not exist, and no read failure may turn a paying
+      // customer's welcome page into a waiting room.
+      if (!isMissingColumnError(companyError)) {
+        console.warn(
+          "[welcome] call-gate columns unreadable, not gating:",
+          companyError.message
+        );
+      }
+    } else if (companyRow) {
+      const row = companyRow as unknown as {
+        requires_call_unlock?: boolean | null;
+        portal_access_granted_at?: string | null;
+      };
+      callGateCompany = {
+        requires_call_unlock: row.requires_call_unlock ?? null,
+        portal_access_granted_at: row.portal_access_granted_at ?? null,
+      };
+
+      /*
+       * Only a company with NO decision yet is a candidate, and only while the
+       * switch is on — which is already in hand, so the normal case (feature
+       * off, or an already flagged or already unlocked company) adds no query
+       * beyond the read above.
+       */
+      if (
+        callSettings.requireCall &&
+        callGateCompany.requires_call_unlock !== true &&
+        !callGateCompany.portal_access_granted_at
+      ) {
+        const stamp = await stampCallUnlockForNewCompany(db, companyId);
+        if (stamp.stamped) {
+          callGateCompany = {
+            requires_call_unlock: true,
+            portal_access_granted_at: null,
+          };
+        }
+      }
+    }
+  }
+
+  const awaitingCall = needsCallUnlock(callGateCompany);
+
   const { data: plan } = sub?.plan_id
     ? await db
         .from("subscription_plans")
@@ -171,6 +253,8 @@ export default async function WelcomePage({
       intakeDone={(initiativeCount ?? 0) > 0}
       isTrial={access.reason === "trialing"}
       trialDaysRemaining={access.daysRemaining}
+      awaitingCall={awaitingCall}
+      bookingUrl={callSettings.bookingUrl}
     />
   );
 }

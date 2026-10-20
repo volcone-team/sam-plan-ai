@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { logActivity } from "@/lib/activity-log";
 import { getInviteContext, sendMemberInvite } from "@/lib/team-invite";
+import { stampCallUnlockForNewCompany } from "@/lib/access/call-gate-settings";
 
 /**
  * POST /api/admin/companies/create
@@ -88,6 +89,30 @@ export async function POST(request: Request) {
     }
 
     console.log("[admin/companies/create] Company created:", company.id, company.name);
+
+    /**
+     * Onboarding call gate: snapshot the global switch onto the new company.
+     *
+     * Done HERE, immediately after the insert, because this route is one of
+     * only two paths that create a company and it is the one the application
+     * owns. `maxAgeMs: null` because we just created the row, so the "is this
+     * really a new signup" age check has nothing to tell us.
+     *
+     * Best-effort and never throws: a company that is not stamped is simply
+     * not gated, which must not fail an admin's creation request. Before
+     * migration 043 is applied the switch reads as off and this is a no-op.
+     */
+    const stamp = await stampCallUnlockForNewCompany(adminClient, company.id, {
+      maxAgeMs: null,
+    });
+    if (stamp.requireCall) {
+      console.log(
+        "[admin/companies/create] Call gate:",
+        stamp.reason,
+        "| stamped:",
+        stamp.stamped
+      );
+    }
 
     // 4. Create the auth user (no password — invite flow, skip email verification)
     const { data: newUser, error: authError } = await adminClient.auth.admin.createUser({

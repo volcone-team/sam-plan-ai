@@ -14,7 +14,9 @@ import {
   Trash2,
   Gift,
   PauseCircle,
+  PhoneCall,
   PlayCircle,
+  Unlock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DateInput } from "@/components/ui/date-input";
@@ -76,6 +78,24 @@ interface CompanyCancellation {
   accessEndsAt: string | null;
 }
 
+/**
+ * The onboarding call gate for one company (migration 043).
+ *
+ * NOT PART OF `CompanySubscription`, because it is not billing: a company can
+ * be waiting for its call while fully paid, or unlocked while past due. The
+ * two gates are evaluated independently and are shown independently.
+ *
+ * `not_gated` is the state of every company that existed before the feature,
+ * which is to say almost all of them — the UI renders nothing for it rather
+ * than adding a column of dashes.
+ */
+interface CompanyPortalAccess {
+  state: "not_gated" | "waiting" | "open";
+  grantedAt: string | null;
+  /** The admin who opened it, by name or email. Null if unknown or never granted. */
+  grantedBy: string | null;
+}
+
 interface AdminCompany {
   id: string;
   name: string;
@@ -95,6 +115,7 @@ interface AdminCompany {
   lifetimePaid: number;
   subscription: CompanySubscription | null;
   cancellation: CompanyCancellation | null;
+  portalAccess: CompanyPortalAccess;
 }
 
 function formatCurrency(amount: number, currency: string = "USD"): string {
@@ -177,6 +198,47 @@ function SubscriptionPill({ sub }: { sub: CompanySubscription | null }) {
   return (
     <span className={cn("inline-flex rounded-full px-2 py-0.5 text-xs font-medium", tone)}>
       {label}
+    </span>
+  );
+}
+
+/**
+ * The onboarding call gate, in the State column beside the subscription pill.
+ *
+ * RENDERS NOTHING FOR `not_gated`, which is the majority of rows: a pill
+ * saying "not applicable" on every company would bury the handful that are
+ * actually waiting, and those are the only ones an admin has to act on.
+ *
+ * Amber for waiting, matching the "something needs you" tone the pause warning
+ * and the cancelling note already use. Open is deliberately quiet — it is the
+ * normal end state, not news.
+ */
+function PortalAccessPill({ access }: { access: CompanyPortalAccess | undefined }) {
+  if (!access || access.state === "not_gated") return null;
+
+  if (access.state === "waiting") {
+    return (
+      <span
+        className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+        title="This customer has paid and is on the thank-you page. Open their portal once the onboarding call has happened."
+      >
+        <PhoneCall className="h-3 w-3" />
+        Waiting for call
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-[hsl(var(--background-muted))] px-2 py-0.5 text-xs font-medium text-[hsl(var(--foreground-muted))]"
+      title={
+        access.grantedAt
+          ? `Portal opened ${shortDate(access.grantedAt)}${access.grantedBy ? ` by ${access.grantedBy}` : ""}`
+          : "Portal open"
+      }
+    >
+      <Unlock className="h-3 w-3" />
+      Portal open
     </span>
   );
 }
@@ -342,6 +404,72 @@ export function CompanyManagement() {
   const resumeBilling = (company: AdminCompany) =>
     runPauseAction({ action: "resume", companyId: company.id });
 
+  /* ---- Portal access: the onboarding call gate (migration 043) ---- */
+
+  /** False → migration 043 is missing, so no control is rendered at all. */
+  const [callGateAvailable, setCallGateAvailable] = useState(true);
+  /** Set when the grant landed but the customer was not told. */
+  const [portalWarning, setPortalWarning] = useState<string | null>(null);
+  /** Set when a grant or revoke changed nothing or succeeded, for one line of feedback. */
+  const [portalNotice, setPortalNotice] = useState<string | null>(null);
+
+  /**
+   * Open or re-close one company's portal.
+   *
+   * SEPARATE FROM BOTH comping and pausing, because it answers a different
+   * question — "has anyone spoken to them yet", not "have they paid" — and the
+   * server keeps the two in different columns for exactly that reason.
+   */
+  async function runPortalAccessAction(company: AdminCompany, action: "grant" | "revoke") {
+    setAccessBusy(true);
+    setAccessError(null);
+    setPortalWarning(null);
+    setPortalNotice(null);
+    try {
+      const res = await fetch(`/api/admin/companies/${company.id}/portal-access`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAccessError(body?.message || body?.error || "That did not work.");
+        return false;
+      }
+
+      /**
+       * The grant is already committed when the email fails, so this is a
+       * warning and not an error. Saying nothing would leave a paid account
+       * sitting idle waiting for a message that never arrived.
+       */
+      if (body?.outcome === "granted" && body?.email && !body.email.sent) {
+        setPortalWarning(
+          `${company.name}'s portal is open, but the “your portal is ready” email could not be sent` +
+            (body.email.error === "no_owner_email"
+              ? " — there is no owner email on this company. Tell them another way."
+              : ". Let them know another way.")
+        );
+      } else if (body?.outcome === "already_granted") {
+        setPortalNotice(`${company.name}'s portal was already open. Nothing was changed or re-sent.`);
+      } else if (body?.outcome === "already_waiting") {
+        setPortalNotice(`${company.name} was already waiting for its call.`);
+      } else if (body?.outcome === "granted") {
+        setPortalNotice(`${company.name}'s portal is open and the owner has been emailed.`);
+      } else if (body?.outcome === "revoked") {
+        setPortalNotice(`${company.name} is waiting for its call again. The customer was not emailed.`);
+      }
+
+      await loadCompanies(search, page);
+      return true;
+    } catch {
+      setAccessError("Could not reach the server.");
+      return false;
+    } finally {
+      setAccessBusy(false);
+    }
+  }
+
   async function handleDeleteCompany(id: string) {
     setDeletingId(id);
     console.log("[CompanyManagement] Deleting company:", id);
@@ -416,6 +544,9 @@ export function CompanyManagement() {
       setCompanies(data.companies || []);
       setTotal(data.total || 0);
       setPlans(data.plans || []);
+      // Defaults to true for an older response that does not say, which only
+      // ever means the control renders and the route's own 409 explains why.
+      setCallGateAvailable(data.callGateAvailable !== false);
     } catch (err: any) {
       setError(err?.message || "Network error");
       console.error("[CompanyManagement] Fetch error:", err);
@@ -625,6 +756,15 @@ export function CompanyManagement() {
                             → {sub.pendingPlanName}
                           </p>
                         )}
+                        {/*
+                          In the collapsed row, not only the accordion: "who is
+                          waiting for their call" is a list an admin scans, and
+                          a state you have to open twenty panels to find is a
+                          state nobody acts on.
+                        */}
+                        {callGateAvailable && (
+                          <PortalAccessPill access={company.portalAccess} />
+                        )}
                       </td>
 
                       {/*
@@ -729,6 +869,31 @@ export function CompanyManagement() {
                               </>
                             )}
 
+                            {/*
+                              Shown only for a company the gate applies to, and
+                              only once 043 is applied. The granted pair is the
+                              audit trail — "who let them in, and when" — which
+                              exists nowhere else in the UI.
+                            */}
+                            {callGateAvailable &&
+                              company.portalAccess &&
+                              company.portalAccess.state !== "not_gated" && (
+                                <Detail label="Portal access">
+                                  {company.portalAccess.state === "waiting" ? (
+                                    <span className="text-amber-700 dark:text-amber-400">
+                                      Waiting for the onboarding call
+                                    </span>
+                                  ) : (
+                                    <>
+                                      Opened {shortDate(company.portalAccess.grantedAt)}
+                                      {company.portalAccess.grantedBy
+                                        ? ` by ${company.portalAccess.grantedBy}`
+                                        : ""}
+                                    </>
+                                  )}
+                                </Detail>
+                              )}
+
                             {company.description && (
                               <div className="sm:col-span-2 lg:col-span-4">
                                 <Detail label="Description">{company.description}</Detail>
@@ -789,6 +954,42 @@ export function CompanyManagement() {
                               <Eye className="h-3.5 w-3.5" />
                               View details
                             </button>
+
+                            {/*
+                              Portal access, first among the access actions
+                              because it is the one with a customer sitting on
+                              the other side of it.
+
+                              NOT OFFERED for a company the gate never applied
+                              to, and not offered at all before 043: a button
+                              that cannot store its result is worse than none,
+                              since the admin would believe a customer had been
+                              let in. The server refuses both cases too.
+                            */}
+                            {callGateAvailable &&
+                              company.portalAccess?.state === "waiting" && (
+                                <button
+                                  onClick={() => runPortalAccessAction(company, "grant")}
+                                  disabled={accessBusy}
+                                  className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-40 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/30"
+                                >
+                                  <Unlock className="h-3.5 w-3.5" />
+                                  Open portal
+                                </button>
+                              )}
+
+                            {callGateAvailable &&
+                              company.portalAccess?.state === "open" && (
+                                <button
+                                  onClick={() => runPortalAccessAction(company, "revoke")}
+                                  disabled={accessBusy}
+                                  title="Puts this company back on the thank-you page until you open it again. The customer is not emailed."
+                                  className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-[hsl(var(--foreground-muted))] transition-colors hover:bg-[hsl(var(--background))] disabled:opacity-40"
+                                >
+                                  <PhoneCall className="h-3.5 w-3.5" />
+                                  Close portal again
+                                </button>
+                              )}
 
                             {/*
                               Grant is offered ONLY to accounts that are not
@@ -1113,6 +1314,29 @@ export function CompanyManagement() {
           className="rounded-[var(--radius-md)] border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
         >
           {pauseWarning}
+        </p>
+      )}
+
+      {/*
+        The portal opened but the customer was not told. Amber, not red: the
+        grant stands, so this is a "go and message them" rather than a failure
+        to retry — clicking again would not re-send anyway.
+      */}
+      {portalWarning && (
+        <p
+          role="alert"
+          className="rounded-[var(--radius-md)] border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        >
+          {portalWarning}
+        </p>
+      )}
+
+      {portalNotice && !portalWarning && (
+        <p
+          role="status"
+          className="rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))] px-3 py-2.5 text-sm text-[hsl(var(--foreground-muted))]"
+        >
+          {portalNotice}
         </p>
       )}
 

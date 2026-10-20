@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { decideBillingGate, decideChoosePlanPage, type GateSubRow } from "./billing-gate";
+import {
+  decideAccessGates,
+  decideBillingGate,
+  decideChoosePlanPage,
+  type GateSubRow,
+} from "./billing-gate";
+import type { CallGateCompany } from "@/lib/access/call-gate";
 import { evaluateAccess, type BillingSettings } from "./entitlement";
 import { shouldClearPauseOnSync, PAUSE_CLEAR_PATCH } from "./webhook-logic";
 
@@ -50,6 +56,98 @@ describe("decideBillingGate", () => {
     expect(decideBillingGate({ isAdmin: false, hasCompany: true, sub: canceled, settings: ON, pathname: "/settings" }))
       .toEqual({ kind: "purchase", reason: "canceled" });
     expect(gate(canceled, "/api/stripe/checkout")).toBe("pass");
+  });
+});
+
+/**
+ * The two middleware gates together.
+ *
+ * The call gate's own rules are tested in src/lib/access/call-gate.test.ts.
+ * What is pinned HERE is the thing neither function can state on its own: the
+ * ORDER, and the fact that an unapplied migration 043 cannot block anybody.
+ */
+describe("decideAccessGates", () => {
+  const WAITING: CallGateCompany = {
+    requires_call_unlock: true,
+    portal_access_granted_at: null,
+  };
+
+  const decide = (
+    company: CallGateCompany | null,
+    pathname: string,
+    opts?: { sub?: GateSubRow | null; isAdmin?: boolean; method?: string }
+  ) =>
+    decideAccessGates({
+      isAdmin: opts?.isAdmin ?? false,
+      hasCompany: true,
+      sub: opts?.sub === undefined ? ROW : opts.sub,
+      settings: ON,
+      company,
+      pathname,
+      method: opts?.method,
+    }).kind;
+
+  it("blocks a paid company that is still waiting for its call", () => {
+    expect(decide(WAITING, "/year-at-a-glance")).toBe("awaiting_call");
+    expect(decide(WAITING, "/intake/start")).toBe("awaiting_call");
+    expect(decide(WAITING, "/settings")).toBe("awaiting_call");
+    expect(decide(WAITING, "/api/plan/year", { method: "POST" })).toBe("awaiting_call");
+  });
+
+  it("lets a waiting company reach the thank-you page and sign out", () => {
+    expect(decide(WAITING, "/welcome")).toBe("pass");
+    expect(decide(WAITING, "/auth/login")).toBe("pass");
+    expect(decide(WAITING, "/auth/verify-code")).toBe("pass");
+    expect(decide(WAITING, "/api/auth/2fa/send", { method: "POST" })).toBe("pass");
+    expect(decide(WAITING, "/api/me")).toBe("pass");
+  });
+
+  it("never blocks a super admin", () => {
+    expect(decide(WAITING, "/year-at-a-glance", { isAdmin: true })).toBe("pass");
+  });
+
+  it("never blocks when migration 043 is not applied, or the row is unreadable", () => {
+    // null is what the middleware passes when the select fails — before 043 is
+    // applied, that is EVERY request. Locking paying customers out because a
+    // column is missing is the one unacceptable failure.
+    expect(decide(null, "/year-at-a-glance")).toBe("pass");
+    expect(decide({}, "/year-at-a-glance")).toBe("pass");
+    expect(decide({ requires_call_unlock: null, portal_access_granted_at: null }, "/settings"))
+      .toBe("pass");
+  });
+
+  it("never blocks a company that has had its call", () => {
+    expect(
+      decide(
+        { requires_call_unlock: true, portal_access_granted_at: "2026-10-18T09:00:00.000Z" },
+        "/year-at-a-glance"
+      )
+    ).toBe("pass");
+  });
+
+  /**
+   * ORDER. The flag is stamped when the COMPANY is created, not when it pays,
+   * so "waiting for a call" does not imply "has paid" — in the no-trial flow a
+   * company is flagged from the moment it registers. Billing therefore goes
+   * first: a company with nothing to its name is sent to buy a plan, and the
+   * call gate only becomes the obstacle once there is an entitlement behind it.
+   */
+  it("asks for payment before it asks for a call", () => {
+    const canceled: GateSubRow = { ...ROW, stripe_status: "canceled", status: "canceled" };
+    expect(decide(WAITING, "/year-at-a-glance", { sub: canceled })).toBe("purchase");
+    expect(decide(WAITING, "/year-at-a-glance", { sub: null })).toBe("purchase");
+  });
+
+  it("reports a pause before a call, for the same reason", () => {
+    expect(decide(WAITING, "/year-at-a-glance", { sub: { ...ROW, is_paused: true } }))
+      .toBe("paused");
+  });
+
+  it("leaves an ungated company's billing answers exactly as they were", () => {
+    const canceled: GateSubRow = { ...ROW, stripe_status: "canceled", status: "canceled" };
+    expect(decide(null, "/settings")).toBe("pass");
+    expect(decide(null, "/settings", { sub: canceled })).toBe("purchase");
+    expect(decide(null, "/api/stripe/checkout", { sub: canceled })).toBe("pass");
   });
 });
 

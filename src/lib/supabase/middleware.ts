@@ -1,7 +1,22 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { TWO_FACTOR_COOKIE, verifyDeviceToken } from '@/lib/two-factor';
-import { decideBillingGate, type GateSubRow } from '@/lib/billing/billing-gate';
+import {
+  decideAccessGates,
+  type AccessGateDecision,
+  type GateSubRow,
+} from '@/lib/billing/billing-gate';
+import { isMissingColumnError } from '@/lib/supabase/missing-column';
+import {
+  CALL_GATE_BLOCKED_MESSAGE,
+  CALL_GATE_PAGE,
+  decideCallGate,
+  type CallGateCompany,
+} from '@/lib/access/call-gate';
+import {
+  NEW_COMPANY_STAMP_GRACE_MS,
+  stampCallUnlockForNewCompany,
+} from '@/lib/access/call-gate-settings';
 import {
   IMPERSONATION_MARKER_COOKIE,
   isMarkerActive,
@@ -143,6 +158,27 @@ async function loadGateSettings(
   } catch {
     return { stripeEnabled: false, trialEnabled: true, trialDays: 14, dunningGraceDays: 7 };
   }
+}
+
+/**
+ * Does this company look new enough that the backstop stamp may apply?
+ *
+ * The cheap half of the backstop's precondition, answered from the
+ * `created_at` the call gate's select already returns, so the global switch is
+ * only ever read for a company that could actually be stamped.
+ *
+ * An unparseable or missing timestamp is NOT new. Both failure directions
+ * matter and they are not symmetric: declining to stamp leaves a company
+ * ungated, which is the same as the feature being off, whereas treating an
+ * unknown age as new would let the gate catch an existing paying customer.
+ * `stampCallUnlockForNewCompany` makes the same judgement independently — this
+ * is a filter, not the authority.
+ */
+function isWithinStampGrace(createdAt: string | null, now: number = Date.now()): boolean {
+  if (!createdAt) return false;
+  const created = Date.parse(createdAt);
+  if (!Number.isFinite(created)) return false;
+  return now - created <= NEW_COMPANY_STAMP_GRACE_MS;
 }
 
 /**
@@ -718,7 +754,29 @@ export async function updateSession(request: NextRequest) {
    */
   const isImpersonationExitRoute = request.nextUrl.pathname === IMPERSONATION_EXIT_PATH;
 
-  if (userId && !isImpersonationExitRoute && (isAppRoute || (isApiRoute && !isPublicApiRoute))) {
+  /**
+   * ONBOARDING PAGES ARE CALL-GATED, THOUGH THEY ARE NOT APP ROUTES.
+   *
+   * `/onboarding/*` is excluded from `isAppRoute` (and from the 2FA gate) so a
+   * brand-new user is not interrupted mid-questionnaire, which means this
+   * block used to skip it entirely — and /onboarding/welcome is the post-signup
+   * hub: it reads initiatives and writes a result through the BROWSER's
+   * Supabase client, so a company awaiting its call could still use the
+   * product there. The call gate's own tests already list /onboarding/welcome
+   * among the routes it blocks; this is what makes that true in the request
+   * path.
+   *
+   * The BILLING gates are deliberately NOT widened to these routes: whether an
+   * unentitled user may walk the onboarding hub is a separate, pre-existing
+   * decision, and changing it is not this feature's business. Only the call
+   * gate is applied below, from `decideCallGate` — the same one rule the app
+   * routes, the APIs, the thank-you page and the admin table use.
+   */
+  if (
+    userId &&
+    !isImpersonationExitRoute &&
+    (isAppRoute || isOnboardingRoute || (isApiRoute && !isPublicApiRoute))
+  ) {
     const { data: gateProfile } = await supabase
       .from('profiles')
       .select('company_id, is_admin')
@@ -745,36 +803,120 @@ export async function updateSession(request: NextRequest) {
        * this runs on the Edge for every request and a second round trip would
        * tax every page load.
        */
-      const { data: gateSubRaw } = await supabase
-        .from('subscriptions')
-        .select(
-          'is_paused, pause_resumes_at, status, stripe_status, is_comped, ' +
-          'comped_until, trial_ends_at, current_period_end, past_due_since, ' +
-          'cancel_at_period_end, stripe_subscription_id, stripe_mode'
-        )
-        .eq('company_id', gateProfile.company_id)
-        .maybeSingle();
+      /**
+       * The subscription row and the company's call-gate columns, IN
+       * PARALLEL.
+       *
+       * They are two tables, so they cannot be one query — but they can be one
+       * round trip's worth of latency, which is what matters on the Edge. The
+       * subscription read is unchanged.
+       *
+       * NOT FETCHED THROUGH `profiles` AS AN EMBED, which was the obvious way
+       * to avoid the second request. Migration 043 is applied by hand, so
+       * until it runs the embedded columns do not exist and the WHOLE select
+       * fails — which would leave `gateProfile` null and skip the BILLING gate
+       * for every customer. A separate query means a missing column costs the
+       * call gate only.
+       */
+      const [subResult, companyResult] = await Promise.all([
+        supabase
+          .from('subscriptions')
+          .select(
+            'is_paused, pause_resumes_at, status, stripe_status, is_comped, ' +
+            'comped_until, trial_ends_at, current_period_end, past_due_since, ' +
+            'cancel_at_period_end, stripe_subscription_id, stripe_mode'
+          )
+          .eq('company_id', gateProfile.company_id)
+          .maybeSingle(),
+        supabase
+          .from('companies')
+          .select('created_at, requires_call_unlock, portal_access_granted_at')
+          .eq('id', gateProfile.company_id)
+          .maybeSingle(),
+      ]);
 
       // Via `unknown`: supabase-js cannot infer a row shape from a
       // concatenated select string and falls back to an error-type union.
-      const gateSub = gateSubRaw as unknown as GateSubRow | null;
+      const gateSub = subResult.data as unknown as GateSubRow | null;
 
       /**
-       * The paused and entitlement decisions, as one tested pure function
-       * (src/lib/billing/billing-gate.ts). Same rules as before, plus one
-       * approved change: a paused company with NO live Stripe subscription
-       * may reach the purchase journey, because buying a plan ends the pause
-       * (the webhook clears it). A paused company with a live subscription is
-       * still refused everywhere.
+       * THE CALL-GATE COLUMNS FAIL OPEN, ALWAYS.
+       *
+       * Before migration 043 is applied this select errors with 42703 and
+       * there is nothing to read; afterwards it can still fail for the usual
+       * transient reasons. Either way `gateCompany` is null, `decideCallGate`
+       * reads null as "not gated", and the request proceeds — the billing
+       * gate above is untouched by this.
+       *
+       * That direction is not a preference. Reading an error as "requires a
+       * call" would lock every paying customer out of the product at once,
+       * which is strictly worse than letting a company that should be waiting
+       * through for one request. Same rule `loadBillingConfig` and
+       * `loadCallGateSettings` follow.
        */
-      const settings = await loadGateSettings(supabase);
-      const gate = decideBillingGate({
-        isAdmin: false,
-        hasCompany: true,
-        sub: gateSub,
-        settings,
-        pathname: request.nextUrl.pathname,
-      });
+      let gateCompany: CallGateCompany | null = null;
+      let companyCreatedAt: string | null = null;
+
+      if (companyResult.error) {
+        if (!isMissingColumnError(companyResult.error)) {
+          // An unapplied migration is expected and silent; a real failure is
+          // worth one line, because it means a gated company is getting in.
+          console.warn(
+            '[middleware] call-gate columns unreadable, not gating:',
+            companyResult.error.message
+          );
+        }
+      } else if (companyResult.data) {
+        const row = companyResult.data as unknown as {
+          created_at?: string | null;
+          requires_call_unlock?: boolean | null;
+          portal_access_granted_at?: string | null;
+        };
+        gateCompany = {
+          requires_call_unlock: row.requires_call_unlock ?? null,
+          portal_access_granted_at: row.portal_access_granted_at ?? null,
+        };
+        companyCreatedAt = row.created_at ?? null;
+      }
+
+      /**
+       * The paused, entitlement and onboarding-call decisions, as one tested
+       * pure function (src/lib/billing/billing-gate.ts). The billing rules are
+       * unchanged, including the one approved exception: a paused company with
+       * NO live Stripe subscription may reach the purchase journey, because
+       * buying a plan ends the pause (the webhook clears it). A paused company
+       * with a live subscription is still refused everywhere.
+       *
+       * The call gate runs LAST — after 2FA (they must be able to prove who
+       * they are before anything decides what they may see) and after billing.
+       * `decideAccessGates` carries the argument for that order; the short
+       * version is that the flag is stamped at company creation rather than at
+       * payment, so "flagged" does not imply "paid", and a company with
+       * nothing to its name should be sent to buy rather than to a thank-you
+       * page that would bounce it to /choose-plan anyway.
+       */
+      /*
+       * An onboarding page asks ONLY the call gate (see the note at the top of
+       * this block), so it does not pay for the billing settings read either.
+       */
+      const gate: AccessGateDecision = isOnboardingRoute
+        ? decideCallGate({
+            isAdmin: false,
+            company: gateCompany,
+            pathname: request.nextUrl.pathname,
+            method: request.method,
+          }).blocked
+          ? { kind: 'awaiting_call' }
+          : { kind: 'pass' }
+        : decideAccessGates({
+            isAdmin: false,
+            hasCompany: true,
+            sub: gateSub,
+            settings: await loadGateSettings(supabase),
+            company: gateCompany,
+            pathname: request.nextUrl.pathname,
+            method: request.method,
+          });
 
       if (gate.kind === 'paused') {
         // APIs get JSON. A client fetching data must see a real error rather
@@ -831,6 +973,114 @@ export async function updateSession(request: NextRequest) {
         url.pathname = '/choose-plan';
         url.search = '';
         return NextResponse.redirect(url);
+      }
+
+      /**
+       * ONBOARDING CALL GATE — paid, but nobody has spoken to them yet.
+       *
+       * They have an entitlement (the billing gate above said so), so this is
+       * not a payment problem and must not read as one. A page goes to the
+       * thank-you page, which carries the "Book a call with us" button; an API
+       * gets 403 with a reason it can show, not a 402 that would send the
+       * client off to buy something it already owns.
+       *
+       * NO LOOP IS POSSIBLE. /welcome is in `isPurchaseFlowRoute`, so it is
+       * neither an app route nor an API route and this whole block is skipped
+       * for it; `isAllowedWhileAwaitingCall` allows it as well, so the answer
+       * is the same whichever way it is reached.
+       *
+       * WHAT THIS DELIBERATELY DOES NOT BLOCK: /choose-plan and /checkout.
+       * Both are excluded from `isAppRoute`, so the gate is never consulted
+       * there — and that is load-bearing rather than an oversight. The flag is
+       * stamped when the COMPANY is created, which in the no-trial flow is
+       * before Checkout; blocking the purchase journey would mean a flagged
+       * company could never pay, and the gate is supposed to come after
+       * payment. The allow-list in call-gate.ts is untouched.
+       */
+      if (gate.kind === 'awaiting_call') {
+        if (isApiRoute) {
+          return NextResponse.json(
+            {
+              error: 'awaiting_onboarding_call',
+              message: CALL_GATE_BLOCKED_MESSAGE,
+            },
+            { status: 403 }
+          );
+        }
+
+        const url = request.nextUrl.clone();
+        url.pathname = CALL_GATE_PAGE;
+        url.search = '';
+        return NextResponse.redirect(url);
+      }
+
+      /**
+       * BACKSTOP STAMP for a company the application never got to stamp.
+       *
+       * Public signup's company row is written by the `handle_new_user`
+       * database trigger, which no application code runs inside, and the
+       * confirmation link can land on /auth/confirmed as a hash fragment that
+       * never reaches the server — so the obvious stamping points are missed
+       * for some signups. The thank-you page stamps the paid flow with the
+       * service role; this covers the trial flow, whose signup goes straight
+       * to the dashboard and never passes /welcome at all.
+       *
+       * COSTS NOTHING ON AN ORDINARY REQUEST, which is the only reason it is
+       * acceptable here (the Next docs are explicit that proxy/middleware is
+       * not the place for data work). All four conditions are answered from
+       * data already in hand:
+       *
+       *   - a PAGE navigation, not an API call and not a static asset (those
+       *     never reach this block);
+       *   - the company carries NO DECISION yet — flag false, no grant — so a
+       *     gated or an unlocked company is never reconsidered;
+       *   - `created_at` is INSIDE the grace window, which is what makes this
+       *     a signup rather than an existing customer. The column came free
+       *     with the select the call gate already needs;
+       *   - and only then is the global switch read.
+       *
+       * So the extra cost is confined to page requests from a company less
+       * than ten minutes old: one `app_settings` read per navigation, plus (if
+       * and only if the switch is on) the one company re-read and single
+       * UPDATE that `stampCallUnlockForNewCompany` performs. Every long-lived
+       * customer pays nothing.
+       *
+       * NEVER THROWS, never un-stamps, never re-locks a granted company, and
+       * never gates a company older than the window — all guaranteed by
+       * `stampCallUnlockForNewCompany`, not by this call site.
+       *
+       * ONE KNOWN LIMIT: this writes through the SESSION client, and the
+       * `companies` UPDATE policy admits only owner/operator roles. The person
+       * making a brand-new company's first request is its owner, so the case
+       * this exists for works; an invited viewer arriving first would simply
+       * not stamp, and the thank-you page's service-role stamp covers the paid
+       * flow regardless.
+       */
+      if (
+        !isApiRoute &&
+        gateCompany &&
+        gateCompany.requires_call_unlock !== true &&
+        !gateCompany.portal_access_granted_at &&
+        isWithinStampGrace(companyCreatedAt)
+      ) {
+        const stamp = await stampCallUnlockForNewCompany(supabase, gateProfile.company_id);
+
+        /*
+         * Honour the stamp on the SAME request that applied it.
+         *
+         * The gates above were decided from the row as it was a moment ago, so
+         * without this the request that stamps is the one request that gets
+         * through — a brand-new customer would see the dashboard once and find
+         * it gone on their next click. We are here only for a page navigation
+         * on an app or onboarding route, and neither is on the allow-list, so
+         * the answer is unconditional.
+         */
+        if (stamp.stamped) {
+          const url = request.nextUrl.clone();
+          url.pathname = CALL_GATE_PAGE;
+          url.search = '';
+          return NextResponse.redirect(url);
+        }
       }
     }
   }

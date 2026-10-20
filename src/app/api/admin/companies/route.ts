@@ -8,6 +8,10 @@ import {
   latestCancellationByCompany,
   type CancellationFeedbackRowLike,
 } from "@/lib/billing/cancellation-history";
+import {
+  derivePortalAccessState,
+  type PortalAccessCompany,
+} from "@/lib/access/portal-access";
 
 /**
  * GET /api/admin/companies
@@ -226,6 +230,55 @@ export async function GET(request: Request) {
       );
     }
 
+    /**
+     * Who opened each gated company's portal (migration 043).
+     *
+     * A SEPARATE LOOKUP from the member query above, which is scoped by
+     * company_id: the granter is one of OUR admins, so they are almost never a
+     * member of the company they unlocked and would never appear in it.
+     *
+     * Keyed by profiles.id with no foreign key behind it (see migration 043),
+     * so a granter whose account has since been deleted simply resolves to
+     * nothing and the UI falls back to the raw id.
+     */
+    const granterIds = [
+      ...new Set(
+        (companies || [])
+          .map((c) => (c as { portal_access_granted_by?: string | null }).portal_access_granted_by)
+          .filter((v): v is string => typeof v === "string" && !!v)
+      ),
+    ];
+
+    const { data: granters } = granterIds.length
+      ? await adminClient
+          .from("profiles")
+          .select("id, email, first_name, last_name")
+          .in("id", granterIds)
+      : { data: [] as { id: string; email: string | null; first_name: string | null; last_name: string | null }[] };
+
+    const granterById = new Map(
+      ((granters ?? []) as {
+        id: string; email: string | null; first_name: string | null; last_name: string | null;
+      }[]).map((g) => [
+        g.id,
+        `${g.first_name ?? ""} ${g.last_name ?? ""}`.trim() || g.email || g.id,
+      ])
+    );
+
+    /**
+     * Is migration 043 applied?
+     *
+     * Inferred from the SHAPE of the rows rather than asked for separately.
+     * The company query is `select("*")`, which is why an unapplied 043 cannot
+     * break this page at all — the columns are simply absent from each row
+     * instead of erroring — and absent is also the signal: no key means no
+     * column. With no companies at all there is nothing to inspect, so it
+     * reports true and the UI shows nothing either way.
+     */
+    const callGateAvailable =
+      (companies || []).length === 0 ||
+      Object.prototype.hasOwnProperty.call(companies![0], "requires_call_unlock");
+
     // Group profiles and plans by company
     const profilesByCompany = new Map<string, typeof profiles>();
     for (const p of profiles || []) {
@@ -363,6 +416,30 @@ export async function GET(request: Request) {
          * unmake the cancellation, so the note stays and the UI dates it.
          */
         cancellation: cancellationByCompany.get(company.id) ?? null,
+        /**
+         * The onboarding call gate for this company (migration 043).
+         *
+         * SEPARATE FROM `subscription`, like `cancellation` and for a stronger
+         * reason: it is not billing at all. A company can be waiting for its
+         * call while perfectly paid up, or unlocked while past due, so nesting
+         * it under the subscription would imply the two decide each other.
+         *
+         * `state` comes from derivePortalAccessState rather than being spelled
+         * out here, so the admin table cannot disagree with the gate the
+         * customer meets. An unapplied 043 leaves the columns absent, which
+         * that function reads as "never gated" — the whole page keeps working.
+         */
+        portalAccess: {
+          state: derivePortalAccessState(company as PortalAccessCompany),
+          grantedAt: (company as { portal_access_granted_at?: string | null })
+            .portal_access_granted_at ?? null,
+          /** Name or email of the admin who opened it; the raw id if they are gone. */
+          grantedBy:
+            granterById.get(
+              (company as { portal_access_granted_by?: string | null })
+                .portal_access_granted_by ?? ""
+            ) ?? null,
+        },
       };
     });
 
@@ -378,6 +455,13 @@ export async function GET(request: Request) {
       // ACTIVE ONLY: granting someone a retired plan would put them on
       // something that cannot be bought or upgraded from.
       stripeEnabled: config.stripeEnabled,
+      /**
+       * False → migration 043 is missing, so the portal-access control is not
+       * rendered at all. Showing a button that cannot store its result is
+       * worse than showing none: the admin would believe a customer had been
+       * let in.
+       */
+      callGateAvailable,
       plans: [...planById.values()]
         .filter((p) => p.is_active)
         .map((p) => ({ id: p.id, name: p.name })),

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TaskTemplate } from "@/lib/workbook/materialise";
 import type { LibraryInitiative } from "@/lib/intake/library";
 import { readStoredMetrics, type StoredMetrics } from "@/lib/metrics/parse-metrics";
+import { isMissingColumnError } from "@/lib/supabase/missing-column";
 
 /**
  * Reads of the workbook tables (migration 018) for plan generation.
@@ -167,13 +168,16 @@ const LIBRARY_COLUMNS_040 =
   "base_key, speed_score, cost_score, odds_score, revenue_score, ease_score, score_total, " +
   "ideal_industries, cta_options, training, metrics_raw, metrics";
 
-/** "This column does not exist" — PostgREST PGRST204 or Postgres 42703. */
-export function isMissingColumnError(err: { code?: string | null; message?: string | null } | null): boolean {
-  if (!err) return false;
-  if (err.code === "PGRST204" || err.code === "42703") return true;
-  const msg = err.message ?? "";
-  return /could not find the '.*' column/i.test(msg) || /column .* does not exist/i.test(msg);
-}
+/**
+ * "This column does not exist" — PostgREST PGRST204 or Postgres 42703.
+ *
+ * MOVED to src/lib/supabase/missing-column.ts and re-exported here so the
+ * dozen existing `from "@/lib/workbook/read"` imports keep working. The
+ * middleware needs the same predicate for migration 043's columns, and
+ * importing it from this module pulled the workbook and metrics-dictionary
+ * graph into the Edge bundle.
+ */
+export { isMissingColumnError } from "@/lib/supabase/missing-column";
 
 const textOrNull = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const numOrNull = (v: unknown): number | null =>

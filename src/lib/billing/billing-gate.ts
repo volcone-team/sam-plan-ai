@@ -11,7 +11,8 @@
  * else a paused company asks for is still refused, and a paused company with a
  * live subscription is refused everywhere, exactly as before.
  *
- * Edge-safe: imports only pure, import-free billing modules.
+ * Edge-safe: imports only pure, import-free billing modules — and, for
+ * `decideAccessGates` below, the equally pure onboarding call gate.
  */
 
 import { evaluateAccess, type AccessDecision, type AccessReason, type BillingSettings } from "./entitlement";
@@ -20,6 +21,7 @@ import {
   canPurchaseWhilePaused,
   isAllowedWhilePausedWithoutSubscription,
 } from "./live-subscription";
+import { decideCallGate, type CallGateCompany } from "@/lib/access/call-gate";
 
 /** The subscription columns the middleware selects. */
 export interface GateSubRow {
@@ -87,6 +89,89 @@ export function decideBillingGate(args: {
     return { kind: "purchase", reason: access.reason };
   }
   return { kind: "pass" };
+}
+
+/* ------------------------------------------------------------------ *
+ * The middleware's two gates, combined
+ * ------------------------------------------------------------------ */
+
+/** As GateDecision, plus "has paid, but nobody has spoken to them yet". */
+export type AccessGateDecision = GateDecision | { kind: "awaiting_call" };
+
+/**
+ * Every access decision the middleware makes for a customer request, in order.
+ *
+ * ONE FUNCTION so the ORDER of the two gates is a tested fact rather than a
+ * detail of how the middleware happens to be written. The gates themselves
+ * stay separate and are unchanged: `decideBillingGate` answers "have they
+ * paid", `decideCallGate` answers "has anyone spoken to them yet", and neither
+ * knows about the other.
+ *
+ * BILLING FIRST, CALL GATE SECOND, which is the opposite of the obvious
+ * reading ("they have already paid, so do not send them to /choose-plan").
+ * Three facts decide it:
+ *
+ *   1. The stamp lands at COMPANY CREATION, not at payment — the switch is
+ *      snapshotted onto the new row (migration 043, and the trigger-written
+ *      signup row the backstop exists for). So "flagged" does NOT imply
+ *      "paid". In the no-trial flow a company is flagged from the moment it
+ *      registers, several minutes before Stripe takes anything.
+ *   2. For such a company the call gate running first would answer the
+ *      dashboard with a redirect to the thank-you page — and the thank-you
+ *      page evaluates entitlement itself and redirects an unentitled visitor
+ *      straight to /choose-plan (src/app/welcome/page.tsx). So call-first
+ *      cannot keep an unpaid company out of the purchase screen; it only adds
+ *      a hop on the way there.
+ *   3. Billing-first makes the owner's rule ("the gate is AFTER payment") fall
+ *      out of the ordering instead of having to be re-stated: a company with
+ *      nothing to its name is sent to buy, and only once it is entitled does
+ *      the call gate become the thing standing in its way.
+ *
+ * A gated company whose subscription later lapses is therefore sent to
+ * /choose-plan rather than to the thank-you page. That is deliberate: at that
+ * point it genuinely has not paid, and no gate should hide that from it.
+ *
+ * NOT CONSULTED AT ALL for the purchase journey (/choose-plan, /checkout,
+ * /welcome) or for public API routes, because the middleware does not run this
+ * block for them — see the note at the call site. That is what keeps a flagged
+ * company able to finish paying.
+ */
+export function decideAccessGates(args: {
+  isAdmin: boolean;
+  hasCompany: boolean;
+  sub: GateSubRow | null;
+  settings: BillingSettings;
+  /**
+   * The migration-043 columns, or null when the row could not be read.
+   *
+   * Null means NOT GATED. Until 043 is applied by hand the select fails and
+   * every caller passes null, and locking paying customers out because a
+   * column is missing is the one failure this feature may not have.
+   */
+  company: CallGateCompany | null;
+  pathname: string;
+  /** Defaults to GET, which is what a page navigation is. */
+  method?: string;
+  now?: number;
+}): AccessGateDecision {
+  const billing = decideBillingGate({
+    isAdmin: args.isAdmin,
+    hasCompany: args.hasCompany,
+    sub: args.sub,
+    settings: args.settings,
+    pathname: args.pathname,
+    now: args.now,
+  });
+  if (billing.kind !== "pass") return billing;
+
+  const call = decideCallGate({
+    isAdmin: args.isAdmin,
+    company: args.company,
+    pathname: args.pathname,
+    method: args.method,
+  });
+
+  return call.blocked ? { kind: "awaiting_call" } : { kind: "pass" };
 }
 
 /**

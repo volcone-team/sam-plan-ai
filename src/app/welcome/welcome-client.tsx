@@ -29,7 +29,13 @@ import {
 
 /** Everything still to be supplied. Empty values render honest fallbacks. */
 const VIDEO_URL = "";
-const BOOKING_URL = ""; // GHL calendar embed URL
+/**
+ * The booking link USED to be a constant here (`BOOKING_URL`, a GHL calendar).
+ * It is now `app_settings.onboarding_call_url`, read server-side and passed in
+ * as `bookingUrl`, so the owner can set it without a deploy. Same value, same
+ * two slots: the step 1 embed and the primary call to action. Unset behaves
+ * exactly as the empty constant did.
+ */
 const SUPPORT_EMAIL = "support@samplan.ai";
 const COACHING_MONTHS = "[X]";
 const COACHING_DAY = "[day]";
@@ -77,12 +83,23 @@ const PERKS = [
 
 export function WelcomeClient({
   intakeDone,
+  awaitingCall,
+  bookingUrl,
 }: {
   firstName: string | null;
   planName: string | null;
   intakeDone: boolean;
   isTrial: boolean;
   trialDaysRemaining: number | null;
+  /**
+   * True when this company must have its onboarding call before the portal
+   * opens (migration 043). Decided server-side by `needsCallUnlock`; false for
+   * everyone who was already a customer, and false whenever the feature is off
+   * or its migration is not applied.
+   */
+  awaitingCall: boolean;
+  /** app_settings.onboarding_call_url, already validated as an https link. */
+  bookingUrl: string | null;
 }) {
   return (
     <div className="relative min-h-dvh overflow-hidden bg-[#060b16] text-white">
@@ -179,9 +196,9 @@ export function WelcomeClient({
           {/* Step 1 — calendar left, copy right */}
           <div className="mt-12 grid items-center gap-8 md:grid-cols-2">
             <div className="order-2 md:order-1">
-              {BOOKING_URL ? (
+              {bookingUrl ? (
                 <iframe
-                  src={BOOKING_URL}
+                  src={bookingUrl}
                   title="Book your onboarding call"
                   className="h-[520px] w-full rounded-xl bg-white"
                 />
@@ -219,15 +236,37 @@ export function WelcomeClient({
                 </>
               }
               body={
-                "Do this before your onboarding call. SAM Plan will build your " +
-                "first draft plan, so your time with Pete or Rachel goes to " +
-                "refining your strategy, not filling out forms."
+                /*
+                 * The mockup's copy says to do the intake BEFORE the call,
+                 * which is true for an ungated customer and the opposite of
+                 * what a gated one can do — the intake is behind the gate. One
+                 * sentence either way rather than a contradiction sitting next
+                 * to the disabled action above.
+                 */
+                awaitingCall
+                  ? "We'll open this up right after your call. SAM Plan then " +
+                    "builds your first draft plan, so your time with Pete or " +
+                    "Rachel goes to refining your strategy, not filling out forms."
+                  : "Do this before your onboarding call. SAM Plan will build your " +
+                    "first draft plan, so your time with Pete or Rachel goes to " +
+                    "refining your strategy, not filling out forms."
               }
               action={
                 intakeDone ? (
                   <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-300">
                     <Check className="h-3.5 w-3.5" aria-hidden="true" />
                     Intake complete
+                  </span>
+                ) : awaitingCall ? (
+                  /*
+                   * NOT A LINK while they are awaiting their call. The intake
+                   * lives at /intake/start, which the gate blocks, so the
+                   * button would bounce straight back to this page — the same
+                   * dead-button problem PrimaryCta avoids for the dashboard,
+                   * one section further up the page.
+                   */
+                  <span className="inline-flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/70">
+                    Opens after your onboarding call
                   </span>
                 ) : (
                   <Link
@@ -265,13 +304,7 @@ export function WelcomeClient({
 
         {/* CTA */}
         <section className="mt-20 text-center">
-          <Link
-            href="/year-at-a-glance"
-            className="mx-auto flex max-w-3xl items-center justify-center gap-2 rounded-md bg-gradient-to-r from-blue-600 via-sky-500 to-teal-400 px-6 py-3.5 text-sm font-semibold uppercase tracking-wide text-white shadow-[0_0_30px_rgba(56,189,248,0.3)] transition-opacity hover:opacity-90"
-          >
-            Access your SAM Plan dashboard
-            <ArrowRight className="h-4 w-4" aria-hidden="true" />
-          </Link>
+          <PrimaryCta awaitingCall={awaitingCall} bookingUrl={bookingUrl} />
           <p className="mt-10 text-sm font-semibold text-white">
             Questions? Email{" "}
             <a href={`mailto:${SUPPORT_EMAIL}`} className="hover:underline">
@@ -294,6 +327,79 @@ export function WelcomeClient({
         </div>
       </footer>
     </div>
+  );
+}
+
+/** The gradient bar, shared so both states look identical. */
+const CTA_CLASS =
+  "mx-auto flex max-w-3xl items-center justify-center gap-2 rounded-md " +
+  "bg-gradient-to-r from-blue-600 via-sky-500 to-teal-400 px-6 py-3.5 text-sm " +
+  "font-semibold uppercase tracking-wide text-white " +
+  "shadow-[0_0_30px_rgba(56,189,248,0.3)] transition-opacity hover:opacity-90";
+
+/**
+ * The one button at the bottom of the page.
+ *
+ * TWO STATES, because this page has two audiences and only one of them has a
+ * dashboard to go to:
+ *
+ *   awaiting their call -> "Book a call with us". The dashboard link is NOT
+ *       shown: the middleware would bounce them straight back here, so
+ *       offering it would be a button whose only effect is to look broken.
+ *   everyone else       -> "Access your SAM Plan dashboard", unchanged. This
+ *       is still the ordinary post-checkout page, and for a customer who was
+ *       never gated (every existing one) nothing about it changes.
+ *
+ * NO DEAD BUTTON when the link is unset. A gated customer with no configured
+ * calendar is told we will arrange it, which is true and is all we can
+ * honestly say — the same reasoning as src/lib/billing/booking.ts, where an
+ * unset URL removes the offer rather than rendering a button that does
+ * nothing.
+ */
+function PrimaryCta({
+  awaitingCall,
+  bookingUrl,
+}: {
+  awaitingCall: boolean;
+  bookingUrl: string | null;
+}) {
+  if (!awaitingCall) {
+    return (
+      <Link href="/year-at-a-glance" className={CTA_CLASS}>
+        Access your SAM Plan dashboard
+        <ArrowRight className="h-4 w-4" aria-hidden="true" />
+      </Link>
+    );
+  }
+
+  if (!bookingUrl) {
+    return (
+      <p className="mx-auto max-w-3xl text-sm font-semibold text-white">
+        We&apos;ll be in touch to arrange your call.
+      </p>
+    );
+  }
+
+  return (
+    <a
+      href={bookingUrl}
+      /*
+       * A third-party calendar, so a new tab and `noopener noreferrer`: the
+       * page must stay open behind it (it carries the rest of the next steps),
+       * and the opened document must get no handle on this one.
+       *
+       * The new tab is ANNOUNCED rather than left as a surprise — a visible
+       * icon would say nothing to a screen reader, so the words are in the
+       * accessible name and hidden visually.
+       */
+      target="_blank"
+      rel="noopener noreferrer"
+      className={CTA_CLASS}
+    >
+      Book a call with us
+      <span className="sr-only"> (opens in a new tab)</span>
+      <ArrowRight className="h-4 w-4" aria-hidden="true" />
+    </a>
   );
 }
 

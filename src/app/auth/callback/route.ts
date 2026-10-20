@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { stampCallUnlockForNewCompany } from "@/lib/access/call-gate-settings";
 import {
   TWO_FACTOR_COOKIE,
   TWO_FACTOR_MAX_AGE_SECONDS,
@@ -84,6 +86,61 @@ export async function GET(request: Request) {
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         console.error("[auth/callback] could not grant device trust:", message);
+      }
+
+      /**
+       * Onboarding call gate: stamp the company of a BRAND-NEW signup.
+       *
+       * This is the application's first chance. The public signup creates its
+       * company inside the `handle_new_user` database trigger (migration 037),
+       * which this code cannot run in, so there is no application-code moment
+       * at the insert itself. Confirming the email is the next server-side
+       * request the new account makes, and it is the same request that grants
+       * device trust above for the same reason: this is someone who has just
+       * registered.
+       *
+       * SAFE FOR EVERYONE ELSE WHO PASSES THROUGH HERE. Password-reset and
+       * invite links also exchange a code here, and
+       * stampCallUnlockForNewCompany only stamps a company created within
+       * NEW_COMPANY_STAMP_GRACE_MS, never one that already has a grant, and
+       * never at all while the switch is off. An established customer coming
+       * back through a reset link is left untouched.
+       *
+       * Best-effort, after the response is built: a stamp that fails means a
+       * company that is not gated, which must never break confirming an email.
+       */
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (user) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("company_id")
+            .eq("id", user.id)
+            .maybeSingle();
+
+          const companyId = (profile as { company_id?: string | null } | null)?.company_id;
+          if (companyId) {
+            /*
+             * Service role: `companies.requires_call_unlock` is gate state, so
+             * it is not writable from a customer session, and the customer
+             * must not be able to clear their own gate.
+             */
+            const admin = createClient(
+              process.env.NEXT_PUBLIC_SUPABASE_URL!,
+              process.env.SUPABASE_SERVICE_ROLE_KEY!
+            );
+            const stamp = await stampCallUnlockForNewCompany(admin, companyId);
+            if (stamp.requireCall) {
+              console.log("[auth/callback] call gate:", stamp.reason, "| stamped:", stamp.stamped);
+            }
+          }
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[auth/callback] could not apply the call gate:", message);
       }
 
       return response;
