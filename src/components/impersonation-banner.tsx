@@ -1,33 +1,61 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { ShieldAlert, LogOut, Loader2 } from "lucide-react";
-import { useImpersonationView } from "@/hooks/use-impersonating";
+import { useAuth } from "@/hooks/use-auth";
+import { useImpersonationExit } from "@/hooks/use-impersonation-exit";
+import { isImpersonationBannerHiddenPath } from "@/lib/admin/impersonation-banner-routes";
+import { decideBannerState } from "@/lib/admin/impersonation-session";
 
 /**
- * Banner shown on every app page while a super admin is signed in as a
- * customer.
+ * Banner shown on EVERY page while a super admin is signed in as a customer.
  *
- * WHY IT READS A COOKIE AND NOT A CONTEXT
- * ---------------------------------------
- * The previous version read a React context backed by `sessionStorage`, which
- * was also the (broken) impersonation mechanism itself. Now the server owns the
- * state: `sam_impersonating` is set by /api/admin/impersonate, is HMAC-signed,
- * and is deliberately NOT httpOnly so this component can render from it
- * without an extra round trip. It carries no credential — the admin's refresh
- * token lives in a separate httpOnly cookie this code cannot see.
+ * WHY IT READS /api/me AND NOT A COOKIE  (this is the bug that broke it twice)
+ * ---------------------------------------------------------------------------
+ * It used to decide whether to render by parsing the readable
+ * `sam_impersonating` cookie in the browser. That decoder took everything
+ * after the FIRST "." as JSON — but the signed payload is
+ * `sam.impersonation.marker.v1.{...}`, whose purpose prefix contains three
+ * dots. `JSON.parse` therefore threw on every single page, the catch returned
+ * null, and the component rendered nothing. Moving the mount from the (app)
+ * group to the root layout changed nothing because the mount was never the
+ * problem.
  *
- * The signature is NOT verified here, and does not need to be: the middleware
- * verifies it on every request and is what actually grants anything. A user who
- * hand-crafts this cookie gains a misleading banner and nothing else.
+ * The signal now comes from the SERVER, over the `/api/me` call AuthProvider
+ * already makes on every page, and it is keyed on the httpOnly return ticket
+ * rather than the readable marker — so the thing that decides to show the way
+ * out is the same thing that makes the way out work. A missing or unreadable
+ * marker now degrades the banner's DETAIL (see `degraded`), and can no longer
+ * hide it.
+ *
+ * WHERE IT IS MOUNTED
+ * -------------------
+ * The root layout (src/app/layout.tsx), not the (app) route group, so it also
+ * covers /intake, /welcome, /choose-plan, /account-paused and /checkout, each
+ * of which has its own layout. `/auth/*` is suppressed; see
+ * impersonation-banner-routes.ts.
+ *
+ * IT IS NOT THE ONLY WAY OUT, BY DESIGN
+ * -------------------------------------
+ * The same action is in the account menu (header/user-avatar.tsx) and at
+ * /auth/impersonation-ended, which can be typed into the address bar. One
+ * broken component must never trap an admin in a customer's account again.
  *
  * ACCESSIBILITY
  * -------------
  * `role="status"` so a screen reader announces it on arrival, a real <button>
  * for Exit (keyboard-reachable in document order, visible focus ring), and the
- * countdown carries a text label rather than relying on position. The banner is
- * in the normal flow at the top of the layout, above the shell, so it pushes
- * content down instead of overlaying the sidebar or covering controls.
+ * countdown carries a text label rather than relying on position.
+ *
+ * WHY IT IS NOT STICKY
+ * --------------------
+ * It stays in the normal document flow, above the shell, so it pushes content
+ * down instead of overlaying anything. Pinning it with `sticky top-0` loses:
+ * three existing elements already own the top of the viewport — the app header
+ * (`sticky top-0 z-30`), the mobile nav bar (`fixed top-0 z-40`) and the
+ * sidebar (`fixed inset-y-0 z-40`). A banner parked over that strip would
+ * permanently cover the breadcrumbs, the avatar and the mobile menu button.
  */
 
 function formatRemaining(ms: number): string {
@@ -38,27 +66,26 @@ function formatRemaining(ms: number): string {
 }
 
 export function ImpersonationBanner() {
-  const marker = useImpersonationView();
+  const { impersonation } = useAuth();
+  const pathname = usePathname();
+  const { exit, exiting } = useImpersonationExit();
 
   const [now, setNow] = useState<number>(() => Date.now());
-  const [exiting, setExiting] = useState(false);
 
-  const exit = useCallback(async () => {
-    setExiting(true);
-    try {
-      const res = await fetch("/api/admin/impersonate/exit", { method: "POST" });
-      const json: { redirectTo?: string } = await res.json().catch(() => ({}));
-      /*
-       * A full page load, not router.push: the session cookies just changed
-       * underneath the client, so every cached server component and client
-       * cache entry belongs to the wrong user.
-       */
-      window.location.href = json.redirectTo || "/admin/companies";
-    } catch {
-      // Even a failed request must not leave them stuck on a customer screen.
-      window.location.href = "/auth/impersonation-ended?reason=exit_failed";
-    }
-  }, []);
+  const state = decideBannerState({
+    impersonation,
+    pathname,
+    hiddenPath: isImpersonationBannerHiddenPath(pathname),
+    now,
+  });
+
+  /*
+   * Primitives, not the state object, for the effect dependencies below:
+   * `decideBannerState` returns a fresh object every render, so depending on
+   * it would re-run the effects on every tick for no reason.
+   */
+  const ticking = state.show && state.showCountdown;
+  const elapsed = state.show && state.elapsed;
 
   /*
    * One timer, two jobs: drive the countdown, and AUTO-EXIT at the 60-minute
@@ -71,26 +98,28 @@ export function ImpersonationBanner() {
    * cascading renders (and the lint rule that forbids it), whereas a timer
    * firing is exactly the "external system notifies React" case effects are
    * for.
+   *
+   * The timer only runs when there is a real deadline to count down to. With
+   * an unreadable marker (`expiresAt === null`) there is no honest number to
+   * show and nothing to auto-exit on, so it stands down rather than throwing
+   * the admin out of a session that may have just begun. Same on /auth/*,
+   * where an auto-exit would fire a redirect out from under a sign-in or
+   * impersonation-ended flow that is already handling the session itself.
    */
   useEffect(() => {
-    if (!marker) return;
+    if (!ticking) return;
 
-    const id = setInterval(() => {
-      const tick = Date.now();
-      setNow(tick);
-
-      if (marker.expiresAt <= tick) {
-        clearInterval(id);
-        void exit();
-      }
-    }, 1000);
-
+    const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [marker, exit]);
+  }, [ticking]);
 
-  if (!marker) return null;
+  useEffect(() => {
+    if (elapsed && !exiting) void exit();
+  }, [elapsed, exiting, exit]);
 
-  const remaining = marker.expiresAt - now;
+  if (!state.show) return null;
+
+  const { view, showCountdown, remainingMs } = state;
 
   return (
     <div
@@ -100,9 +129,16 @@ export function ImpersonationBanner() {
       <ShieldAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
 
       <span className="text-center">
-        Viewing as <strong className="font-semibold">{marker.companyName}</strong> as{" "}
-        <strong className="font-semibold">{marker.targetEmail}</strong>. Changes you make are
-        saved to their account.{" "}
+        {/*
+          Written to answer the question the owner actually asked ("where is
+          the exit to go back to admin?"): who you are right now, whose data
+          you are writing to, and that the button ends it. "Viewing as" was too
+          soft — it reads like a preview, and nothing said how to get back.
+        */}
+        You are signed in as{" "}
+        <strong className="font-semibold">{view.targetEmail}</strong>{" "}
+        (<strong className="font-semibold">{view.companyName}</strong>). Everything you do
+        is saved to their account.{" "}
         {/*
           Said out loud because billing is deliberately NOT blocked while
           impersonating (owner's decision). An admin clicking through a plan
@@ -112,11 +148,26 @@ export function ImpersonationBanner() {
         <span className="font-semibold underline decoration-white/50">
           Billing actions are real and will charge or change their subscription.
         </span>
+        {view.degraded && (
+          /*
+            LOUD, not silent. We know an impersonation is in progress (the
+            return ticket is here) but the marker could not be read, so the
+            company name and the countdown above are placeholders. Saying so
+            beats showing "this company" as if it were a fact — and the Exit
+            button still works, because it needs only the ticket.
+          */
+          <span className="block text-xs font-normal text-amber-50">
+            Session details could not be read, so the account shown may be
+            incomplete. Exit still works.
+          </span>
+        )}
       </span>
 
-      <span className="shrink-0 rounded-full bg-white/20 px-2 py-0.5 text-xs font-medium tabular-nums">
-        {remaining > 0 ? `Ends in ${formatRemaining(remaining)}` : "Ending…"}
-      </span>
+      {showCountdown && remainingMs !== null && (
+        <span className="shrink-0 rounded-full bg-white/20 px-2 py-0.5 text-xs font-medium tabular-nums">
+          {remainingMs > 0 ? `Ends in ${formatRemaining(remainingMs)}` : "Ending…"}
+        </span>
+      )}
 
       <button
         type="button"
@@ -129,7 +180,7 @@ export function ImpersonationBanner() {
         ) : (
           <LogOut className="h-3 w-3" aria-hidden="true" />
         )}
-        {exiting ? "Exiting…" : "Exit"}
+        {exiting ? "Exiting…" : "Exit to admin"}
       </button>
     </div>
   );

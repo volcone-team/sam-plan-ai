@@ -110,3 +110,43 @@ describe("shouldClearPauseOnSync", () => {
     });
   });
 });
+
+/**
+ * Why the middleware skips these gates for the impersonation exit endpoint.
+ *
+ * NOT a hypothetical. An admin impersonates a customer in order to look at a
+ * problem, and the most common problem is a locked-out or paused account. Both
+ * gates answer an API request from such an account with 402 / 403, and
+ * `/api/admin/impersonate/exit` is an API route that appears in neither
+ * allowance — so the Exit button, the account menu and
+ * /auth/impersonation-ended all failed together for exactly the companies an
+ * admin is most likely to be viewing.
+ *
+ * These assertions pin that fact in place. The fix is NOT here (the allow
+ * lists are deliberately untouched, so nothing else gains an exemption): the
+ * middleware refuses to consult the gate for this one path, before it runs.
+ * If someone ever "simplifies" that away, these tests document what breaks.
+ */
+describe("impersonation exit vs the billing gates", () => {
+  const EXIT = "/api/admin/impersonate/exit";
+
+  it("would be refused by the paused gate", () => {
+    expect(gate({ ...ROW, is_paused: true }, EXIT)).toBe("paused");
+  });
+
+  it("would be refused by the entitlement gate", () => {
+    const lockedOut: GateSubRow = {
+      ...ROW,
+      status: "canceled",
+      stripe_status: "canceled",
+      stripe_subscription_id: null,
+    };
+    expect(gate(lockedOut, EXIT)).toBe("purchase");
+  });
+
+  it("is still refused for an account that is merely fine", () => {
+    // Sanity: the exemption lives in the middleware, not in this function, so
+    // a healthy account passing here proves nothing about the exemption.
+    expect(gate(ROW, EXIT)).toBe("pass");
+  });
+});

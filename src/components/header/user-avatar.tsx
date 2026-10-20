@@ -4,10 +4,11 @@ import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { User, LogOut, Settings } from "lucide-react";
+import { User, LogOut, Settings, ShieldAlert, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { useImpersonationExit } from "@/hooks/use-impersonation-exit";
 import { cacheClearAll } from '@/lib/client-cache';
 import { revokeDeviceTrust } from '@/lib/sign-out';
 
@@ -38,7 +39,22 @@ export function UserAvatar({
   className,
 }: UserAvatarProps) {
   const [open, setOpen] = useState(false);
-  const { firstName, lastName, email } = useAuth();
+  const { firstName, lastName, email, impersonation } = useAuth();
+
+  /**
+   * SECOND, INDEPENDENT WAY OUT of an impersonated session.
+   *
+   * The banner is the first. It has already failed silently once — it decided
+   * whether to render by parsing a cookie in the browser, got it wrong, and
+   * left admins signed in as customers with no exit at all. A single point of
+   * failure is not acceptable for the only way back to your own account, so
+   * the same action is offered here, in the menu an admin would instinctively
+   * open looking for it.
+   *
+   * Both read the same server-side signal (/api/me) and call the same endpoint,
+   * which authorizes on the httpOnly return ticket.
+   */
+  const { exit: exitImpersonation, exiting } = useImpersonationExit();
 
   // Prefer the profiles row (source of truth), then an explicit prop, then email.
   const userName =
@@ -128,10 +144,35 @@ export function UserAvatar({
             <p className="text-sm font-medium text-[hsl(var(--foreground))] truncate">
               {userName || "User"}
             </p>
+            {impersonation && (
+              <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-500">
+                Viewing as this customer
+              </p>
+            )}
           </div>
 
           {/* Menu items */}
           <div className="py-1">
+            {impersonation && (
+              /*
+                FIRST in the list, above Settings and Sign Out: an admin who
+                opens this menu while impersonating is almost always looking
+                for the way back, and Sign Out is the wrong answer — it ends
+                the customer's session without restoring the admin's.
+              */
+              <button
+                onClick={exitImpersonation}
+                disabled={exiting}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/20 transition-colors disabled:opacity-60"
+              >
+                {exiting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <ShieldAlert className="h-4 w-4" aria-hidden="true" />
+                )}
+                {exiting ? "Exiting…" : "Exit to admin"}
+              </button>
+            )}
             <Link
               href="/settings"
               onClick={() => setOpen(false)}

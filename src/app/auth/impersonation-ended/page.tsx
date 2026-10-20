@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Loader2, ShieldAlert } from "lucide-react";
+import { cacheClearAll } from "@/lib/client-cache";
 
 /**
  * Landing page that ends an impersonation session and sends the admin home.
@@ -37,6 +38,9 @@ export default function ImpersonationEndedPage() {
     started.current = true;
 
     (async () => {
+      // Cached /api/me and plan data belong to the customer; the admin is
+      // about to be restored in this same tab.
+      cacheClearAll();
       try {
         const res = await fetch("/api/admin/impersonate/exit", { method: "POST" });
         const json: { redirectTo?: string } = await res.json().catch(() => ({}));

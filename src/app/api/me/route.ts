@@ -3,8 +3,56 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { cancelSubscriptionsForCompany } from "@/lib/billing/cancel-on-delete";
+import {
+  IMPERSONATION_MARKER_COOKIE,
+  IMPERSONATION_RETURN_COOKIE,
+  verifyImpersonationMarker,
+  verifyImpersonationReturn,
+} from "@/lib/admin/impersonation";
+import {
+  resolveImpersonationView,
+  type ImpersonationView,
+} from "@/lib/admin/impersonation-session";
 
 export const runtime = "nodejs";
+
+/**
+ * Is a super admin currently signed in as this customer?
+ *
+ * SERVER-READ, and that is the whole point. The banner that offers the way
+ * back used to decide this by parsing the readable marker cookie in the
+ * browser, which failed silently and left admins with no exit. The signal now
+ * comes from here, over the same `/api/me` call every page already makes.
+ *
+ * Both cookies are VERIFIED, not merely decoded: the marker's signature is the
+ * reason the middleware is allowed to treat it as satisfying the 2FA gate, so
+ * this must never report an unsigned one. A verification failure degrades to
+ * "impersonating, details unknown" rather than to "not impersonating" — see
+ * resolveImpersonationView.
+ *
+ * Never throws. An impersonation banner is worth a lot, but not worth taking
+ * /api/me down with it: if TWO_FACTOR_SECRET is unset (verify throws by
+ * design) every page would 500.
+ */
+async function readImpersonation(
+  cookieStore: Awaited<ReturnType<typeof cookies>>,
+  sessionUserId: string | null
+): Promise<ImpersonationView | null> {
+  try {
+    const [ticket, marker] = await Promise.all([
+      verifyImpersonationReturn(cookieStore.get(IMPERSONATION_RETURN_COOKIE)?.value ?? null),
+      verifyImpersonationMarker(cookieStore.get(IMPERSONATION_MARKER_COOKIE)?.value ?? null),
+    ]);
+
+    return resolveImpersonationView({ ticket, marker, sessionUserId });
+  } catch (err: unknown) {
+    console.error(
+      "[api/me] Impersonation cookie read failed:",
+      err instanceof Error ? err.message : String(err)
+    );
+    return null;
+  }
+}
 
 /**
  * GET /api/me
@@ -67,7 +115,16 @@ export async function GET() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         console.log("[api/me] No session");
-        return NextResponse.json({ user: null }, { status: 200 });
+        /*
+         * Impersonation is reported even with no session. If the customer's
+         * session has gone but the admin's return ticket is still here, the
+         * banner is the only thing that can spend it — withholding the signal
+         * would strand them on a signed-out screen with no way home.
+         */
+        return NextResponse.json(
+          { user: null, impersonation: await readImpersonation(cookieStore, null) },
+          { status: 200 }
+        );
       }
       userId = user.id;
       userEmail = user.email || null;
@@ -85,10 +142,13 @@ export async function GET() {
       .eq("id", userId)
       .single();
 
+    const impersonation = await readImpersonation(cookieStore, userId);
+
     if (error || !profile) {
       console.error("[api/me] Profile missing for", userEmail, error?.message);
       // No profile: report it rather than silently pointing at another company.
       return NextResponse.json({
+        impersonation,
         user: {
           id: userId,
           email: userEmail,
@@ -114,9 +174,17 @@ export async function GET() {
       return typeof value === "string" && value.length > 0 ? value : null;
     };
 
-    console.log("[api/me]", userEmail, "| company:", profile.company_id, "| role:", profile.role, "| admin_level:", profile.admin_level, "| active:", profile.is_active);
+    console.log(
+      "[api/me]", userEmail,
+      "| company:", profile.company_id,
+      "| role:", profile.role,
+      "| admin_level:", profile.admin_level,
+      "| active:", profile.is_active,
+      "| impersonated by:", impersonation ? impersonation.adminEmail || "(unknown admin)" : "no"
+    );
 
     return NextResponse.json({
+      impersonation,
       user: {
         id: userId,
         email: userEmail,

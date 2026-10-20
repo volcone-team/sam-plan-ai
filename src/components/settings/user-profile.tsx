@@ -1,7 +1,6 @@
 'use client';
 
 import { useAuth } from '@/hooks/use-auth';
-import { useIsImpersonating } from '@/hooks/use-impersonating';
 import { useTheme } from 'next-themes';
 import { useRouter } from 'next/navigation';
 
@@ -22,14 +21,23 @@ interface ProfileFormData {
 }
 
 export function UserProfile() {
-  const { userId, firstName, lastName, email, role: authRole, loading: authLoading } = useAuth();
+  const {
+    userId, firstName, lastName, email, role: authRole,
+    loading: authLoading, impersonation,
+  } = useAuth();
   const { theme: currentTheme, setTheme } = useTheme();
   /*
    * Hides the controls the middleware refuses while impersonating (password
    * change, account/company deletion). Presentation only — see
    * `isBlockedWhileImpersonating` for the actual enforcement.
+   *
+   * Reads the SERVER's answer via /api/me. It used to read the marker cookie
+   * in the browser through `useIsImpersonating`, which always returned false
+   * because of a decoding bug — so these controls were shown during
+   * impersonation and the middleware 403'd them on submit. Same root cause as
+   * the missing banner.
    */
-  const impersonating = useIsImpersonating();
+  const impersonating = impersonation !== null;
   const router = useRouter();
   const [formData, setFormData] = useState<ProfileFormData | null>(null);
   const [loading, setLoading] = useState(true);

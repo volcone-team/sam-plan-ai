@@ -14,6 +14,9 @@ import {
   IMPERSONATION_EXIT_PATH,
   isBlockedWhileImpersonating,
 } from '@/lib/admin/impersonation-blocked';
+// IMPERSONATION_EXIT_PATH is referenced by three separate rules below: the
+// expired-impersonation redirect, the 2FA exemption, and the billing gates.
+// All three exist so that leaving a customer's account can never be refused.
 
 /**
  * Reads the authentication method out of a JWT's `amr` (Authentication Methods
@@ -418,6 +421,21 @@ export async function updateSession(request: NextRequest) {
     isAuthRoute ||
     request.nextUrl.pathname.startsWith('/api/auth/2fa') ||
     request.nextUrl.pathname === '/api/me' ||
+    /**
+     * 8. the impersonation EXIT endpoint. It is reached while holding the
+     *    CUSTOMER's session, so this gate would challenge the customer's inbox
+     *    — emailing them a code — just to let an admin leave.
+     *
+     *    Normally the valid marker below satisfies the gate anyway, so this
+     *    changes nothing for the happy path. It matters when the marker is
+     *    missing or unreadable while the return ticket is still present: the
+     *    exemption is what keeps that recoverable instead of a dead end.
+     *
+     *    It grants nothing. The handler authorizes on the signed httpOnly
+     *    ticket, and every path through it either restores the admin or signs
+     *    the browser out — there is no branch that hands over access.
+     */
+    request.nextUrl.pathname === IMPERSONATION_EXIT_PATH ||
     isPublicApiRoute ||
     isPublicRoute ||
     // A paused user still holds a valid session; sending them through the code
@@ -678,7 +696,29 @@ export async function updateSession(request: NextRequest) {
    * subscription may reach the purchase journey — buying a plan ends the
    * pause. See decideBillingGate.
    */
-  if (userId && (isAppRoute || (isApiRoute && !isPublicApiRoute))) {
+  /**
+   * THE EXIT ENDPOINT IS EXEMPT FROM BOTH BILLING GATES.
+   *
+   * This was a real dead end, not a hypothetical one. An admin impersonates a
+   * customer in order to look at a problem, and the most common problem is
+   * that the account is locked out or paused. The gates below answer an API
+   * request from such an account with 402 / 403 — and until now that included
+   * POST /api/admin/impersonate/exit, because it is an API route and is in
+   * neither `isAllowedWhileLockedOut` nor the paused allowance. The Exit
+   * button, the account menu and /auth/impersonation-ended all POST that one
+   * endpoint, so all three failed together for exactly the companies an admin
+   * is most likely to be viewing.
+   *
+   * Exempting it weakens nothing. The gates exist to stop an unentitled
+   * account USING the product; this endpoint ends a session. Its own
+   * authorization is the signed httpOnly return ticket, it is already exempt
+   * from the "/api/admin is blocked while impersonating" rule for the same
+   * reason (IMPERSONATION_EXIT_PATH), and a caller without a ticket gets
+   * signed out rather than let in.
+   */
+  const isImpersonationExitRoute = request.nextUrl.pathname === IMPERSONATION_EXIT_PATH;
+
+  if (userId && !isImpersonationExitRoute && (isAppRoute || (isApiRoute && !isPublicApiRoute))) {
     const { data: gateProfile } = await supabase
       .from('profiles')
       .select('company_id, is_admin')

@@ -13,6 +13,7 @@ import {
   Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { cacheClearAll } from "@/lib/client-cache";
 import { pickMoneyFormatter } from "@/lib/results-tab-totals";
 
 interface CompanyDetail {
@@ -83,6 +84,14 @@ export function CompanyDetail({ companyId }: { companyId: string }) {
         return;
       }
 
+      /*
+       * Drop every cached client value before the reload. The profile cache
+       * lives in sessionStorage with a 5-minute TTL, so without this the
+       * customer's screens would render the ADMIN's cached /api/me for up to
+       * five minutes — wrong company id, wrong name, and no impersonation
+       * banner, since the cache cannot know about it.
+       */
+      cacheClearAll();
       window.location.href = "/year-at-a-glance";
     } catch (err: unknown) {
       setImpersonateError(err instanceof Error ? err.message : "Network error");

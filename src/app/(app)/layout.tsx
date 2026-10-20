@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { ImpersonationBanner } from "@/components/impersonation-banner";
 import { Sidebar } from "@/components/sidebar";
 import { AppHeader } from "@/components/header";
 import { MobileNav } from "@/components/mobile-nav";
@@ -19,17 +18,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
   return (
     <>
       {/*
-        ABOVE AppShell and in the normal document flow, so it pushes the
-        sidebar and content down rather than overlaying them — an admin must
-        never lose a control to the banner, and must never miss the banner.
-        It renders null when the impersonation marker cookie is absent, which
-        is every normal customer session.
-
-        The ImpersonationProvider that used to wrap this tree is gone: that
-        context was the old sessionStorage mechanism. Impersonation state now
-        comes from a server-set, signed cookie.
+        The impersonation banner used to be mounted here. It now lives in the
+        ROOT layout (src/app/layout.tsx) so it also covers /intake, /welcome,
+        /choose-plan and every future layout outside this group. Do not add a
+        second mount — it would render the notice twice on these pages.
       */}
-      <ImpersonationBanner />
       <AppShell
         sidebar={<Sidebar />}
         mobileNav={<MobileNav />}
