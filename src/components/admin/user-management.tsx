@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import type { AdminMemberStatus } from "@/lib/team/member-status";
 
 interface AdminUser {
   id: string;
@@ -27,6 +28,38 @@ interface AdminUser {
   isAdmin: boolean;
   adminLevel: string | null;
   createdAt: string;
+  /** null = never signed in; absent = lookup failed or capped. */
+  lastSignInAt?: string | null;
+  status?: AdminMemberStatus;
+}
+
+// Text carries the meaning; colour only reinforces it.
+// "Pending invite" matches Settings › Team Members.
+const STATUS_BADGE: Record<AdminMemberStatus, { label: string; className: string; title: string }> = {
+  active: {
+    label: "Active",
+    className: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+    title: "Active and has signed in",
+  },
+  pending: {
+    label: "Pending invite",
+    className: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+    title: "Invited but has never signed in",
+  },
+  inactive: {
+    label: "Inactive",
+    className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
+    title: "Deactivated",
+  },
+  unknown: {
+    label: "Unknown",
+    className: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
+    title: "Sign-in status could not be checked",
+  },
+};
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 const ROLE_STYLES: Record<string, string> = {
@@ -145,7 +178,7 @@ export function UserManagement({ filter = "all" }: { filter?: "all" | "internal"
       }
 
       console.log("[UserManagement] Deactivated user:", userId);
-      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, isActive: false } : u));
+      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, isActive: false, status: "inactive" } : u));
       setDeleteConfirmId(null);
     } catch (err: any) {
       alert(err?.message || "Network error");
@@ -360,17 +393,24 @@ export function UserManagement({ filter = "all" }: { filter?: "all" | "internal"
                       </select>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={cn(
-                        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
-                        u.isActive
-                          ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
-                          : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
-                      )}>
-                        {u.isActive ? "Active" : "Inactive"}
-                      </span>
+                      {(() => {
+                        // Older responses without `status`: fall back to is_active alone.
+                        const badge = STATUS_BADGE[u.status ?? (u.isActive ? "unknown" : "inactive")];
+                        return (
+                          <span
+                            className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap", badge.className)}
+                            title={badge.title}
+                          >
+                            {badge.label}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-[hsl(var(--foreground-muted))]">
-                      {new Date(u.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                      {formatDate(u.createdAt)}
+                      {u.lastSignInAt && (
+                        <p className="text-xs">Last sign-in {formatDate(u.lastSignInAt)}</p>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">

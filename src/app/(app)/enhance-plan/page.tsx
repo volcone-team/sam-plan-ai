@@ -21,6 +21,8 @@ import { usePermission } from "@/hooks/use-permission";
 import { useCompanyId } from "@/hooks/use-auth";
 import { usePlanYears } from "@/hooks/use-plan-years";
 import { formatMoney } from "@/lib/format-money";
+import { limitNoticeFrom } from "@/lib/billing/limit-notice";
+import { upgradeAction } from "@/components/billing/limit-notice";
 
 interface Suggestion {
   id: string;
@@ -84,6 +86,8 @@ export default function EnhancePlanPage() {
   const { showToast, dismissToast } = useToast();
   /** Only owner/operator may generate suggestions or apply them to the plan. */
   const canEditPlan = usePermission("plan.regenerate");
+  /** Only owners can change plan, so only they get an Upgrade link. */
+  const canUpgrade = usePermission("settings.billing");
 
   const loadSuggestions = useCallback(async () => {
     setLoading(true);
@@ -127,7 +131,8 @@ export default function EnhancePlanPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Failed to generate suggestions");
+        // The AI-use refusal carries its CODE in `error`; show the words.
+        setError(limitNoticeFrom(data)?.message || data.error || "Failed to generate suggestions");
         console.error("[EnhancePlan] Enhance error:", data.error);
         return;
       }
@@ -154,6 +159,17 @@ export default function EnhancePlanPage() {
       });
       const data = await res.json();
       if (!res.ok) {
+        // max_initiatives on a new_initiative: the plan's message, and an
+        // Upgrade link for owners. The suggestion stays pending.
+        const notice = limitNoticeFrom(data);
+        if (notice) {
+          showToast(notice.message, {
+            variant: "error",
+            duration: 8000,
+            action: upgradeAction(notice, canUpgrade),
+          });
+          return;
+        }
         showToast(data.error || "Failed to apply decision", { variant: "error", duration: 5000 });
         return;
       }
@@ -183,15 +199,31 @@ export default function EnhancePlanPage() {
     console.log("[EnhancePlan] Accepting all", count, "suggestions");
     const toastId = showToast("Applying all suggestions to your plan, just a moment...", { variant: "wait" });
     try {
+      // Counted, not assumed: a new initiative can be refused by the plan's
+      // max_initiatives, and saying "all added" would then be untrue.
+      let applied = 0;
+      let notice: ReturnType<typeof limitNoticeFrom> = null;
       for (const s of suggestions) {
-        await fetch(`/api/plan/suggestions/${s.id}`, {
+        const res = await fetch(`/api/plan/suggestions/${s.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ decision: "accepted" }),
         });
+        if (res.ok) {
+          applied += 1;
+        } else if (!notice) {
+          notice = limitNoticeFrom(await res.json().catch(() => null));
+        }
       }
       await loadSuggestions();
-      showToast(`${count} suggestion${count !== 1 ? "s" : ""} added to your plan.`, { variant: "success", duration: 4000 });
+      if (notice) {
+        showToast(
+          `${applied} of ${count} suggestion${count !== 1 ? "s" : ""} added. ${notice.message}`,
+          { variant: "error", duration: 8000, action: upgradeAction(notice, canUpgrade) }
+        );
+      } else {
+        showToast(`${applied} suggestion${applied !== 1 ? "s" : ""} added to your plan.`, { variant: applied === count ? "success" : "info", duration: 4000 });
+      }
     } finally {
       dismissToast(toastId);
       setApplyingAll(false);

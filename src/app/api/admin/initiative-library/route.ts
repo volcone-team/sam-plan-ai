@@ -19,10 +19,11 @@ export const dynamic = "force-dynamic";
  * reference, and it lives in its own table precisely so a workbook re-upload
  * cannot wipe these choices.
  *
- * WHY THIS IS NOT /admin/initiatives. That screen toggles `initiative_types`,
- * a separate 32-row list the AI has never read — its switches looked like they
- * worked and did nothing. This one acts on the list that actually feeds
- * recommendations, the intake picker, plan generation, Enhance and the chatbot.
+ * NOT TO BE CONFUSED WITH `initiative_types`. /admin/initiatives used to
+ * toggle that separate list, which the AI has never read — its switches looked
+ * like they worked and did nothing, and the screen has since been removed.
+ * This route acts on the list that actually feeds recommendations, the intake
+ * picker, plan generation, Enhance and the chatbot.
  *
  * GET → every library initiative with its active flag, plus counts.
  * PUT → set one or many toggles.

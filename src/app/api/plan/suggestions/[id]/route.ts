@@ -3,11 +3,17 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { toDateOnly, clampNotBefore, todayDateOnly, clampDayOfMonth } from "@/lib/plan-dates";
-import { loadLibrary, loadTaskTemplates } from "@/lib/workbook/read";
+import { loadLibrary } from "@/lib/workbook/read";
+import { resolveTaskTemplates, runwayForUntemplated } from "@/lib/workbook/tasks-for-initiatives";
 import { insertWithLibraryKey, supabaseTypeStore } from "@/lib/workbook/initiative-type";
 import { resolveSuggestionInitiative, suggestionChannel } from "@/lib/initiatives/suggestion-initiative";
 import { materialiseTasks, materialiseAiTasks, templateRunwayDays } from "@/lib/workbook/materialise";
 import { loadCompanyFit, rejectionReason } from "@/lib/recommend/company-eligibility";
+import { LIMIT_KEYS } from "@/lib/billing/limits";
+import { checkLiveLimit, liveLimitResponse, type LiveLimitResult } from "@/lib/billing/live-limits";
+
+/** Accepting a new_initiative may involve a ~30s AI call for its task list. */
+export const maxDuration = 60;
 
 /**
  * PATCH /api/plan/suggestions/[id]
@@ -95,6 +101,12 @@ export async function PATCH(
         await applySuggestion(adminClient, companyId, suggestion);
         console.log("[plan/suggestions/id] Applied:", suggestion.suggestion_type);
       } catch (applyErr: any) {
+        if (applyErr instanceof SuggestionOverLimit) {
+          // Left pending, like a FIT refusal: nothing was written, and the
+          // suggestion can be accepted after an upgrade or a deletion.
+          console.warn("[plan/suggestions/id] Refused by plan limit:", applyErr.result.code);
+          return liveLimitResponse(applyErr.result);
+        }
         if (applyErr instanceof SuggestionRejected) {
           // Left pending: nothing was applied, and the user can still reject it.
           console.warn("[plan/suggestions/id] Rejected by FIT:", applyErr.message);
@@ -131,6 +143,15 @@ export async function PATCH(
 
 /** An accepted new_initiative whose library key fails FIT; `message` is the rule's reason. */
 class SuggestionRejected extends Error {}
+
+/** An accepted new_initiative the plan year has no room for (max_initiatives). */
+class SuggestionOverLimit extends Error {
+  readonly result: LiveLimitResult;
+  constructor(result: LiveLimitResult) {
+    super(result.message);
+    this.result = result;
+  }
+}
 
 /** Applies an accepted suggestion to the live plan. */
 async function applySuggestion(db: SupabaseClient, companyId: string, s: any): Promise<void> {
@@ -206,7 +227,7 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
 
   if (type === "new_initiative") {
     const [{ data: annualPlan }, { data: products }, library] = await Promise.all([
-      db.from("annual_plans").select("id").eq("company_id", companyId).order("year", { ascending: false }).limit(1).single(),
+      db.from("annual_plans").select("id, year").eq("company_id", companyId).order("year", { ascending: false }).limit(1).single(),
       db.from("products").select("id").eq("company_id", companyId).eq("is_active", true).order("display_order").limit(1),
       // Inactive included: the suggestion was made from the library, and its
       // row still says what the initiative is and tracks.
@@ -232,6 +253,14 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
     const reason = rejectionReason(library.find((e) => e.initiativeKey === channel), ctx);
     if (reason) throw new SuggestionRejected(reason);
 
+    // max_initiatives, live, in the plan year this initiative is filed under.
+    // Checked before a type can be created or anything inserted.
+    const limit = await checkLiveLimit(db, companyId, LIMIT_KEYS.MAX_INITIATIVES, 1, {
+      annualPlanId: annualPlan.id as string,
+      year: typeof annualPlan.year === "number" ? annualPlan.year : null,
+    });
+    if (!limit.ok) throw new SuggestionOverLimit(limit);
+
     /**
      * The shared type rule (src/lib/workbook/initiative-type.ts): the oldest
      * row with this channel, active or not, else one created once from the
@@ -251,8 +280,24 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
     // Tasks come from the workbook template for this library key, exactly as in
     // generation. Accepting a suggestion used to create an initiative with NO
     // tasks at all, so the plan looked generated but had no project plan behind it.
-    const templates = (await loadTaskTemplates(db, [channel])).get(channel) || [];
-    const runway = templateRunwayDays(templates);
+    /**
+     * The shared resolver, so accepting a suggestion gets the same three-way
+     * answer as a build: workbook template, else an AI-written list, else the
+     * generic starter. It used to be template-or-the-suggestion's-own-tasks,
+     * which left an initiative with NO tasks whenever the library key had no
+     * template and the suggestion carried no usable list.
+     */
+    const resolved = await resolveTaskTemplates(db, [channel], {
+      companyId,
+      logLabel: "[applySuggestion]",
+    });
+    const templates = resolved.get(channel)?.templates ?? [];
+    const taskSource = resolved.get(channel)?.source ?? "starter";
+    // Authored lead times where they exist; the starter runway otherwise, for
+    // the same reason as intake build (see the comment there).
+    const runway = taskSource === "template"
+      ? templateRunwayDays(templates)
+      : runwayForUntemplated();
 
     // Dates floored at today, so accepting a suggestion never back-dates work.
     // The event was previously hardcoded to the 15th (or activation + 14 days)
@@ -314,19 +359,29 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
     );
     if (error) throw new Error(error.message);
 
-    // Attach the project plan: workbook template where it exists, the
-    // suggestion's own fallback list otherwise, so an accepted suggestion is
-    // never an initiative with nothing to do.
-    const tasks = templates.length > 0
-      ? materialiseTasks(templates, { eventDate: eventDateObj, floor: today })
-      : materialiseAiTasks(proposed.tasks, { eventDate: eventDateObj, floor: today });
+    /**
+     * Attach the project plan. The resolver has already picked the best
+     * available source, with one exception kept from the old behaviour: where
+     * it fell all the way back to the GENERIC starter, the suggestion's own
+     * task list — written for this specific initiative by the Enhance call
+     * that produced the suggestion — is the better plan, so it wins.
+     */
+    const ownTasks = taskSource === "starter"
+      ? materialiseAiTasks(proposed.tasks, { eventDate: eventDateObj, floor: today })
+      : [];
+    const tasks = ownTasks.length > 0
+      ? ownTasks
+      : materialiseTasks(templates, { eventDate: eventDateObj, floor: today });
 
     if (!created?.id) {
       console.error("[applySuggestion] initiative id missing - tasks not attached");
       return;
     }
+    // Should no longer be reachable — the starter template always has six
+    // steps — but an initiative saved without its tasks is still better than a
+    // thrown error, so the guard stays.
     if (tasks.length === 0) {
-      console.warn("[applySuggestion] no workbook template and no fallback tasks for", channel);
+      console.warn("[applySuggestion] no tasks resolved for", channel);
       return;
     }
     const { error: taskErr } = await db.from("tasks").insert(
@@ -346,7 +401,7 @@ async function applySuggestion(db: SupabaseClient, companyId: string, s: any): P
     );
     if (taskErr) throw new Error("Initiative saved but its tasks failed: " + taskErr.message);
     console.log("[applySuggestion] attached", tasks.length,
-      templates.length > 0 ? "workbook tasks" : "fallback tasks", "to", proposed.name);
+      ownTasks.length > 0 ? "suggestion" : taskSource, "tasks to", proposed.name);
     return;
   }
 

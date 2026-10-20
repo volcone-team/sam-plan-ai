@@ -50,8 +50,11 @@ export function serviceClient(): SupabaseClient {
   );
 }
 
-/** Map an access refusal onto a response code and a message a user can act on. */
-function accessFailure(access: AccessDecision): { code: EnforcementResult["code"]; message: string } {
+/**
+ * Map an access refusal onto a response code and a message a user can act on.
+ * Exported so the live-count limits (./live-limits) refuse with the same words.
+ */
+export function accessFailure(access: AccessDecision): { code: EnforcementResult["code"]; message: string } {
   switch (access.reason) {
     case "no_subscription":
       return { code: "no_subscription", message: "This account does not have an active subscription." };

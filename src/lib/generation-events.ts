@@ -22,11 +22,19 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  * swallowed and reported via console.error.
  */
 
-/** The kind of AI work that produced this event. */
+/**
+ * The kind of AI work that produced this event.
+ *
+ * `task_generation` is a task list written for an initiative the workbook has
+ * no template for. It is logged for token spend only — it does NOT consume the
+ * customer's ai_uses_month allowance — and needs migration 042, which adds it
+ * to the event_type CHECK from 011.
+ */
 export type GenerationEventType =
   | "plan_generation"
   | "plan_regeneration"
-  | "plan_enhancement";
+  | "plan_enhancement"
+  | "task_generation";
 
 export interface LogGenerationEventInput {
   companyId: string;
@@ -120,6 +128,22 @@ export async function logGenerationEvent(
           retryError.code
         );
       }
+      return;
+    }
+
+    /**
+     * 23514 is the event_type CHECK from migration 011 refusing a type it was
+     * never told about — currently 'task_generation', which migration 042
+     * adds. Named explicitly because the generic message ("violates check
+     * constraint") gives an operator nothing to act on, and because the
+     * feature that produced the event worked fine; only its logging did not.
+     */
+    if (error.code === "23514") {
+      console.warn(
+        "[generation-events] event_type '" + row.event_type + "' rejected by the " +
+          "CHECK constraint; token logging skipped. Apply " +
+          "supabase/migrations/042_task_generation_event.sql."
+      );
       return;
     }
 

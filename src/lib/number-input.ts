@@ -122,3 +122,102 @@ export function caretPositionAfterFormat(
   }
   return formatted.length;
 }
+
+/* ─────────────────────────────────────────────────
+ * Grouped text inputs (metric fields)
+ * ───────────────────────────────────────────────── */
+
+export interface GroupedInputOptions {
+  /** Keep one decimal point. False drops every dot (whole counts). */
+  allowDecimal: boolean;
+  /** Keep a leading minus (scores). Default false. */
+  allowNegative?: boolean;
+  /** Truncate the decimals typed beyond this many (money: 2). */
+  maxDecimals?: number;
+  /** A leading symbol kept when typed, e.g. "$" for money. */
+  prefix?: string;
+  /** A trailing symbol kept when typed, e.g. "%" for rates. */
+  suffix?: string;
+}
+
+/** Group an all-digit string with commas, without going through Number. */
+function groupDigits(digits: string): string {
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
+ * Format what the user has typed into a metric field, keeping it a string.
+ *
+ * Unlike `formatNumberInput` this never goes through `Number`, so it cannot
+ * lose precision on long inputs, and it keeps an optional "$" prefix or "%"
+ * suffix that metric validation (`normaliseMetricInput`) accepts:
+ *   "1234"   -> "1,234"      "1234."  -> "1,234."     "0." -> "0."
+ *   "1234.5" -> "1,234.5"    "12.5%"  -> "12.5%"      "$1234" -> "$1,234"
+ *   "1,2,34" -> "1,234"      "1.2.3"  -> "1.23"
+ * Anything else (letters, spaces, a misplaced minus) is dropped. Leading
+ * zeros collapse ("007" -> "7") but a single "0" is kept.
+ */
+export function formatGroupedInput(raw: string, opts: GroupedInputOptions): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  const prefix = opts.prefix ?? "";
+  const suffix = opts.suffix ?? "";
+  const hasPrefix = prefix !== "" && trimmed.startsWith(prefix);
+  const hasSuffix = suffix !== "" && trimmed.endsWith(suffix);
+  const afterPrefix = hasPrefix ? trimmed.slice(prefix.length).trimStart() : trimmed;
+  const negative = !!opts.allowNegative && afterPrefix.startsWith("-");
+
+  const cleaned = raw.replace(opts.allowDecimal ? /[^0-9.]/g : /[^0-9]/g, "");
+  const dot = cleaned.indexOf(".");
+  const intRaw = dot === -1 ? cleaned : cleaned.slice(0, dot);
+  let decimals = dot === -1 ? "" : cleaned.slice(dot + 1).replace(/\./g, "");
+  if (opts.maxDecimals !== undefined) decimals = decimals.slice(0, opts.maxDecimals);
+
+  const intPart = intRaw.replace(/^0+(?=\d)/, "");
+  const body = groupDigits(intPart) + (dot === -1 ? "" : `.${decimals}`);
+
+  // Nothing numeric yet: keep a lone minus so a score can be typed, drop
+  // the bare symbols so "%" or "$" alone does not sit there as an error.
+  if (body === "") return negative ? "-" : "";
+  return `${hasPrefix ? prefix : ""}${negative ? "-" : ""}${body}${hasSuffix ? suffix : ""}`;
+}
+
+/** Digits and the decimal point: what survives reformatting. */
+function significantCount(s: string): number {
+  return s.replace(/[^0-9.]/g, "").length;
+}
+
+/**
+ * Caret position in `formatted` after `formatGroupedInput(rawInput)`.
+ *
+ * Formats the text LEFT of the caret with the same rules and counts the
+ * digits and point it keeps, then finds that many in the result. Formatting
+ * the prefix (rather than counting raw digits) means characters the
+ * formatter drops — a second dot, a letter, a pasted comma — do not push the
+ * caret too far right.
+ */
+export function groupedCaretPosition(
+  rawInput: string,
+  rawCaret: number,
+  formatted: string,
+  opts: GroupedInputOptions
+): number {
+  if (rawCaret <= 0) return 0;
+  if (rawCaret >= rawInput.length) return formatted.length;
+
+  const wanted = significantCount(formatGroupedInput(rawInput.slice(0, rawCaret), opts));
+  if (wanted === 0) {
+    // Only symbols to the left: sit just before the first digit.
+    const first = formatted.search(/[0-9.]/);
+    return first === -1 ? formatted.length : first;
+  }
+
+  let seen = 0;
+  for (let i = 0; i < formatted.length; i++) {
+    if (/[0-9.]/.test(formatted[i])) {
+      seen += 1;
+      if (seen === wanted) return i + 1;
+    }
+  }
+  return formatted.length;
+}

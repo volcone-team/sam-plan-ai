@@ -20,13 +20,17 @@ import { resultService } from '@/services/result.service';
 import { expenseService } from '@/services/expense.service';
 import { initiativeService } from '@/services/initiative.service';
 import { initiativeTypeService } from '@/services/initiative-type.service';
-import { NumberInputRaw } from '@/components/ui/number-input';
+import { GroupedNumberInput, NumberInputRaw } from '@/components/ui/number-input';
 import { parseNumberInput } from '@/lib/number-input';
 import { formatNumber } from '@/lib/format-money';
 import type { InitiativeMetricSet } from '@/lib/metrics/metric-set';
 import {
   draftFromMetrics,
   formatMetricValue,
+  LEGACY_CREATE_FORMAT,
+  LEGACY_EDIT_FORMAT,
+  legacyDraftFrom,
+  legacyMetricsFrom,
   mergeMetricEdit,
   metricFieldsFor,
   metricGroupsOf,
@@ -367,7 +371,10 @@ interface ResultUpdates {
 function ResultRow({ result, metricKeys, metricSet, formatRevenue, formatLegacy, onUpdate, onDelete }: { result: InitiativeResult; metricKeys: string[]; metricSet: InitiativeMetricSet | null; formatRevenue: MoneyFormatter; formatLegacy: MoneyFormatter; onUpdate: (id: string, updates: ResultUpdates) => void; onDelete: (id: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [editRevenue, setEditRevenue] = useState(String(result.actualRevenue ?? ''));
-  const [editMetrics, setEditMetrics] = useState<Record<string, number>>(result.metrics as Record<string, number> || {});
+  const editMetrics: Record<string, number> = (result.metrics as Record<string, number>) || {};
+  // Legacy (no metric set): grouped text per key, only for keys shown with a
+  // value or touched; parsed on save (blank -> 0, as before).
+  const [legacyDraft, setLegacyDraft] = useState<Record<string, string>>(() => legacyDraftFrom(editMetrics));
   const [editNotes, setEditNotes] = useState(result.notes || '');
   // Metric-set initiatives edit raw text, validated on save.
   const [editDraft, setEditDraft] = useState<Record<string, string>>(() =>
@@ -379,7 +386,7 @@ function ResultRow({ result, metricKeys, metricSet, formatRevenue, formatLegacy,
   const revenueInputId = `result-revenue-${result.id}`;
 
   function handleSave() {
-    let metrics = editMetrics;
+    let metrics = { ...editMetrics, ...legacyMetricsFrom(legacyDraft) };
     if (metricSet) {
       const groups = metricGroupsOf(metricSet);
       const draft = parseMetricDraft(groups, editDraft);
@@ -425,12 +432,15 @@ function ResultRow({ result, metricKeys, metricSet, formatRevenue, formatLegacy,
           )}
           {!metricSet && metricKeys.length > 0 && (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {metricKeys.map(key => (
-                <div key={key}>
-                  <label className="block text-xs text-[hsl(var(--foreground-muted))] mb-1 capitalize">{key.replace(/_/g, ' ')}</label>
-                  <input type="number" step="any" value={editMetrics[key] || ''} onChange={e => setEditMetrics(prev => ({ ...prev, [key]: parseFloat(e.target.value) || 0 }))} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
-                </div>
-              ))}
+              {metricKeys.map(key => {
+                const inputId = `result-${result.id}-metric-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+                return (
+                  <div key={key}>
+                    <label htmlFor={inputId} className="block text-xs text-[hsl(var(--foreground-muted))] mb-1 capitalize">{key.replace(/_/g, ' ')}</label>
+                    <GroupedNumberInput id={inputId} format={LEGACY_EDIT_FORMAT} value={legacyDraft[key] ?? ''} onValueChange={text => setLegacyDraft(prev => ({ ...prev, [key]: text }))} className="w-full rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+                  </div>
+                );
+              })}
             </div>
           )}
           <div>
@@ -558,6 +568,8 @@ function ResultForm({ metricKeys, metricSet, onSubmit, onCancel }: { metricKeys:
   const [revenueInput, setRevenueInput] = useState('');
   // Metric-set initiatives: raw text by field id, validated on submit.
   const [metricDraft, setMetricDraft] = useState<Record<string, string>>({});
+  // Legacy (no metric set): grouped text per touched key; blank -> 0 on submit.
+  const [legacyDraft, setLegacyDraft] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -573,11 +585,7 @@ function ResultForm({ metricKeys, metricSet, onSubmit, onCancel }: { metricKeys:
       onSubmit({ ...formData, actualRevenue: toAmount(revenueInput), metrics: draft.values });
       return;
     }
-    onSubmit({ ...formData, actualRevenue: toAmount(revenueInput) });
-  };
-
-  const handleMetricChange = (key: string, value: number) => {
-    setFormData(p => ({ ...p, metrics: { ...p.metrics, [key]: value } }));
+    onSubmit({ ...formData, actualRevenue: toAmount(revenueInput), metrics: { ...formData.metrics, ...legacyMetricsFrom(legacyDraft) } });
   };
 
   return (
@@ -622,15 +630,14 @@ function ResultForm({ metricKeys, metricSet, onSubmit, onCancel }: { metricKeys:
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {metricKeys.map(key => (
               <div key={key}>
-                <label className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1 capitalize">
+                <label htmlFor={`new-result-metric-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`} className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1 capitalize">
                   {key.replace(/_/g, ' ')}
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={formData.metrics[key] || ''}
-                  onChange={e => handleMetricChange(key, parseFloat(e.target.value) || 0)}
+                <GroupedNumberInput
+                  id={`new-result-metric-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
+                  format={LEGACY_CREATE_FORMAT}
+                  value={legacyDraft[key] ?? ''}
+                  onValueChange={text => setLegacyDraft(prev => ({ ...prev, [key]: text }))}
                   placeholder="0"
                   className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]"
                 />

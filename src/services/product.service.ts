@@ -8,6 +8,7 @@
 
 import type { Product, CreateProductDTO, UpdateProductDTO } from '@/types';
 import { isSupabaseConfigured, getSupabase, camelToSnake } from '@/lib/supabase/db';
+import { limitNoticeFrom, LimitReachedError } from '@/lib/billing/limit-notice';
 
 export class ProductService {
   /**
@@ -144,37 +145,41 @@ export class ProductService {
    * Create a new product
    */
   async createProduct(dto: CreateProductDTO): Promise<Product> {
-    if (isSupabaseConfigured()) {
-      const supabase = getSupabase();
-      const insertData = {
-        company_id: dto.companyId,
+    /**
+     * Through POST /api/products, not a direct browser insert, so the plan's
+     * max_products is enforced. The company is the caller's own (from the
+     * session); `dto.companyId` is not sent.
+     *
+     * A plan-limit refusal throws LimitReachedError so the page can show the
+     * message with an Upgrade link; anything else throws a plain Error.
+     */
+    const response = await fetch('/api/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         name: dto.name,
         description: dto.description || '',
         price: dto.price,
-        revenue_type: dto.revenueType || 'one-time',
-        ticket_tier: dto.ticketTier || 'mid',
-        is_active: true,
-        display_order: dto.displayOrder ?? 0,
-      };
+        revenueType: dto.revenueType || 'one-time',
+        ticketTier: dto.ticketTier || 'mid',
+        displayOrder: dto.displayOrder ?? 0,
+      }),
+    });
+    const body: unknown = await response.json().catch(() => ({}));
 
-      const { data, error } = await supabase
-        .from('products')
-        .insert(insertData)
-        .select()
-        .single();
-
-      // Surface write failures instead of returning throwaway mock data.
-      if (error || !data) {
-        console.error('[Supabase createProduct]', (error as any)?.message, '|details:', (error as any)?.details, '|hint:', (error as any)?.hint, insertData);
-        throw new Error((error as any)?.message || 'Could not save the product.');
-      }
-
-      return this.mapRowToProduct(data);
+    if (!response.ok) {
+      const notice = limitNoticeFrom(body);
+      if (notice) throw new LimitReachedError(notice);
+      const message =
+        body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
+          ? (body as { error: string }).error
+          : `Could not save the product (${response.status}).`;
+      throw new Error(message);
     }
 
-    // Mock data removed - return empty
-    console.log("[product] No data in Supabase, returning empty");
-    throw new Error("Not found");
+    const row = (body as { product?: Record<string, unknown> }).product;
+    if (!row) throw new Error('Could not save the product.');
+    return this.mapRowToProduct(row);
   }
 
   /**

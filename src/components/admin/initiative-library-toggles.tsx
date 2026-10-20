@@ -19,8 +19,9 @@ import { LoadingPanel } from '@/components/ui/spinner';
  * library comes from: seeing "22 initiatives, 6 active" next to the file that
  * produced them is the context that makes the toggles make sense.
  *
- * NOT to be confused with /admin/initiatives, which toggles a different list
- * the AI has never read.
+ * These are now the only initiative toggles in the admin. /admin/initiatives
+ * used to offer a second, similar-looking set over `initiative_types`, a list
+ * the AI has never read; that screen has been removed.
  */
 
 interface LibraryInitiative {

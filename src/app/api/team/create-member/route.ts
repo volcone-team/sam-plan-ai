@@ -3,6 +3,8 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { getInviteContext, sendMemberInvite } from "@/lib/team-invite";
+import { LIMIT_KEYS } from "@/lib/billing/limits";
+import { checkLiveLimit, liveLimitResponse } from "@/lib/billing/live-limits";
 
 /**
  * POST /api/team/create-member
@@ -76,12 +78,21 @@ export async function POST(request: Request) {
 
     const companyId = profile.company_id;
 
-    // 3. Create the auth user with service role (no password — invite flow)
     const adminClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
+    /**
+     * 3. Plan limit: max_users, a LIVE count of every profile in the company
+     * (owner, members, viewers and invites not yet accepted). Checked BEFORE
+     * createUser, so a refusal leaves no auth user or trigger-made company
+     * behind to clean up.
+     */
+    const limit = await checkLiveLimit(adminClient, companyId, LIMIT_KEYS.MAX_USERS, 1);
+    if (!limit.ok) return liveLimitResponse(limit);
+
+    // 4. Create the auth user with service role (no password — invite flow)
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
       email,
       email_confirm: true, // Account usable; they'll set a password via invite link
@@ -110,7 +121,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Failed to create user." }, { status: 500 });
     }
 
-    // 4. Fix the profile created by the handle_new_user trigger.
+    // 5. Fix the profile created by the handle_new_user trigger.
     // The trigger creates a NEW company + profile for the user. We need to:
     //   a) Wait briefly for the trigger to complete
     //   b) Find the auto-created company and delete it
@@ -227,7 +238,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 5. Generate the invite link and email it. This is best-effort — the
+    // 6. Generate the invite link and email it. This is best-effort — the
     // member is already created, so an email failure must NOT fail the request.
     let invited = false;
     try {

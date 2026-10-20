@@ -18,6 +18,8 @@ import { LibraryInitiativePicker, CUSTOM_CHOICE } from './library-initiative-pic
 import { useCustomerLibrary } from './use-customer-library';
 import { MetricSetPicker, DEFAULT_METRIC_CHOICE, type MetricChoice } from './metric-set-picker';
 import type { StoredMetrics } from '@/lib/metrics/parse-metrics';
+import { LimitReachedError, type LimitNotice as LimitNoticeData } from '@/lib/billing/limit-notice';
+import { LimitNotice } from '@/components/billing/limit-notice';
 
 export interface AddInitiativePanelProps {
   open: boolean;
@@ -53,6 +55,8 @@ export function AddInitiativePanel({
   const library = useCustomerLibrary(open);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /** A plan-limit refusal, shown with an Upgrade link for owners. */
+  const [submitLimit, setSubmitLimit] = useState<LimitNoticeData | null>(null);
   const [metricChoice, setMetricChoice] = useState<MetricChoice>(DEFAULT_METRIC_CHOICE);
   /** The library key `metricChoice` belongs to. */
   const [metricChoiceFor, setMetricChoiceFor] = useState<string | null>(null);
@@ -92,6 +96,7 @@ export function AddInitiativePanel({
 
   const resetForm = () => {
     setSubmitError(null);
+    setSubmitLimit(null);
     setStep('pick-type');
     setChoice(null);
     setSelectedType(null);
@@ -170,6 +175,7 @@ export function AddInitiativePanel({
 
     setSubmitting(true);
     setSubmitError(null);
+    setSubmitLimit(null);
     try {
       // Dates go as YYYY-MM-DD strings. toDateOnly keeps a picked date as the
       // same calendar day; `new Date('2026-05-01')` used to be UTC midnight,
@@ -207,7 +213,12 @@ export function AddInitiativePanel({
       await onSubmit(request);
       handleClose();
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Could not save the initiative.');
+      if (err instanceof LimitReachedError) {
+        setSubmitLimit(err.notice);
+        setSubmitError(null);
+      } else {
+        setSubmitError(err instanceof Error ? err.message : 'Could not save the initiative.');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -281,6 +292,7 @@ export function AddInitiativePanel({
                   {submitError}
                 </div>
               )}
+              <LimitNotice notice={submitLimit} />
               {/* Name */}
               <div className="space-y-1.5">
                 <label htmlFor="init-name" className="text-sm font-medium text-[hsl(var(--foreground))]">

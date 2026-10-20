@@ -1,7 +1,6 @@
 export { AdminSidebar } from "./admin-sidebar";
 export { AdminDashboard } from "./admin-dashboard";
 export { QuestionnaireManagement } from "./questionnaire-management";
-export { InitiativeLibraryManagement } from "./initiative-library-management";
 export { AIWorkbook } from "./ai-workbook";
 export { WorkbookUpload } from "./workbook-upload";
 export { UserManagement } from "./user-management";

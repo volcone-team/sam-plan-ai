@@ -2,6 +2,18 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { TWO_FACTOR_COOKIE, verifyDeviceToken } from '@/lib/two-factor';
 import { decideBillingGate, type GateSubRow } from '@/lib/billing/billing-gate';
+import {
+  IMPERSONATION_MARKER_COOKIE,
+  isMarkerActive,
+  isMarkerForUser,
+  verifyImpersonationMarker,
+  type ImpersonationMarker,
+} from '@/lib/admin/impersonation';
+import {
+  IMPERSONATION_BLOCKED_MESSAGE,
+  IMPERSONATION_EXIT_PATH,
+  isBlockedWhileImpersonating,
+} from '@/lib/admin/impersonation-blocked';
 
 /**
  * Reads the authentication method out of a JWT's `amr` (Authentication Methods
@@ -361,10 +373,15 @@ export async function updateSession(request: NextRequest) {
   //  - The two-factor challenge: anyone reaching it ALWAYS holds a session by
   //    definition, and the universal 2FA gate below redirects here. Bouncing
   //    them away would make that gate an infinite loop.
+  //  - The impersonation exit landing page: it is reached while still holding
+  //    the CUSTOMER's session, and its whole job is to POST the exit endpoint
+  //    and send the admin home. Bouncing an authenticated visitor away from it
+  //    would make an expired impersonation impossible to escape.
   const isAuthFlowRoute =
     request.nextUrl.pathname.startsWith('/auth/set-password') ||
     request.nextUrl.pathname.startsWith('/auth/reset-password') ||
-    request.nextUrl.pathname.startsWith('/auth/verify-code');
+    request.nextUrl.pathname.startsWith('/auth/verify-code') ||
+    request.nextUrl.pathname.startsWith('/auth/impersonation-ended');
 
   /**
    * TWO-FACTOR EXEMPTIONS
@@ -417,6 +434,35 @@ export async function updateSession(request: NextRequest) {
   }
 
   /**
+   * ADMIN IMPERSONATION — resolve the marker.
+   *
+   * See the long note at the enforcement block below for why this is here,
+   * ABOVE link-only confinement, rather than next to the rest of it.
+   */
+  const markerCookie = request.cookies.get(IMPERSONATION_MARKER_COOKIE)?.value ?? null;
+  let impersonation: ImpersonationMarker | null = null;
+  let impersonationExpired = false;
+
+  if (markerCookie && userId) {
+    const marker = await verifyImpersonationMarker(markerCookie);
+
+    if (marker && isMarkerForUser(marker, userId)) {
+      if (isMarkerActive(marker)) {
+        impersonation = marker;
+      } else {
+        // Signed, and genuinely this user's, but past the 60-minute limit.
+        impersonationExpired = true;
+      }
+    }
+    /*
+     * A marker that fails verification, or names a different user, is simply
+     * IGNORED — no error, no redirect. It is indistinguishable from junk, and
+     * a real user carrying a stale cookie from a previous admin visit must not
+     * be inconvenienced by it.
+     */
+  }
+
+  /**
    * LINK-ONLY SESSION CONFINEMENT
    *
    * A recovery or invite email signs the user in — that IS how they are
@@ -438,8 +484,19 @@ export async function updateSession(request: NextRequest) {
    *
    * This runs BEFORE the onboarding / app / admin gates so it takes precedence
    * over every other authorization decision below.
+   *
+   * EXCEPT for a verified impersonation. An impersonated session is minted via
+   * generateLink + verifyOtp, so its `amr` is 'otp' — and if the impersonated
+   * owner is an invited user who never chose a password, this rule would read
+   * that as a leaked email link and redirect the ADMIN to /auth/set-password,
+   * offering them a form that sets the CUSTOMER's password. The impersonation
+   * was authorized by a super-admin check and a signed marker, not by someone
+   * forwarding an email, so the premise of this rule does not hold. Setting
+   * the customer's password is blocked outright instead (see
+   * impersonation-blocked.ts). The expired case is excluded too, so an admin
+   * on their way out is not diverted into password setup.
    */
-  if (isLinkOnlySession) {
+  if (isLinkOnlySession && !impersonation && !impersonationExpired) {
     // APIs never get an HTML redirect. Only the exact /api/me endpoint is
     // allowed through (not /api/me/* — e.g. /api/me/password already demands
     // the current password and is not part of this flow).
@@ -462,6 +519,90 @@ export async function updateSession(request: NextRequest) {
   }
 
   /**
+   * ADMIN IMPERSONATION
+   *
+   * When a super admin uses "View Dashboard", they are genuinely signed in as
+   * the target company's owner (see /api/admin/impersonate). The session here
+   * IS the customer's; the `sam_impersonating` cookie is the only thing that
+   * says otherwise.
+   *
+   * THE MARKER IS SIGNED, AND THAT IS WHY THIS IS SAFE. Below, a valid marker
+   * SATISFIES the 2FA gate — so if it were forgeable, any user could set the
+   * cookie and skip the code challenge entirely. It carries an HMAC over
+   * TWO_FACTOR_SECRET and names the user it belongs to; `isMarkerForUser`
+   * binds it to the session actually presenting it, so a copied marker is
+   * inert in anyone else's browser.
+   *
+   * PLACEMENT — BEFORE link-only confinement, which is load-bearing.
+   *
+   * An impersonated session is minted with `generateLink` + `verifyOtp`, so
+   * its `amr` is 'otp', not 'password'. If the impersonated owner is an
+   * invited user who never chose a password (`user_metadata.needs_password`),
+   * the confinement rule below would classify this as a leaked-email-link
+   * session and redirect the ADMIN to /auth/set-password — handing them a form
+   * that sets the CUSTOMER's password. That is both a redirect loop out of the
+   * feature and a privilege the design explicitly withholds.
+   *
+   * So the marker is resolved first (further up), confinement is skipped for a
+   * verified impersonation, and /auth/set-password is in the blocked list
+   * instead.
+   */
+
+  /**
+   * EXPIRED IMPERSONATION — get the admin out.
+   *
+   * The session still belongs to the customer, so doing nothing would drop
+   * through to the 2FA gate and EMAIL A CODE TO THE CUSTOMER, which is exactly
+   * what requirement 7 forbids. Instead every page request is sent to a small
+   * page that POSTs the exit endpoint and restores the admin.
+   *
+   * The exit endpoint itself must stay reachable or this is a dead end.
+   */
+  if (impersonationExpired && request.nextUrl.pathname !== IMPERSONATION_EXIT_PATH) {
+    if (isApiRoute) {
+      return NextResponse.json(
+        {
+          error: 'impersonation_expired',
+          message: 'This impersonation session has expired. Returning you to your own account.',
+        },
+        { status: 403 }
+      );
+    }
+
+    if (!request.nextUrl.pathname.startsWith('/auth/impersonation-ended')) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/auth/impersonation-ended';
+      url.search = '?reason=expired';
+      return NextResponse.redirect(url);
+    }
+  }
+
+  /**
+   * BLOCKED ACTIONS WHILE IMPERSONATING.
+   *
+   * Enforced here, server-side, so hiding the buttons in the UI is a courtesy
+   * rather than the control. See impersonation-blocked.ts for what each entry
+   * is for; the short version is that an admin acting as a customer may not
+   * take the account away from them (password, account deletion, 2FA) and may
+   * not reach admin tooling. Billing is deliberately ALLOWED.
+   */
+  if (impersonation && isBlockedWhileImpersonating(request.nextUrl.pathname, request.method)) {
+    if (isApiRoute) {
+      return NextResponse.json(
+        { error: 'blocked_while_impersonating', message: IMPERSONATION_BLOCKED_MESSAGE },
+        { status: 403 }
+      );
+    }
+
+    // An admin page while impersonating: send them to the exit page rather
+    // than show a dead end, since leaving impersonation is what they want.
+    const url = request.nextUrl.clone();
+    url.pathname = '/auth/impersonation-ended';
+    url.search = '?reason=admin_area';
+    return NextResponse.redirect(url);
+  }
+
+  /**
    * UNIVERSAL TWO-FACTOR GATE
    *
    * Every authenticated user — customer or admin, page or API — must prove this
@@ -478,8 +619,31 @@ export async function updateSession(request: NextRequest) {
    * /auth/set-password rather than to the code challenge — password setup takes
    * precedence. It runs BEFORE the onboarding / app / auth / admin gates below.
    */
+  /**
+   * IMPERSONATION SATISFIES THIS GATE — scoped to this session only.
+   *
+   * Requirement 7. The gate's question is "has this device proved control of
+   * this account's inbox?" For an impersonated session the honest answer is
+   * that it cannot and must not: the inbox belongs to the CUSTOMER, and
+   * challenging here would email them a code every time an admin looked at
+   * their plan.
+   *
+   * What stands in for the code is the super-admin authorization already
+   * performed by /api/admin/impersonate — which itself ran behind this very
+   * gate, so the admin HAS passed a code challenge on this device, under their
+   * own account, within the last 30 days.
+   *
+   * Two properties keep this from being a hole:
+   *   - the marker is HMAC-signed and bound to `targetUserId`, checked above
+   *     by `isMarkerForUser`, so it cannot be forged or transplanted;
+   *   - it is a COOKIE-LIFETIME exemption, not a grant. No `sam_2fa` cookie is
+   *     ever written for the customer's user id, so nothing survives the exit.
+   *     The moment the marker is cleared or its 60 minutes elapse, the
+   *     customer's account is back to requiring a real code — including on
+   *     this same browser.
+   */
   // userId (not isAuthenticated) so TypeScript narrows it to string here.
-  if (userId && !isTwoFactorExempt) {
+  if (userId && !isTwoFactorExempt && !impersonation) {
     const token = request.cookies.get(TWO_FACTOR_COOKIE)?.value ?? null;
     const trusted = await verifyDeviceToken(token, userId);
 
@@ -521,7 +685,18 @@ export async function updateSession(request: NextRequest) {
       .eq('id', userId)
       .maybeSingle();
 
-    // Super admins are never locked out — they are the people who undo it.
+    /**
+     * Super admins are never locked out — they are the people who undo it.
+     *
+     * NOTE ON IMPERSONATION (requirement 9): this needs no special case, and
+     * deliberately has none. `is_admin` is read from the profile of whoever is
+     * SIGNED IN, and during impersonation that is the customer's owner, whose
+     * profile is not an admin. So an impersonating admin hits the pause and
+     * entitlement gates exactly as the customer does — if the customer is
+     * locked out, the admin sees the lockout screen. That is the point of
+     * looking, and it is why impersonation is a real sign-in rather than an
+     * id swap.
+     */
     if (gateProfile?.company_id && !gateProfile.is_admin) {
       /**
        * ONE QUERY for both gates.

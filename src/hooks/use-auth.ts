@@ -13,18 +13,23 @@ export function useAuth(): AuthState {
 
 /**
  * Simple hook that just returns companyId (convenience wrapper).
- * Returns impersonated company ID if admin is impersonating.
+ *
+ * Always the SESSION's company, with no override.
+ *
+ * This used to consult a `sam-admin-impersonate` sessionStorage key and return
+ * the impersonated company id instead. That was the impersonation bug: it
+ * changed which company CLIENT code read, while the admin's actual session
+ * stayed their own. Server routes therefore still acted as the admin — the
+ * Profile screen showed the admin, and starting an intake wrote to the ADMIN's
+ * company — and because RLS on `initiatives`, `products`, `results` and
+ * `annual_plans` is company-scoped with no admin read policy, the admin's own
+ * JWT could not read the customer rows the screen was asking for anyway.
+ *
+ * Impersonation is now a real sign-in as the company's owner
+ * (/api/admin/impersonate), so the session's own company id is already the
+ * right answer and there is nothing to override.
  */
 export function useCompanyId(): string | null {
   const { companyId } = useAuthContext();
-  if (typeof window !== 'undefined') {
-    try {
-      const stored = sessionStorage.getItem('sam-admin-impersonate');
-      if (stored) {
-        const { id } = JSON.parse(stored);
-        if (id) return id;
-      }
-    } catch {}
-  }
   return companyId;
 }

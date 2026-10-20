@@ -23,6 +23,12 @@ export interface FakeDb {
   client: SupabaseClient;
   tables: Record<string, Row[]>;
   calls: Array<{ table: string; op: string; rows?: Row[]; columns?: string }>;
+  /**
+   * Every `rpc()` made through this client. Billing meters usage with
+   * `rpc("increment_usage", ...)`, so a test can assert that a code path did
+   * NOT charge the customer.
+   */
+  rpcCalls: Array<{ fn: string; args: Row | undefined }>;
 }
 
 export function fakeSupabase(opts: FakeOptions = {}): FakeDb {
@@ -66,7 +72,10 @@ export function fakeSupabase(opts: FakeOptions = {}): FakeDb {
       };
       return builder;
     },
-    insert(rows: Row[]) {
+    insert(input: Row[] | Row) {
+      // supabase-js accepts one row or many; normalised so a caller that
+      // inserts a single object (logGenerationEvent) behaves like the real API.
+      const rows = Array.isArray(input) ? input : [input];
       calls.push({ table, op: "insert", rows });
       const bad = unknownColumn(table, [...new Set(rows.flatMap((r) => Object.keys(r)))]);
       if (bad) {
@@ -97,5 +106,11 @@ export function fakeSupabase(opts: FakeOptions = {}): FakeDb {
     },
   });
 
-  return { client: { from } as unknown as SupabaseClient, tables, calls };
+  const rpcCalls: FakeDb["rpcCalls"] = [];
+  const rpc = (fn: string, args?: Row) => {
+    rpcCalls.push({ fn, args });
+    return Promise.resolve({ data: null, error: null });
+  };
+
+  return { client: { from, rpc } as unknown as SupabaseClient, tables, calls, rpcCalls };
 }

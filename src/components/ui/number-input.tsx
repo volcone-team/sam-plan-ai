@@ -8,6 +8,9 @@ import {
   parseNumberInput,
   stripFormatting,
   caretPositionAfterFormat,
+  formatGroupedInput,
+  groupedCaretPosition,
+  type GroupedInputOptions,
 } from "@/lib/number-input";
 
 export interface NumberInputProps
@@ -211,4 +214,72 @@ const NumberInputRaw = React.forwardRef<HTMLInputElement, NumberInputRawProps>(
 );
 NumberInputRaw.displayName = "NumberInputRaw";
 
-export { NumberInput, NumberInputRaw };
+export interface GroupedNumberInputProps
+  extends Omit<
+    React.InputHTMLAttributes<HTMLInputElement>,
+    "value" | "onChange" | "type"
+  > {
+  /** The field's text. Commas are fine: it is shown grouped either way. */
+  value: string;
+  /** Receives the GROUPED text ("1,234.5", "12%"), exactly as displayed. */
+  onValueChange: (value: string) => void;
+  /** Formatting rules: decimals, minus, "$" / "%" symbols. */
+  format: GroupedInputOptions;
+}
+
+/**
+ * Text field that groups thousands as you type, for values that may be
+ * decimal or carry a "$" / "%" symbol (metric fields).
+ *
+ * NumberInputRaw hands back digits only and drops symbols, which suits whole
+ * money amounts. Metric fields instead keep their text and are validated
+ * later by `normaliseMetricInput` (which strips commas), so this component
+ * passes the grouped text straight through. Partial input ("1,234.", "0.",
+ * "-") survives because nothing is parsed here.
+ *
+ * The caret is restored by digit count (`groupedCaretPosition`) so typing in
+ * the middle of a number does not throw the cursor to the end.
+ */
+const GroupedNumberInput = React.forwardRef<HTMLInputElement, GroupedNumberInputProps>(
+  ({ value, onValueChange, format, inputMode, ...props }, ref) => {
+    const innerRef = React.useRef<HTMLInputElement | null>(null);
+    const setRefs = React.useCallback(
+      (node: HTMLInputElement | null) => {
+        innerRef.current = node;
+        if (typeof ref === "function") ref(node);
+        else if (ref) {
+          (ref as React.MutableRefObject<HTMLInputElement | null>).current = node;
+        }
+      },
+      [ref]
+    );
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const rawInput = e.target.value;
+      const caret = e.target.selectionStart ?? rawInput.length;
+      const formatted = formatGroupedInput(rawInput, format);
+      onValueChange(formatted);
+
+      const nextCaret = groupedCaretPosition(rawInput, caret, formatted, format);
+      requestAnimationFrame(() => {
+        const el = innerRef.current;
+        if (el && document.activeElement === el) el.setSelectionRange(nextCaret, nextCaret);
+      });
+    };
+
+    return (
+      <input
+        type="text"
+        inputMode={inputMode ?? (format.allowDecimal ? "decimal" : "numeric")}
+        autoComplete="off"
+        {...props}
+        value={formatGroupedInput(value, format)}
+        onChange={handleChange}
+        ref={setRefs}
+      />
+    );
+  }
+);
+GroupedNumberInput.displayName = "GroupedNumberInput";
+
+export { NumberInput, NumberInputRaw, GroupedNumberInput };

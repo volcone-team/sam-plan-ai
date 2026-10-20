@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { isPendingInvite, lookupLastSignInsById } from "@/lib/team/member-status";
 
 /**
  * GET /api/team
@@ -70,33 +71,17 @@ export async function GET() {
 
     // Determine each member's last sign-in so the UI can flag pending invites
     // (a member who has never signed in hasn't set their password yet).
-    // One admin lookup per member — fine for small teams. Cap to avoid
-    // hammering the auth API for unexpectedly large teams; uncapped members
+    // One admin lookup per member, capped at 100; failed or uncapped lookups
     // fall back to null (treated as pending) rather than blocking the list.
-    const LOOKUP_CAP = 100;
-    const lastSignInById = new Map<string, string | null>();
-
-    await Promise.all(
-      memberList.slice(0, LOOKUP_CAP).map(async (m) => {
-        try {
-          const { data: authData, error: authErr } = await adminClient.auth.admin.getUserById(m.id);
-          if (authErr) {
-            console.error("[team] GET - getUserById error for", m.id, ":", authErr.message);
-            lastSignInById.set(m.id, null);
-            return;
-          }
-          lastSignInById.set(m.id, authData?.user?.last_sign_in_at ?? null);
-        } catch (lookupErr: unknown) {
-          const msg = lookupErr instanceof Error ? lookupErr.message : String(lookupErr);
-          console.error("[team] GET - getUserById threw for", m.id, ":", msg);
-          lastSignInById.set(m.id, null);
-        }
-      })
+    const lastSignInById = await lookupLastSignInsById(
+      adminClient,
+      memberList.map((m) => m.id),
+      100,
     );
 
     return NextResponse.json({
       members: memberList.map((m) => {
-        const lastSignInAt = lastSignInById.has(m.id) ? lastSignInById.get(m.id)! : null;
+        const lastSignInAt = lastSignInById.get(m.id) ?? null;
         return {
           id: m.id,
           email: m.email,
@@ -106,7 +91,7 @@ export async function GET() {
           isActive: m.is_active ?? true,
           createdAt: m.created_at,
           lastSignInAt,
-          pending: !lastSignInAt,
+          pending: isPendingInvite(lastSignInAt),
         };
       }),
     });

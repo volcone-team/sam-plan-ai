@@ -10,7 +10,10 @@ import {
 } from "@/lib/billing/discount-display";
 import { evaluateAccess } from "@/lib/billing/entitlement";
 import { hasLiveStripeSubscription } from "@/lib/billing/live-subscription";
-import { resolveUsagePeriod, checkLimit } from "@/lib/billing/limits";
+import { resolveUsagePeriod } from "@/lib/billing/limits";
+import { buildUsageRows, pickCurrentPlanYear, type UsageRow } from "@/lib/billing/usage-rows";
+import { countLiveUsage } from "@/lib/billing/live-limits";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { canCancel, canOfferDiscount } from "@/lib/billing/cancellation";
 import { canPauseSelf } from "@/lib/billing/pause";
 import { resolveBookingUrls } from "@/lib/billing/booking";
@@ -512,13 +515,30 @@ export async function GET() {
       sub?.current_period_end ?? null
     );
 
-    let usage: {
-      key: string; label: string; limit: number; used: number;
-      remaining: number | null; unlimited: boolean; notIncluded: boolean;
-    }[] = [];
+    /**
+     * Monthly keys come from usage_counters; initiatives, products and team
+     * are LIVE counts, the same ones `checkLiveLimit` enforces with. Built by
+     * `buildUsageRows` (unit tested). See src/lib/billing/usage-rows.ts.
+     */
+    let usage: UsageRow[] = [];
 
     if (companyId && sub?.plan_id) {
-      const planLimits = limitsByPlan.get(sub.plan_id) ?? [];
+      // The caller's OWN plan's limits, even when that plan is retired: the
+      // map above only holds plans still on sale, and a subscriber on a
+      // retired plan keeps its limits.
+      let planLimits = limitsByPlan.get(sub.plan_id);
+      if (!planLimits) {
+        const { data: ownLimits } = await db
+          .from("plan_limits")
+          .select("limit_key, limit_label, limit_value")
+          .eq("plan_id", sub.plan_id);
+        planLimits = ((ownLimits ?? []) as {
+          limit_key: string; limit_label: string; limit_value: number;
+        }[]).map((r) => ({ key: r.limit_key, label: r.limit_label, value: r.limit_value }));
+      }
+
+      const live = await loadLiveUsage(db, companyId);
+
       const { data: counters } = await db
         .from("usage_counters")
         .select("limit_key, used")
@@ -529,18 +549,7 @@ export async function GET() {
         ((counters ?? []) as { limit_key: string; used: number }[]).map((c) => [c.limit_key, c.used])
       );
 
-      usage = planLimits.map((l) => {
-        const check = checkLimit(l.value, usedByKey.get(l.key) ?? 0);
-        return {
-          key: l.key,
-          label: l.label,
-          limit: check.limit,
-          used: check.used,
-          remaining: check.remaining,
-          unlimited: check.unlimited,
-          notIncluded: check.notIncluded,
-        };
-      });
+      usage = buildUsageRows({ planLimits, periodUsed: usedByKey, live });
     }
 
     const { data: invoices } = companyId
@@ -726,4 +735,42 @@ export async function GET() {
     console.error("[billing/me] Error:", message);
     return NextResponse.json({ error: message || "Internal error" }, { status: 500 });
   }
+}
+
+/**
+ * The live counts behind the initiatives / products / team rows.
+ *
+ * Initiatives are counted in the CURRENT plan year, chosen by
+ * `pickCurrentPlanYear` — the same default the year picker lands on — so the
+ * panel names the plan the customer is looking at ("Initiatives in your 2026
+ * plan"). Counted with `countLiveUsage`, the function enforcement uses.
+ */
+async function loadLiveUsage(
+  db: SupabaseClient,
+  companyId: string
+): Promise<{ initiatives: { year: number | null; count: number }; products: number; users: number }> {
+  const { data: planRows } = await db
+    .from("annual_plans")
+    .select("id, year")
+    .eq("company_id", companyId);
+
+  const plans = (planRows ?? []) as { id: string; year: number }[];
+  const year = pickCurrentPlanYear(plans.map((p) => p.year), new Date().getFullYear());
+  const planId = plans.find((p) => p.year === year)?.id ?? null;
+
+  // A failed count must not take the whole billing panel down with it; it is
+  // logged and shown as 0. Enforcement does NOT do this — it refuses instead.
+  const safe = (p: Promise<number>) =>
+    p.catch((err: unknown) => {
+      console.error("[billing/me] live count failed:", err instanceof Error ? err.message : err);
+      return 0;
+    });
+
+  const [initiatives, products, users] = await Promise.all([
+    safe(countLiveUsage(db, companyId, "max_initiatives", { annualPlanId: planId })),
+    safe(countLiveUsage(db, companyId, "max_products")),
+    safe(countLiveUsage(db, companyId, "max_users")),
+  ]);
+
+  return { initiatives: { year, count: initiatives }, products, users };
 }

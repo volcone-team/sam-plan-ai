@@ -25,6 +25,7 @@ import {
   type MetricSetMetric,
 } from "@/lib/metrics/metric-set";
 import { formatMoney, formatMoneyPrecise, formatNumber } from "@/lib/format-money";
+import { formatNumberValue, parseNumberInput, type GroupedInputOptions } from "@/lib/number-input";
 
 /* ------------------------------------------------------------------ *
  * Fields
@@ -116,6 +117,25 @@ export type NormalisedMetric =
 const NUMERIC = /^-?(\d+\.?\d*|\.\d+)$/;
 
 /**
+ * As-you-type grouping rules per kind, matching what `normaliseMetricInput`
+ * accepts. Null for "tag", which is not numeric and keeps a plain text field.
+ */
+export function groupedFormatForKind(kind: MetricKind): GroupedInputOptions | null {
+  switch (kind) {
+    case "count":
+      return { allowDecimal: false };
+    case "money":
+      return { allowDecimal: true, maxDecimals: 2, prefix: "$" };
+    case "rate":
+      return { allowDecimal: true, suffix: "%" };
+    case "score":
+      return { allowDecimal: true, allowNegative: true };
+    case "tag":
+      return null;
+  }
+}
+
+/**
  * Typed text -> the number to store. `value: null` means blank (omit it).
  *
  *   count  non-negative whole number
@@ -174,7 +194,10 @@ export function parseMetricDraft(
   return { values, errors };
 }
 
-/** Stored values -> form text, for editing. Only fields of the set. */
+/**
+ * Stored values -> form text, for editing. Only fields of the set. Grouped
+ * ("1,200"), as the field shows it; validation ignores the commas.
+ */
 export function draftFromMetrics(
   groups: readonly MetricFieldGroup[],
   metrics: Readonly<Record<string, unknown>> | null | undefined
@@ -182,8 +205,37 @@ export function draftFromMetrics(
   const out: Record<string, string> = {};
   for (const id of enteredFieldIds(groups)) {
     const v = metrics?.[id];
-    if (typeof v === "number" && Number.isFinite(v)) out[id] = String(v);
+    if (typeof v === "number" && Number.isFinite(v)) out[id] = formatNumberValue(v);
   }
+  return out;
+}
+
+/* Legacy inputs (no metric set): typed text -> numbers, blank -> 0. */
+
+/** New legacy results: non-negative, decimals allowed (was `min="0"`). */
+export const LEGACY_CREATE_FORMAT: GroupedInputOptions = { allowDecimal: true };
+/** Editing a legacy result: any number, as the old field allowed. */
+export const LEGACY_EDIT_FORMAT: GroupedInputOptions = { allowDecimal: true, allowNegative: true };
+
+/**
+ * Stored legacy metrics -> grouped field text. Zero and non-numbers are left
+ * out, so the field shows blank exactly as the old `value || ''` did.
+ */
+export function legacyDraftFrom(metrics: Readonly<Record<string, unknown>> | null | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(metrics ?? {})) {
+    if (typeof v === "number" && Number.isFinite(v) && v !== 0) out[k] = formatNumberValue(v);
+  }
+  return out;
+}
+
+/**
+ * Legacy field text -> numbers to store, for the keys present in the draft.
+ * Blank or unparseable text is 0, the old `parseFloat(..) || 0` behaviour.
+ */
+export function legacyMetricsFrom(draft: Readonly<Record<string, string>>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, text] of Object.entries(draft)) out[k] = parseNumberInput(text) ?? 0;
   return out;
 }
 
@@ -325,7 +377,10 @@ const oneDecimal = (n: number) => n.toLocaleString("en-US", { maximumFractionDig
  */
 export function formatMetricValue(kind: MetricKind, unit: string | undefined, value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
-  if (kind === "rate") return `${value.toFixed(1)}%`;
+  if (kind === "rate") {
+    // Grouped too: a derived rate (ROI-style) can run past 1,000%.
+    return `${value.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+  }
   if (kind === "money") {
     return Math.round(value * 100) % 100 === 0 ? formatMoney(value) : formatMoneyPrecise(value);
   }
@@ -336,4 +391,13 @@ export function formatMetricValue(kind: MetricKind, unit: string | undefined, va
 /** "Registrations", "Revenue ($)", "Show-up rate (%)", "Viewing time (minutes)". */
 export function fieldLabelWithUnit(f: { label: string; unit?: string }): string {
   return f.unit ? `${f.label} (${f.unit})` : f.label;
+}
+
+/**
+ * A DERIVED rate above 100%, which almost always means an input is wrong (more
+ * show-ups than registrations, say). A soft hint only: some ratios legitimately
+ * exceed 100, so it never blocks saving.
+ */
+export function isRateOverHundred(kind: MetricKind, value: number | null | undefined): boolean {
+  return kind === "rate" && typeof value === "number" && Number.isFinite(value) && value > 100;
 }

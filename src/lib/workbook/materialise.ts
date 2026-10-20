@@ -137,8 +137,12 @@ export interface AiTask {
 }
 
 const VALID_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
-/** Same ceiling the workbook parser applies, for the same reason. */
-const MAX_TASK_HOURS = 200;
+/**
+ * Same ceiling the workbook parser applies, for the same reason. Exported so
+ * AI task validation (src/lib/workbook/ai-tasks.ts) clamps to the SAME limit
+ * rather than inventing a second one that disagrees with this module.
+ */
+export const MAX_TASK_HOURS = 200;
 
 export function materialiseAiTasks(
   tasks: readonly AiTask[] | undefined | null,

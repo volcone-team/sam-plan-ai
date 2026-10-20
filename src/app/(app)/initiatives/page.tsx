@@ -25,6 +25,7 @@ import { sumExpensesByInitiative } from '@/lib/initiative-spend';
 import { rankTopPerformers, type RankedPerformer } from '@/lib/top-performers';
 import type { Initiative, Result } from '@/types';
 import type { CreateInitiativeRequest } from '@/lib/initiatives/create-request';
+import { limitNoticeFrom, LimitReachedError } from '@/lib/billing/limit-notice';
 
 
 export default function InitiativesPage() {
@@ -199,6 +200,9 @@ export default function InitiativesPage() {
     });
     const body = (await response.json().catch(() => ({}))) as { id?: string; error?: string };
     if (!response.ok || !body.id) {
+      // Plan limit: the panel shows the message with an Upgrade link.
+      const notice = limitNoticeFrom(body);
+      if (notice) throw new LimitReachedError(notice);
       throw new Error(body.error || `Could not save the initiative (${response.status}).`);
     }
     const newInitiative = await initiativeService.getInitiative(body.id);

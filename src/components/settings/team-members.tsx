@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { Trash2, UserPlus, Shield, Eye, Crown, Loader2, Mail, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/use-auth';
+import { limitNoticeFrom, type LimitNotice as LimitNoticeData } from '@/lib/billing/limit-notice';
+import { LimitNotice } from '@/components/billing/limit-notice';
 
 interface TeamMember {
   id: string;
@@ -51,6 +53,7 @@ export function TeamMembers() {
   const [role, setRole] = useState<'operator' | 'team_member' | 'viewer'>('operator');
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [addLimit, setAddLimit] = useState<LimitNoticeData | null>(null);
   const [addSuccess, setAddSuccess] = useState<string | null>(null);
   const [addWarning, setAddWarning] = useState<string | null>(null);
 
@@ -75,6 +78,7 @@ export function TeamMembers() {
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     setAddError(null);
+    setAddLimit(null);
     setAddSuccess(null);
     setAddWarning(null);
     setAddLoading(true);
@@ -89,7 +93,10 @@ export function TeamMembers() {
       const data = await res.json();
 
       if (!res.ok) {
-        setAddError(data.error || 'Failed to add member');
+        // max_users: the plan's message, with an Upgrade link.
+        const notice = limitNoticeFrom(data);
+        if (notice) setAddLimit(notice);
+        else setAddError(data.error || 'Failed to add member');
         return;
       }
 
@@ -269,6 +276,8 @@ export function TeamMembers() {
               {addError}
             </div>
           )}
+
+          <LimitNotice notice={addLimit} className="mb-4" />
 
           {addSuccess && (
             <div className="mb-4 rounded-[var(--radius-md)] border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900 dark:bg-green-950/30 dark:text-green-300">

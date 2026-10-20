@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { CheckCircle, Settings, ShieldAlert, ToggleLeft } from "lucide-react";
+import { CheckCircle, Settings, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RoleManagement } from "./role-management";
 import { LegalLinksSettings } from './legal-links-settings';
@@ -10,15 +10,23 @@ import { LegalLinksSettings } from './legal-links-settings';
    Types
    ------------------------------------------------------------------ */
 
-type TierRestriction = "All" | "Starter+" | "Pro+" | "Mastery";
-
-interface FeatureFlag {
-  id: string;
-  name: string;
-  description: string;
-  enabled: boolean;
-  tier: TierRestriction;
-}
+/*
+ * THE "FEATURE FLAGS" TAB IS GONE.
+ *
+ * It listed ten switches (AI Plan Generation, Weekly Operating Cadence, AI
+ * Weekly Insights, Maintenance Mode and so on) with tier badges including a
+ * "Mastery" tier that is not a live plan. Nothing read any of them: they were
+ * seeded from a hardcoded array and written to one localStorage key that no
+ * other file mentions, so toggling a flag — Maintenance Mode included —
+ * changed nothing for anybody, in that admin's browser only.
+ *
+ * What IS real and stays elsewhere:
+ *   - `plan_features` (migration 004) — the per-plan feature list customers
+ *     actually see. Edited on /admin/subscriptions, read by /api/billing/me,
+ *     /choose-plan, /get-started and the cancellation modal.
+ *   - the `feature_flags` TABLE (migration 001) — exists, has RLS, and no
+ *     code reads or writes it. Left in place; not what this tab used.
+ */
 
 interface PlatformSettings {
   appName: string;
@@ -33,21 +41,7 @@ interface PlatformSettings {
    Constants
    ------------------------------------------------------------------ */
 
-const FEATURE_FLAGS_KEY = "sam-flow-admin-feature-flags";
 const PLATFORM_SETTINGS_KEY = "sam-flow-admin-platform-settings";
-
-const DEFAULT_FLAGS: FeatureFlag[] = [
-  { id: "ai-plan-generation", name: "AI Plan Generation", description: "Generate plans from questionnaire answers", enabled: true, tier: "All" },
-  { id: "weekly-operating-cadence", name: "Weekly Operating Cadence", description: "Weekly planner with 5-step flow", enabled: true, tier: "All" },
-  { id: "revenue-projections", name: "Revenue Projections", description: "Good/Better/Best scenario projections", enabled: true, tier: "All" },
-  { id: "csv-export", name: "CSV Export", description: "Export reports as CSV files", enabled: true, tier: "Pro+" },
-  { id: "advanced-analytics", name: "Advanced Analytics", description: "Detailed analytics and trend reports", enabled: false, tier: "Pro+" },
-  { id: "custom-initiative-types", name: "Custom Initiative Types", description: "Users can create custom initiative types", enabled: false, tier: "Mastery" },
-  { id: "ai-weekly-insights", name: "AI Weekly Insights", description: "AI-generated weekly performance insights", enabled: false, tier: "Pro+" },
-  { id: "benchmark-contribution", name: "Benchmark Contribution", description: "Users contribute anonymized data to benchmarks", enabled: true, tier: "All" },
-  { id: "multi-user-access", name: "Multi-User Access", description: "Multiple users per company", enabled: false, tier: "Pro+" },
-  { id: "maintenance-mode", name: "Maintenance Mode", description: "Show maintenance screen to all users", enabled: false, tier: "All" },
-];
 
 const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   appName: "SAM Flow AI",
@@ -74,23 +68,6 @@ const TIMEZONES = [
 ];
 
 const CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD"];
-
-/* ------------------------------------------------------------------
-   Helpers
-   ------------------------------------------------------------------ */
-
-function getTierBadgeClasses(tier: TierRestriction): string {
-  switch (tier) {
-    case "All":
-      return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
-    case "Starter+":
-      return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300";
-    case "Pro+":
-      return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300";
-    case "Mastery":
-      return "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300";
-  }
-}
 
 /* ------------------------------------------------------------------
    Sub-components
@@ -126,65 +103,20 @@ function ToggleSwitch({
   );
 }
 
-function FeatureFlagRow({
-  flag,
-  onToggle,
-}: {
-  flag: FeatureFlag;
-  onToggle: (id: string) => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 px-6 py-4">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-medium text-[hsl(var(--foreground))]">{flag.name}</p>
-          <span
-            className={cn(
-              "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-              getTierBadgeClasses(flag.tier)
-            )}
-          >
-            {flag.tier}
-          </span>
-          <span className="text-xs text-[hsl(var(--foreground-muted))]">
-            {flag.tier === "All" ? "Global" : `${flag.tier} only`}
-          </span>
-        </div>
-        <p className="mt-0.5 text-xs text-[hsl(var(--foreground-muted))]">{flag.description}</p>
-      </div>
-      <ToggleSwitch
-        checked={flag.enabled}
-        onChange={() => onToggle(flag.id)}
-        ariaLabel={`Toggle ${flag.name}`}
-      />
-    </div>
-  );
-}
-
 /* ------------------------------------------------------------------
    Main Component
    ------------------------------------------------------------------ */
 
 export function AdminSettings() {
-  const [flags, setFlags] = useState<FeatureFlag[]>(DEFAULT_FLAGS);
   const [settings, setSettings] = useState<PlatformSettings>(DEFAULT_PLATFORM_SETTINGS);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'flags' | 'platform' | 'roles'>('flags');
-  // Server-persisted, unlike the flags/settings above. Applies to every visitor.
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'platform' | 'roles'>('platform');
+  // Server-persisted, unlike the platform settings above. Applies to every visitor.
   const [deterDevtools, setDeterDevtools] = useState(false);
   const [deterError, setDeterError] = useState<string | null>(null);
 
   // Load from localStorage
   useEffect(() => {
-    const savedFlags = localStorage.getItem(FEATURE_FLAGS_KEY);
-    if (savedFlags) {
-      try {
-        setFlags(JSON.parse(savedFlags));
-      } catch {
-        // Use defaults
-      }
-    }
-
     const savedSettings = localStorage.getItem(PLATFORM_SETTINGS_KEY);
     if (savedSettings) {
       try {
@@ -239,17 +171,6 @@ export function AdminSettings() {
     }
   };
 
-  // Toggle a feature flag
-  const handleToggleFlag = (id: string) => {
-    setFlags((prev) => {
-      const updated = prev.map((f) =>
-        f.id === id ? { ...f, enabled: !f.enabled } : f
-      );
-      localStorage.setItem(FEATURE_FLAGS_KEY, JSON.stringify(updated));
-      return updated;
-    });
-  };
-
   // Save platform settings
   const handleSaveSettings = () => {
     localStorage.setItem(PLATFORM_SETTINGS_KEY, JSON.stringify(settings));
@@ -270,7 +191,6 @@ export function AdminSettings() {
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border overflow-x-auto">
         {([
-          { key: 'flags', label: 'Feature Flags', icon: ToggleLeft },
           { key: 'platform', label: 'Platform Settings', icon: Settings },
           { key: 'roles', label: 'Role Management', icon: Settings },
         ] as const).map(tab => (
@@ -288,31 +208,14 @@ export function AdminSettings() {
         ))}
       </div>
 
-      {/* Tab content */}
-      {activeSettingsTab === 'flags' && (
-        <section aria-label="Feature Flags">
-        <div className="mb-4 flex items-center gap-2">
-          <ToggleLeft className="h-5 w-5 text-[hsl(var(--primary))]" />
-          <h2 className="text-lg font-semibold text-[hsl(var(--foreground))]">Feature Flags</h2>
-        </div>
-        <div className="rounded-[var(--radius-lg)] border border-border bg-card">
-          <div className="divide-y divide-border">
-            {flags.map((flag) => (
-              <FeatureFlagRow key={flag.id} flag={flag} onToggle={handleToggleFlag} />
-            ))}
-          </div>
-        </div>
-      </section>
-      )}
-
       {/* Platform Settings */}
       {activeSettingsTab === 'platform' && (
       <section aria-label="Platform Settings">
         {/*
-          Browser inspection deterrent. Unlike the feature flags above (which are
-          localStorage-only and affect nobody but the admin's own browser), this
-          is persisted server-side and applies to every visitor, so it saves
-          immediately rather than waiting for the Save button below.
+          Browser inspection deterrent. Unlike the platform settings below
+          (localStorage-only, affecting nobody but the admin's own browser),
+          this is persisted server-side and applies to every visitor, so it
+          saves immediately rather than waiting for the Save button below.
         */}
         <div className="mb-6">
           <div className="mb-4 flex items-center gap-2">

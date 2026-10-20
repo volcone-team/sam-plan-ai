@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuth } from '@/hooks/use-auth';
+import { useIsImpersonating } from '@/hooks/use-impersonating';
 import { useTheme } from 'next-themes';
 import { useRouter } from 'next/navigation';
 
@@ -23,6 +24,12 @@ interface ProfileFormData {
 export function UserProfile() {
   const { userId, firstName, lastName, email, role: authRole, loading: authLoading } = useAuth();
   const { theme: currentTheme, setTheme } = useTheme();
+  /*
+   * Hides the controls the middleware refuses while impersonating (password
+   * change, account/company deletion). Presentation only — see
+   * `isBlockedWhileImpersonating` for the actual enforcement.
+   */
+  const impersonating = useIsImpersonating();
   const router = useRouter();
   const [formData, setFormData] = useState<ProfileFormData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -290,6 +297,19 @@ export function UserProfile() {
           <h3 className="text-base font-semibold">Security</h3>
         </div>
 
+        {/*
+          Hidden while a super admin is viewing as this customer. Changing the
+          password here would lock the real customer out of their own account,
+          so the server refuses it (/api/me/password is blocked by the
+          middleware). This only removes the form so nobody fills it in and
+          collects a 403 — the control is server-side.
+        */}
+        {impersonating ? (
+          <p className="mt-4 text-sm text-[hsl(var(--foreground-muted))]">
+            Password and two-factor settings are hidden while viewing as a customer. Exit
+            impersonation to manage your own security settings.
+          </p>
+        ) : (
         <div className="mt-4 space-y-4">
           <div>
             <p className="text-sm font-medium">Change Password</p>
@@ -390,9 +410,19 @@ export function UserProfile() {
             </div>
           </form>
         </div>
+        )}
       </div>
 
-      {/* Danger Zone — destructive, irreversible actions. */}
+      {/*
+        Danger Zone — destructive, irreversible actions.
+
+        Suppressed entirely while impersonating. Deleting the account or the
+        company from inside someone else's session is the most destructive
+        thing this feature could enable, and an admin has the same power from
+        the admin area under their OWN identity (where it is audited as such).
+        /api/me DELETE is blocked server-side regardless.
+      */}
+      {!impersonating && (
       <div className="rounded-[var(--radius-lg)] border border-red-200 bg-card p-5 dark:border-red-900/60">
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-5 w-5 text-red-500" />
@@ -439,6 +469,7 @@ export function UserProfile() {
           )}
         </div>
       </div>
+      )}
 
       <DeleteAccountModal
         open={deleteMode !== null}

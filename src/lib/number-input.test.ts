@@ -5,6 +5,8 @@ import {
   formatNumberInput,
   formatNumberValue,
   caretPositionAfterFormat,
+  formatGroupedInput,
+  groupedCaretPosition,
 } from "./number-input";
 
 /**
@@ -193,5 +195,83 @@ describe("caretPositionAfterFormat", () => {
 
   it("clamps to the end when the count exceeds the formatted length", () => {
     expect(caretPositionAfterFormat("999", 10, "999")).toBe(3);
+  });
+});
+
+describe("formatGroupedInput", () => {
+  const DEC = { allowDecimal: true };
+  it("groups the integer part as you type", () => {
+    expect(formatGroupedInput("1234", DEC)).toBe("1,234");
+    expect(formatGroupedInput("1234567.89", DEC)).toBe("1,234,567.89");
+    expect(formatGroupedInput("12345678901234567890", DEC)).toBe("12,345,678,901,234,567,890");
+  });
+  it("keeps partial decimals exactly as typed", () => {
+    expect(formatGroupedInput("1234.", DEC)).toBe("1,234.");
+    expect(formatGroupedInput("1234.5", DEC)).toBe("1,234.5");
+    expect(formatGroupedInput("0.", DEC)).toBe("0.");
+    expect(formatGroupedInput("1234.50", DEC)).toBe("1,234.50");
+    expect(formatGroupedInput(".5", DEC)).toBe(".5");
+  });
+  it("keeps one dot only", () => {
+    expect(formatGroupedInput("1.2.3", DEC)).toBe("1.23");
+    expect(formatGroupedInput("1234..", DEC)).toBe("1,234.");
+  });
+  it("drops the dot for whole counts", () => {
+    expect(formatGroupedInput("1234.5", { allowDecimal: false })).toBe("12,345");
+  });
+  it("regroups pasted, mis-grouped text", () => {
+    expect(formatGroupedInput("1,2,34", DEC)).toBe("1,234");
+    expect(formatGroupedInput(" 1 234 abc", DEC)).toBe("1,234");
+  });
+  it("collapses leading zeros but keeps a single zero", () => {
+    expect(formatGroupedInput("007", DEC)).toBe("7");
+    expect(formatGroupedInput("0", DEC)).toBe("0");
+  });
+  it("keeps a trailing % for rates and a leading $ for money", () => {
+    expect(formatGroupedInput("12.5%", { allowDecimal: true, suffix: "%" })).toBe("12.5%");
+    expect(formatGroupedInput("1234%", { allowDecimal: true, suffix: "%" })).toBe("1,234%");
+    expect(formatGroupedInput("%", { allowDecimal: true, suffix: "%" })).toBe("");
+    expect(formatGroupedInput("12.5%", DEC)).toBe("12.5");
+    const money = { allowDecimal: true, maxDecimals: 2, prefix: "$" };
+    expect(formatGroupedInput("$1234.567", money)).toBe("$1,234.56");
+    expect(formatGroupedInput("1234.5", money)).toBe("1,234.5");
+  });
+  it("keeps a leading minus only when allowed (scores)", () => {
+    const score = { allowDecimal: true, allowNegative: true };
+    expect(formatGroupedInput("-1234.5", score)).toBe("-1,234.5");
+    expect(formatGroupedInput("-", score)).toBe("-");
+    expect(formatGroupedInput("-1234", DEC)).toBe("1,234");
+    expect(formatGroupedInput("12-34", score)).toBe("1,234");
+  });
+  it("is idempotent", () => {
+    for (const s of ["1,234.5", "$1,234.56", "12.5%", "-1,000", "0.", ""]) {
+      const opts = { allowDecimal: true, allowNegative: true, prefix: "$", suffix: "%" };
+      expect(formatGroupedInput(formatGroupedInput(s, opts), opts)).toBe(formatGroupedInput(s, opts));
+    }
+  });
+});
+
+describe("groupedCaretPosition", () => {
+  const DEC = { allowDecimal: true };
+  const at = (raw: string, caret: number, opts = DEC) =>
+    groupedCaretPosition(raw, caret, formatGroupedInput(raw, opts), opts);
+  it("stays after the digit typed when a comma appears to its left", () => {
+    // "123" -> type "4" at the end -> "1,234", caret at the end.
+    expect(at("1234", 4)).toBe(5);
+    // "1,234" -> type "9" after the "1": raw "19,234" stays "19,234".
+    expect(at("19,234", 2)).toBe(2);
+    // "9,999" -> type "1" at the start of "999": raw "9,1999" -> "91,999".
+    expect(at("9,1999", 3)).toBe(2);
+  });
+  it("holds the caret at the start", () => {
+    expect(at("1234", 0)).toBe(0);
+  });
+  it("is not pushed right by characters the formatter drops", () => {
+    // "1.5" -> type a second "." after the "1": raw "1..5" -> "1.5".
+    expect(at("1..5", 2)).toBe(2);
+  });
+  it("lands before the first digit when only symbols are to its left", () => {
+    const money = { allowDecimal: true, prefix: "$" };
+    expect(at("$1234", 1, money)).toBe(1);
   });
 });

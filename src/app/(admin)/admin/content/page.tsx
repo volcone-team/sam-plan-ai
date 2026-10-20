@@ -12,7 +12,7 @@ export default function AdminContentPage() {
           Content Management
         </h1>
         <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">
-          Manage SAM University content, FAQ articles, and email templates
+          Manage SAM University content and FAQ articles
         </p>
       </div>
       <ContentManagement />

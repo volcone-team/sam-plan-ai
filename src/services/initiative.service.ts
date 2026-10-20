@@ -8,7 +8,6 @@
 
 import type {
   Initiative,
-  CreateInitiativeDTO,
   UpdateInitiativeDTO,
   InitiativeStatus,
   InitiativeKind,
@@ -16,8 +15,6 @@ import type {
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
 import { toDateOnly, parseDateOnly } from '@/lib/plan-dates';
 import { readMetricSet } from '@/lib/metrics/metric-set';
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class InitiativeService {
   /**
@@ -281,88 +278,6 @@ export class InitiativeService {
     // Mock data removed - return empty
     console.log("[initiative] No data in Supabase, returning empty");
     return [];
-  }
-
-  /**
-   * Create a new initiative
-   */
-  async createInitiative(dto: CreateInitiativeDTO): Promise<Initiative> {
-    if (isSupabaseConfigured()) {
-      const supabase = getSupabase();
-
-      // The "Custom Initiative" flow hands us a client-side id like
-      // "custom-1699999999". initiative_type_id is a UUID FK, so persist a
-      // real user-owned type first and use its id.
-      let typeId = dto.initiativeTypeId;
-      if (!UUID_RE.test(typeId || '')) {
-        const { data: newType, error: typeError } = await supabase
-          .from('initiative_types')
-          .insert({
-            name: dto.name || 'Custom Initiative',
-            channel: 'custom',
-            description: dto.description || '',
-            owner: 'user',
-            benchmarks: {},
-            project_template: { tasks: [], totalEstimatedHours: 0 },
-            difficulty: { effortToImplement: 5, skillExpertiseRequired: 5, timeToResults: 5, costToRun: 5 },
-            ai_context: { description: '', sizingGuidance: '', recommendationWeights: {} },
-            tier: 1,
-            display_order: 999,
-            is_active: true,
-          })
-          .select('id')
-          .single();
-
-        if (typeError || !newType) {
-          console.error('[Supabase createInitiativeType]', (typeError as any)?.message, (typeError as any)?.details);
-          throw new Error('Could not create the custom initiative type. Please try again.');
-        }
-        typeId = newType.id as string;
-      }
-
-      // product_id is NOT NULL. A brand-new company has no products yet.
-      if (!UUID_RE.test(dto.productId || '')) {
-        throw new Error('Add a product first — every initiative must be tied to a product.');
-      }
-
-      const insertData = {
-        company_id: dto.companyId,
-        annual_plan_id: dto.annualPlanId,
-        product_id: dto.productId,
-        initiative_type_id: typeId,
-        name: dto.name,
-        description: dto.description || '',
-        kind: dto.kind,
-        status: 'planned',
-        activation_date: toDateOnly(dto.activationDate),
-        event_date: dto.eventDate ? toDateOnly(dto.eventDate) : null,
-        traffic_input: dto.trafficInput || null,
-        revenue_good: dto.revenueScenarios?.good || 0,
-        revenue_better: dto.revenueScenarios?.better || 0,
-        revenue_best: dto.revenueScenarios?.best || 0,
-        planned_budget: dto.plannedBudget || 0,
-        actual_spend: 0,
-        display_order: dto.displayOrder || 0,
-      };
-
-      const { data, error } = await supabase
-        .from('initiatives')
-        .insert(insertData)
-        .select()
-        .single();
-
-      // Surface write failures instead of silently returning throwaway mock data.
-      if (error || !data) {
-        console.error('[Supabase createInitiative]', (error as any)?.message, '|details:', (error as any)?.details, '|hint:', (error as any)?.hint, insertData);
-        throw new Error((error as any)?.message || 'Could not save the initiative.');
-      }
-
-      return this.mapRowToInitiative(data);
-    }
-
-    // Mock data removed - return empty
-    console.log("[initiative] No data in Supabase, returning empty");
-    throw new Error("Not found");
   }
 
   async updateInitiative(id: string, dto: UpdateInitiativeDTO): Promise<Initiative> {

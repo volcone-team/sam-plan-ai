@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   Users,
   Building2,
-  Rocket,
   Sparkles,
   BarChart3,
   BookOpen,
@@ -49,12 +48,15 @@ const navItems: NavItem[] = [
    * it is simply no longer presented as a working tool.
    */
   /*
-   * "Initiative Types", not "Initiative Library" — the AI's library lives on
-   * the AI Workbook page below. Two entries called a library, only one of
-   * which the AI reads, is how this page's toggles came to look as though they
-   * controlled recommendations.
+   * "Initiative Types" (/admin/initiatives) is REMOVED, page and all.
+   *
+   * It edited `initiative_types` — the records a customer's initiatives attach
+   * to — but its switches looked as though they chose what the AI recommends
+   * and never did. The AI's library is `wb_initiative_library`, controlled on
+   * the AI Workbook page below. The `initiative_types` TABLE is still load
+   * bearing (`initiatives.initiative_type_id` is NOT NULL); only the screen is
+   * gone, and rows are created and read by src/lib/workbook/initiative-type.ts.
    */
-  { label: "Initiative Types", href: "/admin/initiatives", icon: Rocket },
   { label: "AI Workbook", href: "/admin/ai-workbook", icon: Sparkles },
   { label: "Benchmarks", href: "/admin/benchmarks", icon: BarChart3 },
   { label: "Content", href: "/admin/content", icon: BookOpen },

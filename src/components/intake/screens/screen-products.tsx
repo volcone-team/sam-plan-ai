@@ -1,7 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useLiveLimit } from "@/hooks/use-live-limit";
+import { usePermission } from "@/hooks/use-permission";
+import { capState, UPGRADE_URL } from "@/lib/billing/limit-notice";
 import { formatMoney } from "@/lib/format-money";
 import { productsTotal } from "@/lib/intake-forecast";
 import {
@@ -55,6 +59,16 @@ export function ScreenProducts({
   const updateProduct = (index: number, patch: Partial<ProductDraft>) => {
     setProducts(products.map((p, i) => (i === index ? { ...p, ...patch } : p)));
   };
+
+  /**
+   * The plan's max_products, as a cap on the cards. A courtesy so the build
+   * is not refused later; /api/intake/build is the actual enforcement (and
+   * also counts products the account already has under other names).
+   */
+  const productLimit = useLiveLimit("max_products");
+  const canUpgrade = usePermission("settings.billing");
+  const cap = capState(products.length, productLimit.limit);
+  const planLabel = productLimit.planName ? `Your ${productLimit.planName} plan` : "Your plan";
 
   return (
     <>
@@ -120,12 +134,32 @@ export function ScreenProducts({
         <Button
           type="button"
           variant="outline"
-          onClick={() => setProducts([...products, {}])}
+          onClick={() => {
+            if (cap.canAdd) setProducts([...products, {}]);
+          }}
+          disabled={!cap.canAdd}
+          aria-describedby={cap.atCap ? "product-cap-note" : undefined}
           className="w-full"
         >
           <Plus className="h-4 w-4" />
           Add another product
         </Button>
+
+        {cap.atCap && productLimit.limit !== null && (
+          <p id="product-cap-note" className="text-xs text-[hsl(var(--foreground-muted))]">
+            {planLabel} allows {productLimit.limit} product{productLimit.limit === 1 ? "" : "s"}.
+            {cap.over > 0 &&
+              ` Remove ${cap.over} to build your plan.`}
+            {canUpgrade && (
+              <>
+                {" "}
+                <Link href={UPGRADE_URL} className="font-medium underline underline-offset-2">
+                  Upgrade to add more
+                </Link>
+              </>
+            )}
+          </p>
+        )}
       </div>
 
       {/*

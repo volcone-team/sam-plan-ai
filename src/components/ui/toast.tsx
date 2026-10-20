@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { Clock, Info, CheckCircle2, AlertTriangle, X } from "lucide-react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 type ToastVariant = "info" | "wait" | "success" | "error";
@@ -19,11 +20,25 @@ interface ToastItem {
   variant: ToastVariant;
   /** ms before auto-dismiss. Omit/0 for a toast that must be dismissed manually or via dismissToast(id). */
   duration?: number;
+  /** Optional link shown after the message, e.g. "Upgrade" on a plan-limit refusal. */
+  action?: ToastAction;
+}
+
+export interface ToastAction {
+  label: string;
+  /** In-app path. */
+  href: string;
+}
+
+interface ToastOptions {
+  variant?: ToastVariant;
+  duration?: number;
+  action?: ToastAction;
 }
 
 interface ToastContextValue {
   /** Show a toast. Returns its id so callers can dismiss it early (e.g. once a slow request finishes). */
-  showToast: (message: string, options?: { variant?: ToastVariant; duration?: number }) => string;
+  showToast: (message: string, options?: ToastOptions) => string;
   dismissToast: (id: string) => void;
 }
 
@@ -79,11 +94,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const showToast = useCallback(
-    (message: string, options?: { variant?: ToastVariant; duration?: number }) => {
+    (message: string, options?: ToastOptions) => {
       const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const variant = options?.variant ?? "info";
       const duration = options?.duration;
-      setToasts((prev) => [...prev, { id, message, variant, duration }]);
+      const action = options?.action;
+      setToasts((prev) => [...prev, { id, message, variant, duration, action }]);
 
       if (duration && duration > 0) {
         const timer = setTimeout(() => dismissToast(id), duration);
@@ -124,7 +140,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               )}
             >
               <Icon className="mt-0.5 h-4 w-4 shrink-0" />
-              <p className="flex-1">{t.message}</p>
+              <p className="flex-1">
+                {t.message}
+                {t.action && (
+                  <>
+                    {" "}
+                    <Link
+                      href={t.action.href}
+                      onClick={() => dismissToast(t.id)}
+                      className="font-semibold underline underline-offset-2"
+                    >
+                      {t.action.label}
+                    </Link>
+                  </>
+                )}
+              </p>
               <button
                 onClick={() => dismissToast(t.id)}
                 className="shrink-0 rounded p-0.5 opacity-60 hover:opacity-100"

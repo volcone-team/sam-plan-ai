@@ -46,6 +46,49 @@ export function CompanyDetail({ companyId }: { companyId: string }) {
   const [data, setData] = useState<CompanyDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [impersonating, setImpersonating] = useState(false);
+  const [impersonateError, setImpersonateError] = useState<string | null>(null);
+
+  /**
+   * "View Dashboard" — really sign in as this company's owner.
+   *
+   * This used to write a `sam-admin-impersonate` key into sessionStorage and
+   * navigate, which only changed which company id CLIENT code asked for: the
+   * admin's session was untouched, so writes landed in the admin's own company
+   * and RLS withheld most of the customer's rows. Now the server mints a real
+   * session for the company's owner and sets a signed marker cookie; the
+   * banner in the app layout is what offers the way back.
+   *
+   * A full page load afterwards, not router.push — the session cookies have
+   * changed, so every cached server component and client cache entry on this
+   * page belongs to the previous user.
+   */
+  async function startImpersonation() {
+    setImpersonating(true);
+    setImpersonateError(null);
+
+    try {
+      const res = await fetch("/api/admin/impersonate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyId }),
+      });
+      const json: { error?: string; message?: string } = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        // `message` is the human-readable form (e.g. the no-owner refusal);
+        // `error` is the machine code, shown only when there is nothing better.
+        setImpersonateError(json.message || json.error || "Could not start impersonation.");
+        setImpersonating(false);
+        return;
+      }
+
+      window.location.href = "/year-at-a-glance";
+    } catch (err: unknown) {
+      setImpersonateError(err instanceof Error ? err.message : "Network error");
+      setImpersonating(false);
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -114,17 +157,25 @@ export function CompanyDetail({ companyId }: { companyId: string }) {
           </p>
           </div>
         </div>
-        <button
-          onClick={() => {
-            console.log("[CompanyDetail] Impersonating:", company.name, company.id);
-            sessionStorage.setItem("sam-admin-impersonate", JSON.stringify({ id: company.id, name: company.name }));
-            router.push("/year-at-a-glance");
-          }}
-          className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-        >
-          <Eye className="h-4 w-4" />
-          View Dashboard
-        </button>
+        <div className="flex flex-col items-end gap-1.5">
+          <button
+            onClick={startImpersonation}
+            disabled={impersonating}
+            className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
+          >
+            {impersonating ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Eye className="h-4 w-4" aria-hidden="true" />
+            )}
+            {impersonating ? "Signing in…" : "View Dashboard"}
+          </button>
+          {impersonateError && (
+            <p role="alert" className="max-w-xs text-right text-xs text-red-600 dark:text-red-400">
+              {impersonateError}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Revenue Stats */}

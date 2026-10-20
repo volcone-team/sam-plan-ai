@@ -1,9 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { parseMetricsCell } from "@/lib/metrics/parse-metrics";
 import { buildMetricSet, metricFieldId, type InitiativeMetricSet } from "@/lib/metrics/metric-set";
+import type { MetricKind } from "@/lib/metrics/dictionary";
+import { formatGroupedInput } from "@/lib/number-input";
 import {
   draftFromMetrics,
   formatMetricValue,
+  groupedFormatForKind,
+  isRateOverHundred,
+  legacyDraftFrom,
+  legacyMetricsFrom,
   mergeMetricEdit,
   metricAggregate,
   metricFieldsFor,
@@ -104,6 +110,44 @@ describe("normaliseMetricInput", () => {
   });
 });
 
+describe("grouped input round trip", () => {
+  const fmt = (kind: MetricKind, raw: string) => {
+    const opts = groupedFormatForKind(kind);
+    if (!opts) throw new Error(`no format for ${kind}`);
+    return formatGroupedInput(raw, opts);
+  };
+  it("typed text -> grouped text -> the same stored number", () => {
+    expect(fmt("count", "1234")).toBe("1,234");
+    expect(normaliseMetricInput("count", fmt("count", "1234"))).toEqual({ ok: true, value: 1234 });
+    expect(fmt("money", "$1234.5")).toBe("$1,234.5");
+    expect(normaliseMetricInput("money", fmt("money", "$1234.5"))).toEqual({ ok: true, value: 1234.5 });
+    expect(fmt("money", "1234.567")).toBe("1,234.56");
+    expect(normaliseMetricInput("rate", fmt("rate", "12.5%"))).toEqual({ ok: true, value: 12.5 });
+    expect(fmt("score", "-1234.5")).toBe("-1,234.5");
+    expect(normaliseMetricInput("score", fmt("score", "-1234.5"))).toEqual({ ok: true, value: -1234.5 });
+    expect(groupedFormatForKind("tag")).toBeNull();
+  });
+  it("partial input stays a validation error until finished, then parses", () => {
+    expect(normaliseMetricInput("score", fmt("score", "-")).ok).toBe(false);
+    expect(normaliseMetricInput("money", fmt("money", "1234."))).toEqual({ ok: true, value: 1234 });
+  });
+  it("seeded: grouping never changes the stored number", () => {
+    for (let seed = 1; seed <= RUNS; seed++) {
+      const r = rng(seed);
+      const n = Math.floor(r() * 1e9);
+      const cents = Math.floor(r() * 100);
+      expect(normaliseMetricInput("count", fmt("count", String(n)))).toEqual({ ok: true, value: n });
+      const money = `${n}.${String(cents).padStart(2, "0")}`;
+      expect(normaliseMetricInput("money", fmt("money", money))).toEqual({ ok: true, value: Number(money) });
+    }
+  });
+});
+describe("legacy metric drafts", () => {
+  it("shows non-zero values grouped and stores blank as 0", () => {
+    expect(legacyDraftFrom({ leads: 1200, rate: 0.25, zero: 0 })).toEqual({ leads: "1,200", rate: "0.25" });
+    expect(legacyMetricsFrom({ leads: "1,200", rate: "0.25", cleared: "" })).toEqual({ leads: 1200, rate: 0.25, cleared: 0 });
+  });
+});
 describe("drafts and edits", () => {
   const groups = metricGroupsOf(WEBINAR);
 
@@ -119,6 +163,11 @@ describe("drafts and edits", () => {
     expect(merged).toEqual({ legacy_show_rate: 0.4, registrations: 12 });
     expect(otherMetricEntries(groups, merged)).toEqual([["legacy_show_rate", 0.4]]);
     expect(draftFromMetrics(groups, merged)).toEqual({ registrations: "12" });
+  });
+  it("edit drafts show stored values grouped, and validate back unchanged", () => {
+    const draft = draftFromMetrics(groups, { registrations: 1200, revenue: 1234.5 });
+    expect(draft).toEqual({ registrations: "1,200", revenue: "1,234.5" });
+    expect(parseMetricDraft(groups, draft)).toEqual({ values: { registrations: 1200, revenue: 1234.5 }, errors: {} });
   });
 
   it("seeded: an edit never loses a key outside the set", () => {
@@ -239,11 +288,23 @@ describe("formatMetricValue", () => {
   it("formats per kind", () => {
     expect(formatMetricValue("rate", "%", 12.5)).toBe("12.5%");
     expect(formatMetricValue("rate", "%", 42)).toBe("42.0%");
+    expect(formatMetricValue("rate", "%", 1234.5)).toBe("1,234.5%");
     expect(formatMetricValue("money", "$", 1200)).toBe("$1,200");
     expect(formatMetricValue("money", "$", 0.42)).toBe("$0.42");
     expect(formatMetricValue("count", undefined, 1200)).toBe("1,200");
     expect(formatMetricValue("count", "minutes", 4.5)).toBe("4.5 minutes");
     expect(formatMetricValue("score", undefined, -12)).toBe("-12");
     expect(formatMetricValue("rate", "%", null)).toBe("—");
+  });
+});
+
+describe("isRateOverHundred", () => {
+  it("flags only rates above 100", () => {
+    expect(isRateOverHundred("rate", 100.1)).toBe(true);
+    expect(isRateOverHundred("rate", 100)).toBe(false);
+    expect(isRateOverHundred("rate", 45)).toBe(false);
+    expect(isRateOverHundred("rate", null)).toBe(false);
+    expect(isRateOverHundred("rate", Number.POSITIVE_INFINITY)).toBe(false);
+    expect(isRateOverHundred("count", 500)).toBe(false);
   });
 });

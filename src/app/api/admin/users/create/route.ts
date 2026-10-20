@@ -4,6 +4,8 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { getInviteContext, sendMemberInvite } from "@/lib/team-invite";
 import { logActivity } from "@/lib/activity-log";
+import { LIMIT_KEYS } from "@/lib/billing/limits";
+import { checkLiveLimit, liveLimitResponse } from "@/lib/billing/live-limits";
 
 /**
  * POST /api/admin/users/create
@@ -82,6 +84,15 @@ export async function POST(request: Request) {
     }
 
     console.log("[admin/users/create] Company found:", company.name);
+
+    /**
+     * The company's max_users applies here too. Limits belong to the company,
+     * and checkEntitlement exempts nobody, so an admin adding a user is held
+     * to the same count as the owner. To go past it, change or comp the
+     * company's plan first. Checked before createUser so nothing is left over.
+     */
+    const limit = await checkLiveLimit(adminClient, companyId, LIMIT_KEYS.MAX_USERS, 1);
+    if (!limit.ok) return liveLimitResponse(limit);
 
     // 4. Create auth user (no password — invite flow)
     const { data: newUser, error: authError } = await adminClient.auth.admin.createUser({

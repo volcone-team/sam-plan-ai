@@ -45,6 +45,10 @@ interface Plan {
 interface UsageRow {
   key: string; label: string; limit: number; used: number;
   remaining: number | null; unlimited: boolean; notIncluded: boolean;
+  /** Holding more than the plan allows. Optional: older payloads omit it. */
+  overLimit?: boolean;
+  /** period = resets each billing period; total / plan_year = live counts. */
+  scope?: 'period' | 'total' | 'plan_year';
 }
 
 interface BillingMe {
@@ -736,26 +740,43 @@ export function BillingPanel() {
       {me.usage.length > 0 && (
         <div className="rounded-[var(--radius-lg)] border border-border bg-card p-6">
           <div className="flex items-baseline justify-between">
-            <h3 className="text-sm font-semibold">Usage this period</h3>
-            <p className="text-xs text-[hsl(var(--foreground-muted))]">
-              Resets {shortDate(me.periodEnd)}
-            </p>
+            {/*
+              Not "this period" any more: initiatives, products and team are
+              what the account holds now and never reset. Only the monthly
+              allowances carry the reset date.
+            */}
+            <h3 className="text-sm font-semibold">Plan usage</h3>
+            {me.usage.some((u) => (u.scope ?? 'period') === 'period') && (
+              <p className="text-xs text-[hsl(var(--foreground-muted))]">
+                Monthly allowances reset {shortDate(me.periodEnd)}
+              </p>
+            )}
           </div>
           <div className="mt-4 space-y-3">
             {me.usage.map((u) => {
               const pct = u.unlimited || u.limit <= 0
                 ? 0
                 : Math.min(100, Math.round((u.used / u.limit) * 100));
+              const isPeriod = (u.scope ?? 'period') === 'period';
               return (
                 <div key={u.key}>
                   <div className="flex items-baseline justify-between text-sm">
                     <span>{u.label}</span>
-                    <span className="text-xs text-[hsl(var(--foreground-muted))]">
+                    <span
+                      className={cn(
+                        'text-xs',
+                        u.overLimit
+                          ? 'font-medium text-[hsl(var(--destructive))]'
+                          : 'text-[hsl(var(--foreground-muted))]'
+                      )}
+                    >
                       {u.unlimited
                         ? 'Unlimited'
                         : u.notIncluded
                           ? 'Not in your plan'
-                          : `${u.used} of ${u.limit}`}
+                          : u.overLimit
+                            ? `${u.used} of ${u.limit}, over your plan limit`
+                            : `${u.used} of ${u.limit}${isPeriod ? ' this period' : ''}`}
                     </span>
                   </div>
                   {!u.unlimited && !u.notIncluded && (

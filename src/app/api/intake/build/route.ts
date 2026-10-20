@@ -3,8 +3,17 @@ import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
-import { checkEntitlement, statusForCode } from "@/lib/billing/enforce";
+import { checkEntitlement, recordUsage, statusForCode } from "@/lib/billing/enforce";
 import { LIMIT_KEYS } from "@/lib/billing/limits";
+import { UPGRADE_URL } from "@/lib/billing/limit-notice";
+import {
+  countLiveUsage,
+  evaluateLiveLimit,
+  initiativeUsageAfterWipe,
+  liveLimitResponse,
+  loadLiveLimitContext,
+  productAdditions,
+} from "@/lib/billing/live-limits";
 import { statusUpdate, timestampColumnFor } from "@/lib/intake/draft";
 import { toRevenueType, toTicketTier } from "@/lib/intake/product-mapping";
 import {
@@ -19,7 +28,12 @@ import type { RepeatFrequency } from "@/lib/intake-forecast";
 import type { InitiativeKind } from "@/types";
 import { productGoal } from "@/lib/intake-forecast";
 import { MAX_RECOMMENDED_INITIATIVES } from "@/lib/recommend/sizing";
-import { loadLibrary, loadTaskTemplates, type LibraryEntry } from "@/lib/workbook/read";
+import { loadLibrary, type LibraryEntry } from "@/lib/workbook/read";
+import {
+  resolveTaskTemplates,
+  runwayForUntemplated,
+  type ResolvedTemplates,
+} from "@/lib/workbook/tasks-for-initiatives";
 import {
   insertWithLibraryKey,
   resolveInitiativeTypeId,
@@ -40,6 +54,14 @@ import { snapshotProducts } from "@/lib/snapshot-products";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/**
+ * Stated explicitly now that a build may make an AI call (task lists for
+ * initiatives the workbook has no template for, ~30s worst case) on top of its
+ * own database work. Without this the platform default applies, which is
+ * shorter than the AI timeout — the build would be killed mid-flight rather
+ * than falling back to the starter template.
+ */
+export const maxDuration = 120;
 
 /**
  * POST /api/intake/build — turn the intake into a real plan.
@@ -49,10 +71,13 @@ export const dynamic = "force-dynamic";
  * recommendations screen can let someone accept, dismiss and swap freely — none
  * of it is real until this route runs.
  *
- * REQ-13.15: the plan's `max_initiatives` is re-checked HERE as well as on the
- * screen. The screen's check is a courtesy so the user is not surprised; this
- * one is the actual enforcement, because a client can always post whatever it
- * likes.
+ * REQ-13.15: the plan's limits are re-checked HERE as well as on the screen.
+ * The screen's check is a courtesy so the user is not surprised; this one is
+ * the actual enforcement, because a client can always post whatever it likes.
+ * `max_initiatives` (per plan year, after the rebuild's own wipe) and
+ * `max_products` are live counts; a rebuild also spends one
+ * `plan_regenerations`. All three are decided before anything is wiped or
+ * written.
  *
  * Writes are ordered so a failure leaves the account usable rather than half
  * migrated: products first (initiatives reference them), then initiatives, then
@@ -65,9 +90,11 @@ export const dynamic = "force-dynamic";
  *   200 { built: true, productCount, initiativeCount }
  *   400 { error } — malformed body
  *   401 { error: "Unauthorized" }
- *   402/403 { error, code } — billing refused
+ *   402/403 { error, code, message } — billing refused, or over max_products /
+ *           max_initiatives (code "limit_reached" / "not_included")
+ *   429 { error, code: "limit_reached" } — no plan regenerations left this period
  *   409 { error } — no company, or no saved intake
- *   422 { error, limit } — over max_initiatives
+ *   422 { error, limit } — over the five-initiative plan ceiling
  */
 
 interface BuildBody {
@@ -90,7 +117,7 @@ export async function POST(request: NextRequest) {
   try {
     const caller = await resolveCaller();
     if ("error" in caller) return caller.error;
-    const { db, companyId } = caller;
+    const { db, companyId, user } = caller;
 
     let body: BuildBody = {};
     try {
@@ -222,48 +249,348 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    /* ---- REQ-13.15: the real limit check ---- */
+    /* ---- Work out everything the build will write, BEFORE any write ---- */
 
-    const entitlement = await checkEntitlement(
-      db,
-      companyId,
-      LIMIT_KEYS.MAX_INITIATIVES,
-      totalInitiatives
+    /**
+     * Every limit below has to be decided before the previous plan is wiped
+     * or a single row is inserted: refusing half-way would leave a deleted
+     * plan and nothing in its place. So the products that will exist, the
+     * initiatives, their dates and therefore their plan years are all derived
+     * from the draft first. Intake product ids stand in for the live product
+     * ids until the products are written.
+     *
+     * A named intake card always becomes a live product (created or reused by
+     * name), so the cards with a name AND an id are exactly the ones the
+     * initiatives' product chips can resolve to later.
+     */
+    const namedIntakeIds = new Set<string>();
+    for (const product of intakeProducts) {
+      const intakeId = str(product.id);
+      if (intakeId && str(product.name)) namedIntakeIds.add(intakeId);
+    }
+    const largestIntakeId = largestProduct(
+      intakeProducts,
+      new Map([...namedIntakeIds].map((id) => [id, id]))
     );
 
-    if (!entitlement.ok) {
-      // 402 or 403 depending on why; `statusForCode` owns that mapping.
-      return NextResponse.json(
-        {
-          error: entitlement.message,
-          code: entitlement.code,
-          limit: entitlement.limit?.limit ?? null,
-        },
-        { status: statusForCode(entitlement.code) }
-      );
-    }
-
-    if (
-      entitlement.limit &&
-      !entitlement.limit.unlimited &&
-      totalInitiatives > entitlement.limit.limit
-    ) {
-      /**
-       * 422 rather than 403: the request is well-formed and the account is in
-       * good standing — there are simply too many initiatives in it. The screen
-       * should have prevented this, so reaching here means a stale client, and
-       * the message names the number so it can correct itself.
-       */
+    /**
+     * No product means no plan is possible: `initiatives.product_id` is NOT
+     * NULL, so every initiative would be rejected and the user would land on an
+     * empty dashboard believing their plan had been built.
+     *
+     * 409 and a plain explanation, pointing at the screen that fixes it. This
+     * is reachable whenever screen 3 was left blank or its cards were never
+     * named, so it is a real user state rather than a defensive check. Now
+     * answered before anything is cleared, so the old plan survives it.
+     */
+    if (namedIntakeIds.size === 0) {
       return NextResponse.json(
         {
           error:
-            `Your plan allows ${entitlement.limit.limit} initiatives. ` +
-            `Deselect ${totalInitiatives - entitlement.limit.limit} to continue.`,
-          limit: entitlement.limit.limit,
-          requested: totalInitiatives,
+            "Your plan needs at least one product before it can be built. " +
+            "Go back to Products and add what you sell.",
+          screen: "products",
         },
-        { status: 422 }
+        { status: 409 }
       );
+    }
+
+    const planStart = str(input.plan_start_month) ?? todayIso();
+
+    /**
+     * Both sources are collected BEFORE anything is written, because the dates
+     * cannot be decided one initiative at a time.
+     *
+     * `sequenceEventDates` needs the whole set: its job is to stop two launches
+     * landing on the same day and to stop one initiative's preparation window
+     * starting before the previous launch. Inserting as we go would mean each
+     * initiative is dated in ignorance of the others, which is the pile-up
+     * generate-plan already had to solve.
+     */
+    const pending: {
+      libraryKey: string;
+      name: string;
+      /** The date the user asked for, or the plan start as a fallback. */
+      desiredEvent: string;
+      /** `intake_products` ids; translated to live ids once products exist. */
+      intakeProductIds: string[];
+      displayOrder: number;
+      /** good/better/best, so the dashboard has revenue to show. */
+      revenue: RevenueScenarios;
+      /**
+       * one-time / recurring / evergreen, from the user's own cadence answer.
+       *
+       * ONE INITIATIVE, HOWEVER MANY RUNS. A business doing monthly webinars
+       * has one webinar initiative marked recurring, not twelve initiatives —
+       * which is what makes a cap of five initiatives per plan compatible with
+       * running something every month.
+       */
+      kind: InitiativeKind;
+      /** weekly / monthly / quarterly, or null when it does not repeat. */
+      repeatFrequency: RepeatFrequency | null;
+    }[] = [];
+
+    // The horizon the funnel figures are projected over. Defaults to 12 so a
+    // missing answer does not silently zero every forecast.
+    const horizonMonths = num(input.horizon_months) ?? 12;
+
+    for (const [index, initiative] of plannedInitiatives.entries()) {
+      const key = str(initiative.initiative_key);
+      if (!key) continue;
+
+      /**
+       * Product chips are stored as `intake_products` ids, translated to the
+       * live `products` ids once those are written.
+       *
+       * Falling back to the largest product when that yields nothing, because
+       * `initiatives.product_id` is NOT NULL: screen 5's product selection is
+       * optional, and a draft saved before its products existed can carry
+       * stale ids. Dropping the initiative instead would silently shrink the
+       * plan the user just approved.
+       */
+      const mapped = toStringArray(initiative.product_ids).filter((id) =>
+        namedIntakeIds.has(id)
+      );
+
+      const intakeProductIds =
+        mapped.length > 0
+          ? mapped
+          : largestIntakeId
+            ? [largestIntakeId]
+            : [];
+
+      pending.push({
+        libraryKey: key,
+        name:
+          str(initiative.initiative_label) ??
+          str(initiative.custom_label) ??
+          "Initiative",
+        // An exact date wins over a month: it is the more specific answer.
+        desiredEvent:
+          str(initiative.exact_date) ?? str(initiative.start_month) ?? planStart,
+        intakeProductIds,
+        displayOrder: index,
+        /**
+         * The forecast the user already saw on the recommendations screen,
+         * recomputed from the same stored funnel. Without this the initiative
+         * is created with no revenue and the dashboard reads $0 everywhere.
+         */
+        revenue: scenariosFor(
+          forecastForStoredInitiative(initiative, horizonMonths)
+        ),
+        /**
+         * The cadence the user chose, carried through instead of discarded.
+         *
+         * These two lines are what stop the plan contradicting itself. The
+         * revenue above is ALREADY multiplied by the number of runs the
+         * cadence implies, so writing 'one-time' here claimed twelve monthly
+         * webinars' revenue for a single dated webinar.
+         */
+        kind: initiativeKindForCadence(initiative.cadence),
+        repeatFrequency: toFrequency(initiative.repeat_frequency),
+      });
+    }
+
+    /**
+     * A recommendation has no funnel of its own — the user never ran it — so
+     * its forecast comes from the same benchmark the recommendations screen
+     * used: a conservative third of the average product goal.
+     *
+     * Recomputed here rather than accepted from the client, which could send
+     * any figure it liked.
+     */
+    const benchmarkRevenue = benchmarkPerInitiative(intakeProducts);
+
+    // Accepted recommendations start a month apart as an opening intent;
+    // sequencing below then spaces them by their real preparation windows.
+    for (const [offset, key] of acceptedKeys.entries()) {
+      pending.push({
+        libraryKey: key,
+        // The library's name, not the raw key: this used to write "webinar"
+        // as the initiative's name on the customer's plan.
+        name: libraryByKey.get(key)?.name ?? key,
+        desiredEvent: addMonths(planStart, offset),
+        intakeProductIds: largestIntakeId ? [largestIntakeId] : [],
+        displayOrder: plannedInitiatives.length + offset,
+        revenue: scenariosFor(benchmarkRevenue),
+        /**
+         * A RECOMMENDATION STARTS AS ONE-TIME, and that is honest rather than
+         * lazy: the user has never run it and was never asked how often they
+         * would. Its benchmark forecast is a single run's worth too, so
+         * marking it recurring would promise a cadence nobody chose and a
+         * revenue figure that does not match it.
+         *
+         * They can change it to recurring on the initiative itself once the
+         * plan exists.
+         */
+        kind: "one-time",
+        repeatFrequency: null,
+      });
+    }
+
+    /**
+     * Nothing to build.
+     *
+     * Path A and B users reach here with their own initiatives; a Path C user
+     * who accepted no recommendations has none. Either way the dashboard would
+     * be empty, so say so instead of reporting a successful build — that is
+     * exactly the "it loaded, then there was nothing" failure.
+     */
+    if (pending.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "There are no initiatives to build yet. Accept at least one " +
+            "recommendation, or add what you are already planning.",
+        },
+        { status: 409 }
+      );
+    }
+
+    /**
+     * Task templates and runways come from the WORKBOOK, keyed by library key.
+     *
+     * This is what makes an intake-built plan equivalent to a generated one: an
+     * initiative with no tasks looks planned but has no project plan behind it,
+     * and the runway is also what `sequenceEventDates` uses to space launches.
+     * Loaded in one query for every key rather than per initiative.
+     */
+    const templatesByKey = await resolveTaskTemplates(
+      db,
+      pending.map((p) => p.libraryKey),
+      { companyId, userId: user.id, logLabel: "[intake/build]" }
+    );
+
+    /**
+     * RUNWAY FOR AN UNTEMPLATED INITIATIVE IS THE STARTER TEMPLATE'S, not its
+     * AI-written task list's.
+     *
+     * `sequenceEventDates` spaces the launches by how long each takes to
+     * prepare, and that spacing has to be stable: it decides every event date
+     * in the plan, the plan years the initiatives are filed under, and
+     * therefore which max_initiatives counts are checked below. Deriving it
+     * from AI output would make all of that move with a call that is allowed
+     * to fail — two builds of the same intake could land in different years.
+     *
+     * So an initiative with no workbook template is scheduled on the starter
+     * template's known 30-day runway (runwayForUntemplated), whatever its
+     * tasks turn out to be. The cost is small and bounded: an AI task with a
+     * longer lead than the runway is floored at today by `materialiseTasks`
+     * instead of moving the event.
+     */
+    const scheduled = sequenceEventDates(
+      pending.map((p) => ({
+        desiredEvent: p.desiredEvent,
+        runwayDays: runwayFor(templatesByKey.get(p.libraryKey)),
+      }))
+    );
+
+    /* ---- Plan limits: all decided before the wipe ---- */
+
+    /**
+     * max_initiatives is a LIVE count per plan year (src/lib/billing/live-limits.ts).
+     *
+     * Each initiative is filed under its EVENT's year (see insertInitiative),
+     * and writes one row per product it sells. The year being rebuilt
+     * (`wipeYear`, the same year clearPreviousPlan uses) is emptied first, so
+     * it starts from 0; any other year the plan spills into keeps what it has.
+     * This replaces the old check against a usage counter nothing wrote.
+     */
+    const wipeYear = Number(planStart.slice(0, 4)) || new Date().getUTCFullYear();
+
+    const newByYear = new Map<number, number>();
+    for (const [index, item] of pending.entries()) {
+      const year = Number(toDateOnly(scheduled[index].eventDate).slice(0, 4)) || wipeYear;
+      newByYear.set(year, (newByYear.get(year) ?? 0) + item.intakeProductIds.length);
+    }
+
+    const { data: planRows, error: planReadError } = await db
+      .from("annual_plans")
+      .select("id, year")
+      .eq("company_id", companyId)
+      .in("year", [...new Set([wipeYear, ...newByYear.keys()])]);
+
+    if (planReadError) {
+      return NextResponse.json(
+        { error: "Could not check your plan limits, so nothing has been changed. Please try again." },
+        { status: 500 }
+      );
+    }
+
+    const existingByYear = new Map<number, number>();
+    for (const row of (planRows ?? []) as { id: string; year: number }[]) {
+      existingByYear.set(
+        row.year,
+        await countLiveUsage(db, companyId, LIMIT_KEYS.MAX_INITIATIVES, { annualPlanId: row.id })
+      );
+    }
+
+    /**
+     * A REBUILD is exactly when clearPreviousPlan will find something to
+     * snapshot and wipe: the year's plan exists and holds initiatives. The
+     * first build is free; a rebuild spends one plan_regenerations.
+     */
+    const isRebuild = (existingByYear.get(wipeYear) ?? 0) > 0;
+
+    const limitCtx = await loadLiveLimitContext(db, companyId);
+
+    /**
+     * Products: read once here and reused by the products section below.
+     * Reused-by-name products are not new; an inactive one that the build
+     * switches back on does add to the active count.
+     */
+    const { data: existingProductRows, error: productReadError } = await db
+      .from("products")
+      .select("id, name, is_active")
+      .eq("company_id", companyId);
+
+    if (productReadError) {
+      return NextResponse.json(
+        { error: "Could not check your plan limits, so nothing has been changed. Please try again." },
+        { status: 500 }
+      );
+    }
+
+    const existingProducts = (existingProductRows ?? []) as {
+      id: string; name: string; is_active: boolean | null;
+    }[];
+
+    const productLimit = evaluateLiveLimit(
+      limitCtx,
+      LIMIT_KEYS.MAX_PRODUCTS,
+      existingProducts.filter((p) => p.is_active !== false).length,
+      productAdditions(intakeProducts.map((p) => str(p.name)), existingProducts).adding
+    );
+    if (!productLimit.ok) return liveLimitResponse(productLimit);
+
+    for (const year of initiativeUsageAfterWipe({ wipeYear, existingByYear, newByYear })) {
+      const initiativeLimit = evaluateLiveLimit(
+        limitCtx, LIMIT_KEYS.MAX_INITIATIVES, year.used, year.adding, { year: year.year }
+      );
+      if (!initiativeLimit.ok) return liveLimitResponse(initiativeLimit);
+    }
+
+    /**
+     * plan_regenerations: a monthly counter (checkEntitlement), checked here
+     * and recorded only after the rebuild succeeds.
+     */
+    let regenPeriod: { periodStart: string; periodEnd: string } | null = null;
+    if (isRebuild) {
+      const regen = await checkEntitlement(db, companyId, LIMIT_KEYS.PLAN_REGENERATIONS);
+      if (!regen.ok) {
+        return NextResponse.json(
+          {
+            error: regen.message,
+            code: regen.code,
+            message: regen.message,
+            limitKey: LIMIT_KEYS.PLAN_REGENERATIONS,
+            limit: regen.limit?.limit ?? null,
+            upgradeUrl: UPGRADE_URL,
+          },
+          { status: statusForCode(regen.code) }
+        );
+      }
+      regenPeriod = regen.period;
     }
 
     /* ---- Clear what a previous build left behind ---- */
@@ -284,7 +611,6 @@ export async function POST(request: NextRequest) {
      * Everything is snapshotted first, so a rebuild is recoverable from
      * Plan History rather than being a one-way door.
      */
-    const planStart = str(input.plan_start_month) ?? todayIso();
     const wiped = await clearPreviousPlan(db, companyId, planStart);
 
     if (!wiped.ok) {
@@ -316,13 +642,8 @@ export async function POST(request: NextRequest) {
      */
     const productIdByIntakeId = new Map<string, string>();
 
-    const { data: existingProducts } = await db
-      .from("products")
-      .select("id, name")
-      .eq("company_id", companyId);
-
     const productIdByName = new Map<string, string>();
-    for (const row of (existingProducts ?? []) as { id: string; name: string }[]) {
+    for (const row of existingProducts) {
       const key = row.name.trim().toLowerCase();
       // First wins, so an account that already accumulated duplicates settles
       // on one of them instead of picking a different row on every rebuild.
@@ -389,197 +710,11 @@ export async function POST(request: NextRequest) {
 
     /* ---- Initiatives ---- */
 
-    const largestProductId = largestProduct(intakeProducts, productIdByIntakeId);
-
-    /**
-     * No product means no plan is possible: `initiatives.product_id` is NOT
-     * NULL, so every initiative would be rejected and the user would land on an
-     * empty dashboard believing their plan had been built.
-     *
-     * 409 and a plain explanation, pointing at the screen that fixes it. This
-     * is reachable whenever screen 3 was left blank or its cards were never
-     * named, so it is a real user state rather than a defensive check.
-     */
-    if (productIdByIntakeId.size === 0) {
-      return NextResponse.json(
-        {
-          error:
-            "Your plan needs at least one product before it can be built. " +
-            "Go back to Products and add what you sell.",
-          screen: "products",
-        },
-        { status: 409 }
-      );
-    }
-
-    /**
-     * Both sources are collected BEFORE anything is written, because the dates
-     * cannot be decided one initiative at a time.
-     *
-     * `sequenceEventDates` needs the whole set: its job is to stop two launches
-     * landing on the same day and to stop one initiative's preparation window
-     * starting before the previous launch. Inserting as we go would mean each
-     * initiative is dated in ignorance of the others, which is the pile-up
-     * generate-plan already had to solve.
-     */
-    const pending: {
-      libraryKey: string;
-      name: string;
-      /** The date the user asked for, or the plan start as a fallback. */
-      desiredEvent: string;
-      productIds: string[];
-      displayOrder: number;
-      /** good/better/best, so the dashboard has revenue to show. */
-      revenue: RevenueScenarios;
-      /**
-       * one-time / recurring / evergreen, from the user's own cadence answer.
-       *
-       * ONE INITIATIVE, HOWEVER MANY RUNS. A business doing monthly webinars
-       * has one webinar initiative marked recurring, not twelve initiatives —
-       * which is what makes a cap of five initiatives per plan compatible with
-       * running something every month.
-       */
-      kind: InitiativeKind;
-      /** weekly / monthly / quarterly, or null when it does not repeat. */
-      repeatFrequency: RepeatFrequency | null;
-    }[] = [];
-
-    // The horizon the funnel figures are projected over. Defaults to 12 so a
-    // missing answer does not silently zero every forecast.
-    const horizonMonths = num(input.horizon_months) ?? 12;
-
-    for (const [index, initiative] of plannedInitiatives.entries()) {
-      const key = str(initiative.initiative_key);
-      if (!key) continue;
-
-      /**
-       * Product chips are stored as `intake_products` ids, which have to be
-       * translated to the live `products` ids created above.
-       *
-       * Falling back to the largest product when that yields nothing, because
-       * `initiatives.product_id` is NOT NULL: screen 5's product selection is
-       * optional, and a draft saved before its products existed can carry
-       * stale ids. Dropping the initiative instead would silently shrink the
-       * plan the user just approved.
-       */
-      const mapped = toStringArray(initiative.product_ids)
+    /** Intake product ids -> the live ids just written. */
+    const liveProductIds = (intakeIds: readonly string[]): string[] =>
+      intakeIds
         .map((id) => productIdByIntakeId.get(id))
         .filter((id): id is string => Boolean(id));
-
-      const productIds =
-        mapped.length > 0
-          ? mapped
-          : largestProductId
-            ? [largestProductId]
-            : [];
-
-      pending.push({
-        libraryKey: key,
-        name:
-          str(initiative.initiative_label) ??
-          str(initiative.custom_label) ??
-          "Initiative",
-        // An exact date wins over a month: it is the more specific answer.
-        desiredEvent:
-          str(initiative.exact_date) ?? str(initiative.start_month) ?? planStart,
-        productIds,
-        displayOrder: index,
-        /**
-         * The forecast the user already saw on the recommendations screen,
-         * recomputed from the same stored funnel. Without this the initiative
-         * is created with no revenue and the dashboard reads $0 everywhere.
-         */
-        revenue: scenariosFor(
-          forecastForStoredInitiative(initiative, horizonMonths)
-        ),
-        /**
-         * The cadence the user chose, carried through instead of discarded.
-         *
-         * These two lines are what stop the plan contradicting itself. The
-         * revenue above is ALREADY multiplied by the number of runs the
-         * cadence implies, so writing 'one-time' here claimed twelve monthly
-         * webinars' revenue for a single dated webinar.
-         */
-        kind: initiativeKindForCadence(initiative.cadence),
-        repeatFrequency: toFrequency(initiative.repeat_frequency),
-      });
-    }
-
-    /**
-     * A recommendation has no funnel of its own — the user never ran it — so
-     * its forecast comes from the same benchmark the recommendations screen
-     * used: a conservative third of the average product goal.
-     *
-     * Recomputed here rather than accepted from the client, which could send
-     * any figure it liked.
-     */
-    const benchmarkRevenue = benchmarkPerInitiative(intakeProducts);
-
-    // Accepted recommendations start a month apart as an opening intent;
-    // sequencing below then spaces them by their real preparation windows.
-    for (const [offset, key] of acceptedKeys.entries()) {
-      pending.push({
-        libraryKey: key,
-        // The library's name, not the raw key: this used to write "webinar"
-        // as the initiative's name on the customer's plan.
-        name: libraryByKey.get(key)?.name ?? key,
-        desiredEvent: addMonths(planStart, offset),
-        productIds: largestProductId ? [largestProductId] : [],
-        displayOrder: plannedInitiatives.length + offset,
-        revenue: scenariosFor(benchmarkRevenue),
-        /**
-         * A RECOMMENDATION STARTS AS ONE-TIME, and that is honest rather than
-         * lazy: the user has never run it and was never asked how often they
-         * would. Its benchmark forecast is a single run's worth too, so
-         * marking it recurring would promise a cadence nobody chose and a
-         * revenue figure that does not match it.
-         *
-         * They can change it to recurring on the initiative itself once the
-         * plan exists.
-         */
-        kind: "one-time",
-        repeatFrequency: null,
-      });
-    }
-
-    /**
-     * Task templates and runways come from the WORKBOOK, keyed by library key.
-     *
-     * This is what makes an intake-built plan equivalent to a generated one: an
-     * initiative with no tasks looks planned but has no project plan behind it,
-     * and the runway is also what `sequenceEventDates` uses to space launches.
-     * Loaded in one query for every key rather than per initiative.
-     */
-    /**
-     * Nothing to build.
-     *
-     * Path A and B users reach here with their own initiatives; a Path C user
-     * who accepted no recommendations has none. Either way the dashboard would
-     * be empty, so say so instead of reporting a successful build — that is
-     * exactly the "it loaded, then there was nothing" failure.
-     */
-    if (pending.length === 0) {
-      return NextResponse.json(
-        {
-          error:
-            "There are no initiatives to build yet. Accept at least one " +
-            "recommendation, or add what you are already planning.",
-        },
-        { status: 409 }
-      );
-    }
-
-    const templatesByKey = await loadTaskTemplates(
-      db,
-      pending.map((p) => p.libraryKey)
-    );
-
-    const scheduled = sequenceEventDates(
-      pending.map((p) => ({
-        desiredEvent: p.desiredEvent,
-        runwayDays: templateRunwayDays(templatesByKey.get(p.libraryKey) ?? []),
-      }))
-    );
 
     // Nothing may be dated before today, including tasks.
     const floor = toDateOnly(new Date());
@@ -587,7 +722,7 @@ export async function POST(request: NextRequest) {
 
     for (const [index, item] of pending.entries()) {
       const slot = scheduled[index];
-      const templates = templatesByKey.get(item.libraryKey) ?? [];
+      const resolved = templatesByKey.get(item.libraryKey);
 
       const ok = await insertInitiative(db, {
         companyId,
@@ -595,7 +730,7 @@ export async function POST(request: NextRequest) {
         name: item.name,
         activationDate: toDateOnly(slot.activationDate),
         eventDate: toDateOnly(slot.eventDate),
-        productIds: item.productIds,
+        productIds: liveProductIds(item.intakeProductIds),
         displayOrder: item.displayOrder,
         revenue: item.revenue,
         kind: item.kind,
@@ -607,15 +742,20 @@ export async function POST(request: NextRequest) {
         metricSet: item.libraryKey === SOMETHING_ELSE_KEY
           ? null
           : defaultLibraryMetricSet(item.libraryKey, libraryByKey.get(item.libraryKey)),
-        // Same date handling as generate-plan: counted back from the event,
-        // floored at today.
-        tasks:
-          templates.length > 0
-            ? materialiseTasks(templates, {
-                eventDate: slot.eventDate,
-                floor,
-              })
-            : [],
+        /**
+         * Always a real task list now. `resolveTaskTemplates` guarantees a
+         * source for every key — workbook template, AI-written, or the generic
+         * starter — so this can no longer save an initiative with no tasks,
+         * which is what happened to every library key the workbook has no
+         * template for (about 73 of them).
+         *
+         * Same date handling whichever source it came from: counted back from
+         * the event, floored at today.
+         */
+        tasks: materialiseTasks(resolved?.templates ?? [], {
+          eventDate: slot.eventDate,
+          floor,
+        }),
       });
 
       if (!ok) {
@@ -670,6 +810,12 @@ export async function POST(request: NextRequest) {
       .update({ ...update, completed_at: new Date().toISOString() })
       .eq("id", planningInputId)
       .eq("company_id", companyId);
+
+    // A rebuild that actually replaced a plan spends one regeneration — only
+    // now that it has succeeded. recordUsage never throws.
+    if (regenPeriod && wiped.deleted > 0) {
+      await recordUsage(db, companyId, LIMIT_KEYS.PLAN_REGENERATIONS, regenPeriod);
+    }
 
     return NextResponse.json({
       built: true,
@@ -1148,6 +1294,18 @@ async function resolveCaller() {
   }
 
   return { user, db, companyId };
+}
+
+/**
+ * Scheduling runway for one resolved initiative.
+ *
+ * The workbook's authored lead times where there are any; the starter
+ * template's fixed runway otherwise (see the comment at the call site for why
+ * AI lead times are deliberately not consulted here).
+ */
+function runwayFor(resolved: ResolvedTemplates | undefined): number {
+  if (resolved && resolved.source === "template") return templateRunwayDays(resolved.templates);
+  return runwayForUntemplated();
 }
 
 function str(value: unknown): string | null {

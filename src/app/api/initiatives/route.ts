@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { serviceClient } from "@/lib/billing/enforce";
+import { LIMIT_KEYS } from "@/lib/billing/limits";
+import { checkLiveLimit, liveLimitResponse } from "@/lib/billing/live-limits";
 import { requirePermission } from "@/lib/require-permission";
 import { parseCreateInitiativeRequest } from "@/lib/initiatives/create-request";
 import { loadLibrary } from "@/lib/workbook/read";
@@ -11,9 +13,14 @@ import {
 } from "@/lib/workbook/initiative-type";
 import { resolveLibraryMetricSet } from "@/lib/metrics/library-metric-set";
 import type { InitiativeMetricSet } from "@/lib/metrics/metric-set";
+import { resolveTasks } from "@/lib/workbook/tasks-for-initiatives";
+import { todayDateOnly } from "@/lib/plan-dates";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** The task list for an untemplated library pick may involve a ~30s AI call. */
+export const maxDuration = 60;
 
 /**
  * POST /api/initiatives — create one initiative from the Add Initiative panel.
@@ -33,6 +40,8 @@ export const dynamic = "force-dynamic";
  *   400 { error } — malformed body, or a metric selection naming a format or
  *                   metric the library row does not have
  *   401 / 403 { error } — not signed in / role may not create
+ *   402 / 403 { error, code: "limit_reached" | "not_included", message } —
+ *                   the plan year already holds the plan's max_initiatives
  *   404 { error } — plan or product is not this company's
  *   422 { error } — the library initiative is no longer offered
  *   500 { error }
@@ -41,7 +50,7 @@ export async function POST(request: NextRequest) {
   try {
     const check = await requirePermission("initiatives.create");
     if (!check.ok) return NextResponse.json({ error: check.error }, { status: check.status });
-    const { companyId } = check;
+    const { companyId, userId } = check;
 
     let body: unknown = null;
     try {
@@ -57,11 +66,20 @@ export async function POST(request: NextRequest) {
     const db = serviceClient();
 
     const [{ data: plan }, { data: product }] = await Promise.all([
-      db.from("annual_plans").select("id").eq("id", req.annualPlanId).eq("company_id", companyId).maybeSingle(),
+      db.from("annual_plans").select("id, year").eq("id", req.annualPlanId).eq("company_id", companyId).maybeSingle(),
       db.from("products").select("id").eq("id", req.productId).eq("company_id", companyId).maybeSingle(),
     ]);
     if (!plan) return NextResponse.json({ error: "That plan was not found." }, { status: 404 });
     if (!product) return NextResponse.json({ error: "That product was not found." }, { status: 404 });
+
+    /* ---- Plan limit: max_initiatives, live, per plan year ---- */
+
+    // Before anything is written, including a custom initiative type.
+    const limit = await checkLiveLimit(db, companyId, LIMIT_KEYS.MAX_INITIATIVES, 1, {
+      annualPlanId: plan.id as string,
+      year: typeof plan.year === "number" ? plan.year : null,
+    });
+    if (!limit.ok) return liveLimitResponse(limit);
 
     /* ---- The initiative type ---- */
 
@@ -158,10 +176,101 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error?.message || "Could not save the initiative." }, { status: 500 });
     }
 
-    return NextResponse.json({ id: created.id }, { status: 201 });
+    /**
+     * THE PROJECT PLAN. This route previously created none at all, so an
+     * initiative added by hand arrived with an empty task list while the same
+     * library pick made by intake build or generation arrived with the
+     * workbook's tasks — the same "nothing to do" symptom, from a different
+     * path. Resolved by the shared helper: workbook template, else AI-written,
+     * else the generic starter.
+     *
+     * A CUSTOM initiative (no library key) still gets none. There is nothing
+     * to look up and nothing to describe to the model; the user is writing
+     * their own initiative and can add their own tasks.
+     *
+     * Non-fatal on purpose: the initiative is already saved and the response
+     * is a 201 either way. Failing here would tell the user their initiative
+     * was not created when it was.
+     */
+    let taskCount = 0;
+    if (req.libraryKey) {
+      taskCount = await attachTasks(db, {
+        companyId,
+        initiativeId: created.id as string,
+        libraryKey: req.libraryKey,
+        /**
+         * Tasks count BACK from the event. An evergreen or recurring
+         * initiative may have no event date, and the activation date is the
+         * only anchor there is — preparation work then lands on or before the
+         * day the initiative starts, which is the right end of it.
+         */
+        eventDate: req.eventDate ?? req.activationDate,
+        userId,
+      });
+    }
+
+    return NextResponse.json({ id: created.id, taskCount }, { status: 201 });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[initiatives/create] failed:", message);
     return NextResponse.json({ error: "Could not save the initiative." }, { status: 500 });
+  }
+}
+
+/**
+ * Resolve and insert the task list for a just-created initiative.
+ *
+ * Returns how many tasks were attached; 0 on any failure. NEVER throws: the
+ * initiative is already saved, so a task problem must not turn a success into
+ * an error response. It is logged loudly instead.
+ */
+async function attachTasks(
+  db: SupabaseClient,
+  args: {
+    companyId: string;
+    initiativeId: string;
+    libraryKey: string;
+    eventDate: string;
+    userId: string | null;
+  }
+): Promise<number> {
+  try {
+    const resolved = await resolveTasks(
+      db,
+      [{ libraryKey: args.libraryKey, eventDate: args.eventDate, floor: todayDateOnly() }],
+      { companyId: args.companyId, userId: args.userId, logLabel: "[initiatives/create]" }
+    );
+    const entry = resolved.get(args.libraryKey);
+    if (!entry || entry.tasks.length === 0) return 0;
+
+    const { error } = await db.from("tasks").insert(
+      entry.tasks.map((t) => ({
+        id: t.id,
+        initiative_id: args.initiativeId,
+        company_id: args.companyId,
+        name: t.name,
+        description: t.description,
+        due_date: t.dueDate,
+        estimated_hours: t.estimatedHours,
+        status: "not_started",
+        priority: t.priority,
+        display_order: t.displayOrder,
+        dependency_ids: t.dependencyIds,
+      }))
+    );
+    if (error) {
+      console.error("[initiatives/create] task insert failed:", error.message);
+      return 0;
+    }
+    console.log(
+      "[initiatives/create] attached", entry.tasks.length, entry.source, "tasks to", args.libraryKey
+    );
+    return entry.tasks.length;
+  } catch (err: unknown) {
+    console.error(
+      "[initiatives/create] task resolution failed:",
+      err instanceof Error ? err.message : String(err)
+    );
+    return 0;
   }
 }

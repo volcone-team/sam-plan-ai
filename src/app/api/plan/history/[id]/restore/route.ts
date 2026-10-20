@@ -4,6 +4,13 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { snapshotPlanYear, snapshotPlanTargets } from "@/lib/plan-snapshot-year";
 import { snapshotProducts } from "@/lib/snapshot-products";
+import { LIMIT_KEYS } from "@/lib/billing/limits";
+import {
+  evaluateLiveLimit,
+  liveLimitResponse,
+  loadLiveLimitContext,
+  productAdditions,
+} from "@/lib/billing/live-limits";
 
 /**
  * POST /api/plan/history/[id]/restore
@@ -102,6 +109,95 @@ export async function POST(
       );
     }
 
+    /**
+     * 1b. PLAN LIMITS, checked before anything is written — including the
+     * pre-restore snapshot below. A restore that would take the plan year past
+     * max_initiatives, or the company past max_products, is refused whole:
+     * restoring "some" of a plan would be a silent truncation.
+     *
+     * The reads the restore needs anyway (target year, its plan row, current
+     * products) are taken here and reused below.
+     */
+    const targetYear = snapshotPlanYear(data, new Date().getUTCFullYear());
+
+    const [{ data: existingPlan }, { data: currentProducts }] = await Promise.all([
+      admin
+        .from("annual_plans")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("year", targetYear)
+        .maybeSingle(),
+      admin
+        .from("products")
+        .select("id, name, is_active")
+        .eq("company_id", companyId),
+    ]);
+
+    const initiativesToRestore = onlyInitiativeId
+      ? snapInitiatives.filter((i) => i.id === onlyInitiativeId)
+      : snapInitiatives;
+
+    // Only meaningful for a SINGLE-initiative restore. A full restore of an
+    // empty plan (a deleted year with no initiatives) is legitimate and must
+    // fall through to restoring the year and its targets.
+    if (onlyInitiativeId && initiativesToRestore.length === 0) {
+      return NextResponse.json({ error: "That initiative was not found in the snapshot." }, { status: 404 });
+    }
+
+    const limitCtx = await loadLiveLimitContext(admin, companyId);
+    if (limitCtx.refusal || limitCtx.enforced) {
+      /*
+       * Initiatives: what stays in the target year plus what comes back. A
+       * FULL restore first deletes every not-started ("planned") initiative,
+       * so only started ones stay; a single restore keeps everything.
+       */
+      let remaining = 0;
+      if (existingPlan?.id) {
+        let q = admin
+          .from("initiatives")
+          .select("id", { count: "exact", head: true })
+          .eq("company_id", companyId)
+          .eq("annual_plan_id", existingPlan.id);
+        if (!onlyInitiativeId) q = q.neq("status", "planned");
+        const { count, error: countErr } = await q;
+        if (countErr) {
+          return NextResponse.json(
+            { error: "Could not check your plan limits, so nothing was restored. Please try again." },
+            { status: 500 }
+          );
+        }
+        remaining = count ?? 0;
+      }
+      const initiativeLimit = evaluateLiveLimit(
+        limitCtx, LIMIT_KEYS.MAX_INITIATIVES, remaining, initiativesToRestore.length,
+        { year: targetYear }
+      );
+      if (!initiativeLimit.ok) return liveLimitResponse(initiativeLimit);
+
+      /*
+       * Products: snapshot products whose name matches nothing current are
+       * recreated (restore does not reactivate an archived match), plus the
+       * placeholder made when there are no products at all.
+       */
+      const current = (currentProducts ?? []) as { name: string; is_active: boolean | null }[];
+      const snapProductList = (data.products || []) as { id?: string; name?: string | null }[];
+      const snapProductIds = new Set(snapProductList.map((sp) => sp.id));
+      const additions = productAdditions(
+        snapProductList.map((sp) => String(sp.name || "Restored Product")),
+        current,
+        { reactivates: false }
+      );
+      const needsPlaceholder =
+        current.length === 0 &&
+        snapProductList.length === 0 &&
+        initiativesToRestore.some((i: { product_id?: string }) => !snapProductIds.has(i.product_id));
+      const activeNow = current.filter((p) => p.is_active !== false).length;
+      const productLimit = evaluateLiveLimit(
+        limitCtx, LIMIT_KEYS.MAX_PRODUCTS, activeNow, additions.created + (needsPlaceholder ? 1 : 0)
+      );
+      if (!productLimit.ok) return liveLimitResponse(productLimit);
+    }
+
     // 2. Snapshot the CURRENT plan first (so restore is itself reversible)
     try {
       const [
@@ -164,15 +260,7 @@ export async function POST(
      * `snapshotPlanYear` answers this from the snapshot rather than from
      * whatever the database holds now.
      */
-    const targetYear = snapshotPlanYear(data, new Date().getUTCFullYear());
-
-    const { data: existingPlan } = await admin
-      .from("annual_plans")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("year", targetYear)
-      .maybeSingle();
-
+    // `targetYear` and `existingPlan` were read in step 1b.
     let annualPlan = existingPlan as { id: string } | null;
 
     if (!annualPlan) {
@@ -226,10 +314,7 @@ export async function POST(
     //    duplicated every product whose name did not match byte-for-byte.
     const productKey = (name: unknown) => String(name ?? "").trim().toLowerCase();
 
-    const { data: currentProducts } = await admin
-      .from("products")
-      .select("id, name")
-      .eq("company_id", companyId);
+    // `currentProducts` was read in step 1b.
     const productByName = new Map(
       (currentProducts || []).map((p) => [productKey(p.name), p.id])
     );
@@ -308,17 +393,7 @@ export async function POST(
       console.log("[plan/restore] Created a placeholder product to restore into");
     }
 
-    // 5. Which snapshot initiatives to restore
-    const initiativesToRestore = onlyInitiativeId
-      ? snapInitiatives.filter((i) => i.id === onlyInitiativeId)
-      : snapInitiatives;
-
-    // Only meaningful for a SINGLE-initiative restore. A full restore of an
-    // empty plan (a deleted year with no initiatives) is legitimate and must
-    // fall through to restoring the year and its targets.
-    if (onlyInitiativeId && initiativesToRestore.length === 0) {
-      return NextResponse.json({ error: "That initiative was not found in the snapshot." }, { status: 404 });
-    }
+    // 5. Which snapshot initiatives to restore: `initiativesToRestore`, from step 1b.
 
     // 6. FULL restore only: clear current upcoming (not-started, future) initiatives
     //    so the restored plan replaces the upcoming plan. Keep past/in-progress.

@@ -5,12 +5,20 @@ import { cookies } from "next/headers";
 import { requirePlanEditor } from "@/lib/require-plan-editor";
 import { checkEntitlement, recordUsage, statusForCode, serviceClient } from "@/lib/billing/enforce";
 import { LIMIT_KEYS } from "@/lib/billing/limits";
+import {
+  countLiveUsage,
+  evaluateLiveLimit,
+  liveLimitResponse,
+  loadLiveLimitContext,
+  productAdditions,
+} from "@/lib/billing/live-limits";
 import { logGenerationEvent, type GenerationEventType } from "@/lib/generation-events";
 import { classifyAiFailure, aiFailureLogDetail, operatorHint } from "@/lib/ai-errors";
 import { toDateOnly, clampDayOfMonth, resolvePlanStart, planMonthToCalendar, todayDateOnly, requiredRunwayDays } from "@/lib/plan-dates";
 import { sequenceEventDates } from "@/lib/plan-schedule";
 import { loadLibrary, loadTaskTemplates, loadAiContext, renderLibraryForPrompt, type LibraryEntry } from "@/lib/workbook/read";
 import { materialiseTasks, materialiseAiTasks, templateRunwayDays } from "@/lib/workbook/materialise";
+import { starterTemplate, STARTER_RUNWAY_DAYS } from "@/lib/workbook/starter-template";
 import { insertWithLibraryKey, resolveInitiativeTypeId, supabaseTypeStore } from "@/lib/workbook/initiative-type";
 import { defaultLibraryMetricSet } from "@/lib/metrics/library-metric-set";
 import { loadCompanyFit, partitionLibrary, rejectionReason } from "@/lib/recommend/company-eligibility";
@@ -253,11 +261,11 @@ export async function POST(request: Request) {
     // 4b. Resolve the annual plan to generate into.
     //    With a targetYear (future-year draft) attach to THAT year's plan,
     //    creating it if needed. Without one, use the most recent plan.
-    let annualPlan: { id: string } | null = null;
+    let annualPlan: { id: string; year: number } | null = null;
     if (targetYear) {
       const { data: existing } = await supabase
         .from("annual_plans")
-        .select("id")
+        .select("id, year")
         .eq("company_id", companyId)
         .eq("year", targetYear)
         .maybeSingle();
@@ -267,7 +275,7 @@ export async function POST(request: Request) {
         const { data: created, error: createErr } = await supabase
           .from("annual_plans")
           .insert({ company_id: companyId, year: targetYear, baseline_revenue: 0, stretch_revenue: 0, operating_budget: 0, status: "draft" })
-          .select("id")
+          .select("id, year")
           .single();
         if (createErr || !created) {
           return NextResponse.json({ error: "Could not create the plan for " + targetYear }, { status: 500 });
@@ -277,7 +285,7 @@ export async function POST(request: Request) {
     } else {
       const { data: latest } = await supabase
         .from("annual_plans")
-        .select("id")
+        .select("id, year")
         .eq("company_id", companyId)
         .order("year", { ascending: false })
         .limit(1)
@@ -288,6 +296,47 @@ export async function POST(request: Request) {
     if (!annualPlan) {
       return NextResponse.json({ error: "No annual plan found" }, { status: 400 });
     }
+
+    /**
+     * 4c. Live plan limits, BEFORE the AI call: a refusal must not cost money.
+     *
+     * max_initiatives counts the target plan year. This route adds to the plan
+     * rather than replacing it, so if the year is already full there is
+     * nothing to generate. Otherwise the room left is passed to the prompt and
+     * the real number is checked again before anything is written (7).
+     *
+     * max_products: the questionnaire's products are known now. A name that
+     * matches an existing product is reused (7b), so it is not new.
+     */
+    const limitCtx = await loadLiveLimitContext(billingDb, companyId);
+    const annualPlanYear = typeof annualPlan.year === "number" ? annualPlan.year : null;
+    const initiativesInPlan = limitCtx.enforced
+      ? await countLiveUsage(billingDb, companyId, LIMIT_KEYS.MAX_INITIATIVES, { annualPlanId: annualPlan.id })
+      : 0;
+    const roomCheck = evaluateLiveLimit(
+      limitCtx, LIMIT_KEYS.MAX_INITIATIVES, initiativesInPlan, 1, { year: annualPlanYear }
+    );
+    if (!roomCheck.ok) return liveLimitResponse(roomCheck);
+    /** How many more initiatives fit; null = unlimited. */
+    const initiativesRoom = roomCheck.remaining;
+
+    const { data: existingProductRows } = await supabase
+      .from("products")
+      .select("id, name, is_active")
+      .eq("company_id", companyId);
+    const existingProducts = (existingProductRows ?? []) as {
+      id: string; name: string; is_active: boolean | null;
+    }[];
+    const productLimit = evaluateLiveLimit(
+      limitCtx,
+      LIMIT_KEYS.MAX_PRODUCTS,
+      existingProducts.filter((p) => p.is_active !== false).length,
+      productAdditions(
+        ((questionnaire.products || []) as { name?: string }[]).map((p) => p.name || "Untitled Product"),
+        existingProducts
+      ).adding
+    );
+    if (!productLimit.ok) return liveLimitResponse(productLimit);
 
     // 5. Call Claude
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -424,7 +473,15 @@ Generate a complete revenue plan as JSON.`;
       console.error("[generate-plan] Workbook load failed:", wbErr);
     }
 
-    const systemPrompt = buildSystemPrompt(startMonth, planMonths, startYear, planFloor.getDate(), toDateOnly(planFloor)) + initiativeTypesContext + workbookContext;
+    // The plan's room for initiatives, stated last so it overrides "4-8".
+    const limitContext =
+      initiativesRoom !== null
+        ? `\n\nPLAN LIMIT: this account's plan has room for at most ${initiativesRoom} more ` +
+          `initiative${initiativesRoom === 1 ? "" : "s"}. Return NO MORE than ${initiativesRoom}, ` +
+          `even where the guidelines above suggest more.`
+        : "";
+
+    const systemPrompt = buildSystemPrompt(startMonth, planMonths, startYear, planFloor.getDate(), toDateOnly(planFloor)) + initiativeTypesContext + workbookContext + limitContext;
 
     console.log("[generate-plan] System prompt size:", systemPrompt.length, "chars");
     const claudeStart = Date.now();
@@ -468,6 +525,50 @@ Generate a complete revenue plan as JSON.`;
       }
     }
 
+    /**
+     * FIT, enforced server-side. The prompt only listed eligible initiatives,
+     * but the prompt is not enforcement: a library key the model picks that
+     * fails FIT (or the admin allowlist) is REJECTED here with the rule's
+     * reason, the same way /api/intake/recommend re-checks. Keys that are not
+     * library keys at all keep their existing handling below.
+     */
+    const rejectedInitiatives: { libraryKey: string; name: string; reason: string }[] = [];
+    const fullLibraryByKey = new Map(
+      (await loadLibrary(supabase, { includeInactive: true })).map((l) => [l.initiativeKey, l])
+    );
+    const generatedInitiatives = (plan.initiatives || []).filter((gi) => {
+      const key = gi.libraryKey || gi.channel || "";
+      const reason = rejectionReason(fullLibraryByKey.get(key), fit.ctx);
+      if (!reason) return true;
+      rejectedInitiatives.push({ libraryKey: key, name: gi.name, reason });
+      return false;
+    });
+    if (rejectedInitiatives.length > 0) {
+      console.warn(
+        "[generate-plan] Rejected ineligible picks:",
+        rejectedInitiatives.map((r) => `${r.libraryKey} (${r.reason})`).join("; ")
+      );
+    }
+
+    /**
+     * Plan limits on what is about to be written, decided BEFORE the first
+     * write (7a). A trial is not special: it grants its plan's limits.
+     *
+     * max_initiatives is a live count of the target plan year. This route
+     * ADDS to the plan (it does not clear it), so what is there stays and the
+     * whole generated set must fit on top. Refused whole, never truncated.
+     * The prompt was already told how many fit (see the pre-check above), so
+     * this only fires when the model ignored it.
+     */
+    const initiativeLimit = evaluateLiveLimit(
+      limitCtx, LIMIT_KEYS.MAX_INITIATIVES, initiativesInPlan, generatedInitiatives.length,
+      { year: annualPlanYear }
+    );
+    if (!initiativeLimit.ok) {
+      console.warn("[generate-plan] Refused by max_initiatives:", initiativeLimit.message);
+      return liveLimitResponse(initiativeLimit);
+    }
+
     // 7. Persist to database
 
     // 7a. Update annual plan with revenue targets
@@ -492,12 +593,9 @@ Generate a complete revenue plan as JSON.`;
     const productIds: string[] = [];
     const userProducts = questionnaire.products || [];
 
-    const { data: existingProducts } = await supabase
-      .from("products")
-      .select("id, name")
-      .eq("company_id", companyId);
+    // `existingProducts` was read for the limit check in 4c.
     const productIdByName = new Map<string, string>(
-      (existingProducts || []).map((pr: { id: string; name: string }) => [
+      existingProducts.map((pr) => [
         String(pr.name).trim().toLowerCase(),
         pr.id,
       ])
@@ -568,33 +666,6 @@ Generate a complete revenue plan as JSON.`;
     // a pile-up rather than a plan. sequenceEventDates guarantees distinct
     // launch days, non-overlapping prep windows, each initiative's own runway,
     // and nothing in the past, all derived from the plan's own task leads.
-    // Trial accounts are not trimmed specially: a trial grants Starter's limits,
-    // and max_initiatives is enforced through the normal entitlement path like
-    // any plan. The separate trial cap was removed.
-    /**
-     * FIT, enforced server-side. The prompt only listed eligible initiatives,
-     * but the prompt is not enforcement: a library key the model picks that
-     * fails FIT (or the admin allowlist) is REJECTED here with the rule's
-     * reason, the same way /api/intake/recommend re-checks. Keys that are not
-     * library keys at all keep their existing handling below.
-     */
-    const rejectedInitiatives: { libraryKey: string; name: string; reason: string }[] = [];
-    const fullLibraryByKey = new Map(
-      (await loadLibrary(supabase, { includeInactive: true })).map((l) => [l.initiativeKey, l])
-    );
-    const generatedInitiatives = (plan.initiatives || []).filter((gi) => {
-      const key = gi.libraryKey || gi.channel || "";
-      const reason = rejectionReason(fullLibraryByKey.get(key), fit.ctx);
-      if (!reason) return true;
-      rejectedInitiatives.push({ libraryKey: key, name: gi.name, reason });
-      return false;
-    });
-    if (rejectedInitiatives.length > 0) {
-      console.warn(
-        "[generate-plan] Rejected ineligible picks:",
-        rejectedInitiatives.map((r) => `${r.libraryKey} (${r.reason})`).join("; ")
-      );
-    }
 
     // Task templates for everything the model selected. Tasks and their lead
     // times come from here, not from the model.
@@ -617,8 +688,12 @@ Generate a complete revenue plan as JSON.`;
           // Authored runway beats inferred: the workbook says how long this
           // initiative takes to prepare. Falls back to the model's own task
           // leads only when the workbook has no template for it.
+          // ...and the starter template's runway last, for an initiative with
+          // neither a workbook template nor a usable model task list: it is
+          // what its tasks will come from, so it is what it needs to prepare.
           runwayDays: templateRunwayDays(templatesByKey.get(gi.libraryKey || "") || [])
-            || requiredRunwayDays(gi.tasks),
+            || requiredRunwayDays(gi.tasks)
+            || STARTER_RUNWAY_DAYS,
           // Evergreen work is continuous, not a launch, so it neither blocks
           // another initiative nor gets pushed by one.
           exclusive: gi.kind !== "evergreen",
@@ -708,11 +783,35 @@ Generate a complete revenue plan as JSON.`;
       // The workbook wins where it has been authored. Where it has not, the
       // model's own task list is used rather than saving an initiative with no
       // project plan at all - both go through identical date handling.
-      const tasks = templates.length > 0
+      /**
+       * THREE SOURCES, IN ORDER: the workbook's authored template, then the
+       * model's own task list (this route already asks for one in the same
+       * call, so no second AI request is needed), then the generic starter
+       * template.
+       *
+       * The starter is the new branch. Without it an initiative whose library
+       * key has no template AND whose model task list came back empty or
+       * malformed was saved with ZERO tasks — scheduled and forecast with
+       * nothing to do. See src/lib/workbook/tasks-for-initiatives.ts for the
+       * same rule applied where there is no inline AI list to fall back on.
+       */
+      let tasks = templates.length > 0
         ? materialiseTasks(templates, { eventDate: eventDateObj, floor: planFloor })
         : materialiseAiTasks(init.tasks, { eventDate: eventDateObj, floor: planFloor });
+      let taskSource = templates.length > 0 ? "workbook" : "AI-suggested";
+
+      if (tasks.length === 0) {
+        tasks = materialiseTasks(starterTemplate(init.name || libEntry?.name || channel), {
+          eventDate: eventDateObj,
+          floor: planFloor,
+        });
+        taskSource = "starter";
+      }
       if (templates.length === 0) {
-        console.log("[generate-plan] No workbook template for", init.libraryKey || init.name, "- used", tasks.length, "AI-suggested tasks");
+        console.log(
+          "[generate-plan] No workbook template for", init.libraryKey || init.name,
+          "- used", tasks.length, taskSource, "tasks"
+        );
       }
       if (tasks.length > 0) {
         const { error: taskErr } = await supabase.from("tasks").insert(

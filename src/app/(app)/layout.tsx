@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { ImpersonationProvider } from "@/hooks/use-impersonation";
 import { ImpersonationBanner } from "@/components/impersonation-banner";
 import { Sidebar } from "@/components/sidebar";
 import { AppHeader } from "@/components/header";
@@ -18,7 +17,18 @@ interface AppLayoutProps {
  */
 export default function AppLayout({ children }: AppLayoutProps) {
   return (
-    <ImpersonationProvider>
+    <>
+      {/*
+        ABOVE AppShell and in the normal document flow, so it pushes the
+        sidebar and content down rather than overlaying them — an admin must
+        never lose a control to the banner, and must never miss the banner.
+        It renders null when the impersonation marker cookie is absent, which
+        is every normal customer session.
+
+        The ImpersonationProvider that used to wrap this tree is gone: that
+        context was the old sessionStorage mechanism. Impersonation state now
+        comes from a server-set, signed cookie.
+      */}
       <ImpersonationBanner />
       <AppShell
         sidebar={<Sidebar />}
@@ -34,6 +44,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
         super admin has enabled chat.
       */}
       <ChatWidget />
-    </ImpersonationProvider>
+    </>
   );
 }

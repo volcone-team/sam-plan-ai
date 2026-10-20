@@ -9,6 +9,8 @@ import { useToast } from '@/components/ui/toast';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { usePermission } from '@/hooks/use-permission';
 import { pickMoneyFormatter } from '@/lib/results-tab-totals';
+import { limitNoticeFrom } from '@/lib/billing/limit-notice';
+import { upgradeAction } from '@/components/billing/limit-notice';
 
 interface SnapshotData {
   id: string;
@@ -42,6 +44,8 @@ export default function PlanSnapshotDetailPage() {
   const [deleting, setDeleting] = useState(false);
   /** Only owner/operator may restore snapshots or delete history. */
   const canEditPlan = usePermission('plan.regenerate');
+  /** Only owners can change plan, so only they get an Upgrade link. */
+  const canUpgrade = usePermission('settings.billing');
 
   const { showToast } = useToast();
 
@@ -57,6 +61,17 @@ export default function PlanSnapshotDetailPage() {
       const res = await fetch(url, { method: "POST" });
       const json = await res.json();
       if (!res.ok) {
+        // Over max_initiatives / max_products: nothing was restored. Say why,
+        // with an Upgrade link for owners.
+        const notice = limitNoticeFrom(json);
+        if (notice) {
+          showToast(notice.message, {
+            variant: "error",
+            duration: 8000,
+            action: upgradeAction(notice, canUpgrade),
+          });
+          return;
+        }
         showToast(json.error || "Restore failed", { variant: "error", duration: 5000 });
         return;
       }

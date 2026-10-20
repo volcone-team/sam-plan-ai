@@ -18,9 +18,9 @@ import type { InitiativeMetricSet } from "@/lib/metrics/metric-set";
  *      been written with `channel = libraryKey`, so this is the stable key.
  *   2. Active or inactive does NOT matter, and the row is never reactivated.
  *      `initiative_types.is_active` is not the control over what the AI or the
- *      pickers offer — `initiative_settings` is (see loadLibrary). An admin
- *      who switched a type off did so for the /admin/initiatives list, and
- *      silently flipping it back on would undo their decision.
+ *      pickers offer — `initiative_settings` is (see loadLibrary). A type
+ *      switched off was switched off on the since-removed /admin/initiatives
+ *      screen, and silently flipping it back on would undo that decision.
  *   3. When several rows share the channel, the OLDEST wins: it is the row
  *      existing plans already point at, and choosing it every time means the
  *      answer is stable.

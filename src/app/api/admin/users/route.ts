@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { adminMemberStatus, lookupLastSignInsBatched } from "@/lib/team/member-status";
 
 /**
  * GET /api/admin/users
@@ -102,7 +103,15 @@ export async function GET(request: Request) {
       companyNameMap.set(c.id, c.name);
     }
 
-    // 6. Format response
+    // 6. Last sign-in for this page of users (batched via auth.admin.listUsers).
+    // Ids the lookup couldn't resolve (error or page cap) come back as status
+    // "unknown", never "active".
+    const lastSignInById = await lookupLastSignInsBatched(
+      adminClient,
+      (users || []).map((u) => u.id),
+    );
+
+    // 7. Format response
     const result = (users || []).map((u) => ({
       id: u.id,
       email: u.email,
@@ -115,6 +124,9 @@ export async function GET(request: Request) {
       isAdmin: u.is_admin,
       adminLevel: u.admin_level ?? null,
       createdAt: u.created_at,
+      // undefined → omitted from JSON → client sees "unknown"
+      lastSignInAt: lastSignInById.get(u.id),
+      status: adminMemberStatus({ isActive: u.is_active, lastSignInAt: lastSignInById.get(u.id) }),
     }));
 
     console.log("[admin/users] Returning", result.length, "users");

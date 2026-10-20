@@ -4,16 +4,19 @@
  * Metric-set inputs and read-outs, shared by the Results tab and the weekly
  * planner so the two cannot diverge.
  *
- * Inputs are plain `type="text"` with `inputMode="decimal"` (or "numeric"
- * for counts) and are validated by `normaliseMetricInput`. Not
- * `NumberInputRaw`: its digit-grouping reformat is built for whole money
- * amounts, and a metric field must accept partial decimals ("0.", "12.")
- * and a typed "%" without reformatting under the cursor.
+ * Inputs are `GroupedNumberInput`s (thousands grouped as you type, caret
+ * preserved) with `inputMode="decimal"` (or "numeric" for counts), validated
+ * by `normaliseMetricInput`, which ignores the commas. Not `NumberInputRaw`:
+ * it hands back digits only, and a metric field must keep partial decimals
+ * ("0.", "12.") and a typed "%" or "$".
  */
+import { GroupedNumberInput } from '@/components/ui/number-input';
 import { computeDerived, type InitiativeMetricSet } from '@/lib/metrics/metric-set';
 import {
   fieldLabelWithUnit,
   formatMetricValue,
+  groupedFormatForKind,
+  isRateOverHundred,
   metricGroupsOf,
   normaliseMetricInput,
   otherMetricEntries,
@@ -58,23 +61,37 @@ export function MetricInputs({ set, values, onChange, idPrefix }: MetricInputsPr
               const raw = values[f.id] ?? '';
               const check = normaliseMetricInput(f.kind, raw);
               const errorId = `${id}-error`;
+              const format = groupedFormatForKind(f.kind);
+              const fieldClass = `${inputClass} ${check.ok ? 'border-border' : 'border-red-500'}`;
               return (
                 <div key={f.id}>
                   <label htmlFor={id} className="block text-xs font-medium text-[hsl(var(--foreground-muted))] mb-1">
                     {fieldLabelWithUnit(f)}
                     {f.optional && <span className="font-normal"> (optional)</span>}
                   </label>
-                  <input
-                    id={id}
-                    type="text"
-                    inputMode={f.kind === 'count' ? 'numeric' : 'decimal'}
-                    autoComplete="off"
-                    value={raw}
-                    onChange={e => onChange({ ...values, [f.id]: e.target.value })}
-                    aria-invalid={!check.ok || undefined}
-                    aria-describedby={!check.ok ? errorId : undefined}
-                    className={`${inputClass} ${check.ok ? 'border-border' : 'border-red-500'}`}
-                  />
+                  {format ? (
+                    <GroupedNumberInput
+                      id={id}
+                      format={format}
+                      inputMode={f.kind === 'count' ? 'numeric' : 'decimal'}
+                      value={raw}
+                      onValueChange={text => onChange({ ...values, [f.id]: text })}
+                      aria-invalid={!check.ok || undefined}
+                      aria-describedby={!check.ok ? errorId : undefined}
+                      className={fieldClass}
+                    />
+                  ) : (
+                    <input
+                      id={id}
+                      type="text"
+                      autoComplete="off"
+                      value={raw}
+                      onChange={e => onChange({ ...values, [f.id]: e.target.value })}
+                      aria-invalid={!check.ok || undefined}
+                      aria-describedby={!check.ok ? errorId : undefined}
+                      className={fieldClass}
+                    />
+                  )}
                   {!check.ok && (
                     <p id={errorId} role="alert" className="mt-1 text-xs text-red-700">{check.error}</p>
                   )}
@@ -91,6 +108,10 @@ export function MetricInputs({ set, values, onChange, idPrefix }: MetricInputsPr
                     <output id={id} aria-describedby={`${id}-formula`} aria-live="polite">
                       <span className="font-medium text-[hsl(var(--foreground))]">{d.label}:</span>{' '}
                       {formatMetricValue(d.kind, d.unit, derived[d.id])}
+                      {/* Words, not just colour; never blocks saving. */}
+                      {isRateOverHundred(d.kind, derived[d.id]) && (
+                        <span className="text-amber-700 dark:text-amber-400"> (over 100%: check your inputs)</span>
+                      )}
                     </output>
                     <span id={`${id}-formula`}> — {d.formulaText}</span>
                   </li>

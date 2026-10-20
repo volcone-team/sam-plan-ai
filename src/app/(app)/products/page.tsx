@@ -21,6 +21,8 @@ import { initiativeService } from '@/services/initiative.service';
 import type { Product, CreateProductDTO, UpdateProductDTO, RevenueType, ProductTicketTier } from '@/types';
 import { NumberInputRaw } from '@/components/ui/number-input';
 import { formatMoney } from '@/lib/format-money';
+import { LimitReachedError, type LimitNotice as LimitNoticeData } from '@/lib/billing/limit-notice';
+import { LimitNotice } from '@/components/billing/limit-notice';
 
 type ProductType = 'Service' | 'Course' | 'Membership' | 'Coaching' | 'Digital Product' | 'Subscription';
 
@@ -98,6 +100,9 @@ export default function ProductsPage() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [addForm, setAddForm] = useState<ProductFormData>(emptyForm);
   const [addLoading, setAddLoading] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  /** A max_products refusal, with an Upgrade link for owners. */
+  const [addLimit, setAddLimit] = useState<LimitNoticeData | null>(null);
 
   // Edit product state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -154,6 +159,8 @@ export default function ProductsPage() {
     if (!addForm.name.trim() || !addForm.price) return;
     try {
       setAddLoading(true);
+      setAddError(null);
+      setAddLimit(null);
       const dto: CreateProductDTO = {
         companyId: companyId,
         name: addForm.name.trim(),
@@ -167,7 +174,13 @@ export default function ProductsPage() {
       setShowAddForm(false);
     } catch (err) {
       console.error('Error creating product:', err);
-      setError(err instanceof Error ? err.message : 'Could not save the product.');
+      // Shown in the form, not as the page error: `error` hides the product
+      // grid, and a refused add must not make the existing products vanish.
+      if (err instanceof LimitReachedError) {
+        setAddLimit(err.notice);
+      } else {
+        setAddError(err instanceof Error ? err.message : 'Could not save the product.');
+      }
     } finally {
       setAddLoading(false);
     }
@@ -336,6 +349,12 @@ export default function ProductsPage() {
               </label>
             </div>
           </div>
+          {addError && (
+            <p role="alert" className="mt-4 rounded-[var(--radius-md)] border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {addError}
+            </p>
+          )}
+          <LimitNotice notice={addLimit} className="mt-4" />
           <div className="mt-4 flex gap-2">
             <button
               onClick={handleAddProduct}
@@ -349,6 +368,8 @@ export default function ProductsPage() {
               onClick={() => {
                 setShowAddForm(false);
                 setAddForm(emptyForm);
+                setAddError(null);
+                setAddLimit(null);
               }}
               className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-4 py-2 text-sm font-medium text-[hsl(var(--foreground-muted))] transition-colors hover:bg-[hsl(var(--background))]"
             >

@@ -30,6 +30,8 @@ import {
   AllInitiativesList,
   type LibraryOption,
 } from "@/components/intake/recommendations/all-initiatives-list";
+import { limitNoticeFrom, type LimitNotice as LimitNoticeData } from "@/lib/billing/limit-notice";
+import { LimitNotice } from "@/components/billing/limit-notice";
 
 /**
  * The recommendations screen (REQ-13.1 to REQ-13.16).
@@ -99,6 +101,8 @@ export function RecommendationsPage() {
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [building, setBuilding] = React.useState(false);
   const [buildError, setBuildError] = React.useState<string | null>(null);
+  /** A plan-limit refusal from /api/intake/build, shown with an Upgrade link. */
+  const [buildLimit, setBuildLimit] = React.useState<LimitNoticeData | null>(null);
   const [path, setPath] = React.useState<PlanPath | null>(null);
 
   const [accepted, setAccepted] = React.useState<Set<string>>(new Set());
@@ -484,6 +488,7 @@ export function RecommendationsPage() {
 
     setBuilding(true);
     setBuildError(null);
+    setBuildLimit(null);
 
     try {
       // Cards and the full list alike; the server re-checks each is active.
@@ -501,6 +506,13 @@ export function RecommendationsPage() {
       const body = (await response.json()) as { error?: string };
 
       if (!response.ok) {
+        // Over max_products / max_initiatives, or out of regenerations:
+        // nothing was changed. The plan's message, with an Upgrade link.
+        const notice = limitNoticeFrom(body);
+        if (notice) {
+          setBuildLimit(notice);
+          return;
+        }
         throw new Error(body.error || `Could not build your plan (${response.status}).`);
       }
 
@@ -787,6 +799,7 @@ export function RecommendationsPage() {
       )}
 
       <FormError message={buildError} />
+      <LimitNotice notice={buildLimit} />
 
       <div className="flex items-center justify-between gap-3 border-t border-border pt-6">
         <Button
