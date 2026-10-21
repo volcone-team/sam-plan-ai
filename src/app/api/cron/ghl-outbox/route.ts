@@ -17,6 +17,20 @@ export const dynamic = "force-dynamic";
  * `src/lib/ghl/drain.ts`, where it is unit tested with a fake client. This
  * file is auth, I/O construction and a JSON summary, deliberately thin.
  *
+ * NOT ON A SCHEDULE ANY MORE — MANUAL AND EXTERNAL ONLY. This had a Vercel
+ * cron entry running every ten minutes; the owner's account is Hobby, which
+ * allows two cron jobs and daily expressions only, so that entry failed the
+ * deploy outright. It has been removed from `vercel.json` and the route kept, because
+ * it is still the right thing to curl by hand and the right thing to point an
+ * external scheduler (GitHub Actions, cron-job.org, an upgraded Vercel plan)
+ * at. Routine delivery now happens two other ways: opportunistically after
+ * every enqueue (`scheduleGhlDrain`, via `after()`), and as a daily safety-net
+ * batch at the end of /api/cron/resume-paused.
+ *
+ * It stays under `/api/cron/` deliberately: the path prefix is what makes it
+ * public in the middleware, and renaming it would put it behind the session
+ * gate with no one to authenticate.
+ *
  * Authorises via `Authorization: Bearer ${CRON_SECRET}`, matching
  * /api/cron/initiative-reminders and /api/cron/resume-paused. An unset secret
  * means every request is unauthorised, and a failure returns 401 with no body

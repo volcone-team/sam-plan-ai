@@ -1,5 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+/* ── Mocked drain scheduler ──────────────────────────────────────────────────
+ * The real one calls `after()`, which throws outside a request context — so
+ * mocking it is not only about observing the call, it is what keeps these
+ * tests about the insert. Its own guarantees live in schedule-drain.test.ts.
+ */
+const scheduleGhlDrain = vi.fn();
+vi.mock("@/lib/ghl/schedule-drain", () => ({
+  scheduleGhlDrain: (db: never) => scheduleGhlDrain(db),
+}));
+
 import {
   enqueueGhlEvent,
   GHL_SUB_ACCOUNT_APP,
@@ -99,6 +110,7 @@ beforeEach(() => {
   inserts = [];
   insertError = null;
   insertData = { id: "row-1" };
+  scheduleGhlDrain.mockReset();
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
@@ -293,5 +305,73 @@ describe("enqueueGhlEvent — dedupe and failure", () => {
 
     expect(logged.length).toBeGreaterThan(0);
     expect(logged.join("\n")).not.toContain("pit-secret-value");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Delivery scheduling
+ * ------------------------------------------------------------------ */
+
+/**
+ * THE OUTBOX HAS NO CRON OF ITS OWN. Hobby allows two cron jobs and daily
+ * schedules only, so routine delivery is opportunistic: a new row asks for a
+ * small drain once the response has been sent. Which makes "did we ask" a
+ * correctness property of this module rather than a detail — a row nobody
+ * drains waits for tomorrow's safety-net sweep.
+ */
+describe("enqueueGhlEvent — asking for delivery", () => {
+  it("schedules a drain with the same client when a row is written", async () => {
+    const db = makeDb();
+    await enqueueGhlEvent(db, input());
+
+    expect(scheduleGhlDrain).toHaveBeenCalledTimes(1);
+    // The caller's service-role client, reused rather than rebuilt.
+    expect(scheduleGhlDrain).toHaveBeenCalledWith(db);
+  });
+
+  /** A dry run exercises the whole path, delivery included. */
+  it("schedules a drain on a dry run too", async () => {
+    await enqueueGhlEvent(makeDb(), input({ config: DRY }));
+    expect(scheduleGhlDrain).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * NOTHING NEW TO DELIVER MEANS NO DRAIN. A duplicate is already queued or
+   * already sent, a skip wrote nothing, and a failed insert left nothing
+   * behind — in all three a drain would spend a query to discover that.
+   */
+  it("does not schedule a drain on a duplicate", async () => {
+    insertError = { code: "23505", message: "duplicate key value" };
+    const result = await enqueueGhlEvent(makeDb(), input({ dedupeKey: "evt_1:founder" }));
+
+    expect(result).toMatchObject({ outcome: "duplicate" });
+    expect(scheduleGhlDrain).not.toHaveBeenCalled();
+  });
+
+  it("does not schedule a drain on any skip", async () => {
+    await enqueueGhlEvent(makeDb(), input({ config: OFF }));
+    await enqueueGhlEvent(makeDb(), input({ contactEmail: "  " }));
+    await enqueueGhlEvent(makeDb(), input({ tagsAdd: [], tagsRemove: [] }));
+
+    expect(scheduleGhlDrain).not.toHaveBeenCalled();
+  });
+
+  it("does not schedule a drain when the insert failed", async () => {
+    insertError = { code: "42501", message: "permission denied" };
+    const result = await enqueueGhlEvent(makeDb(), input());
+
+    expect(result).toMatchObject({ outcome: "failed" });
+    expect(scheduleGhlDrain).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The opt-out, for the callers that are already delivering or are writing in
+   * bulk: a drain scheduling a drain, or a backfill asking for one per row.
+   */
+  it("suppresses the drain when the caller opts out", async () => {
+    const result = await enqueueGhlEvent(makeDb(), input({ scheduleDrain: false }));
+
+    expect(result).toMatchObject({ outcome: "enqueued" });
+    expect(scheduleGhlDrain).not.toHaveBeenCalled();
   });
 });

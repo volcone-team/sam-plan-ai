@@ -7,6 +7,11 @@ import { ghlIsOn, loadGhlConfig, type GhlConfig } from "@/lib/ghl/config";
 // what "23505" means. `webhook-logic` is pure (it imports only `plan-change`),
 // so this costs nothing at import time.
 import { interpretClaim } from "@/lib/billing/webhook-logic";
+// Delivery is still `drain.ts`; this only ASKS for one, after the response has
+// been sent. It never throws and is safe with no request context, so it adds
+// no failure mode to the callers listed below. No cycle: `schedule-drain`
+// reaches `drain.ts`, `config.ts` and `client.ts`, none of which import this.
+import { scheduleGhlDrain } from "@/lib/ghl/schedule-drain";
 
 /**
  * Enqueueing a GoHighLevel side effect.
@@ -107,6 +112,14 @@ export interface EnqueueGhlEventInput {
    * once per row.
    */
   config?: GhlConfig;
+  /**
+   * Whether to ask for an opportunistic drain after the response (default
+   * true). The ONLY reason to pass false is that the caller is itself a drain
+   * or a batch/backfill: scheduling a delivery from inside delivery is at best
+   * a lease loss per row, and a backfill writing hundreds of rows would ask
+   * for hundreds of identical drains. Normal producers leave it alone.
+   */
+  scheduleDrain?: boolean;
 }
 
 /** Why nothing was written. Stable strings: logged, and asserted in tests. */
@@ -244,6 +257,20 @@ export async function enqueueGhlEvent(
      * exists. The caller does nothing with the id but log it; refusing the
      * write because we could not read it back would be the wrong trade.
      */
+    /*
+     * ON `enqueued` ONLY. `duplicate`, `skipped` and `failed` all mean there
+     * is no new row to deliver, so a drain would spend a query to find that
+     * out. NOT DEDUPED PER REQUEST, deliberately: the Stripe webhook enqueues
+     * up to three events and so asks for three drains, but the lease makes
+     * that harmless (the first takes the rows, the others read an empty batch
+     * or lose the lease) and the cost is two extra selects on a local
+     * database. The alternatives are worse — module-level "already scheduled"
+     * state is simply wrong in a serverless runtime, where one instance
+     * serves many requests, and `React.cache` would pull React into the
+     * import graph of the Stripe webhook to save a query.
+     */
+    if (input.scheduleDrain !== false) scheduleGhlDrain(db);
+
     return {
       ok: true,
       outcome: "enqueued",

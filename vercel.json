@@ -7,10 +7,6 @@
     {
       "path": "/api/cron/resume-paused",
       "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/cron/ghl-outbox",
-      "schedule": "*/10 * * * *"
     }
   ]
 }

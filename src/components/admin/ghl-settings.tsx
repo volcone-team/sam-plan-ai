@@ -555,9 +555,12 @@ export function GhlSettings() {
           <div>
             <h3 className="text-sm font-semibold">Outbox</h3>
             <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">
-              Events are delivered by a scheduled drain. Running one by hand here is
-              safe at any time — rows are claimed under a lease, so an overlapping
-              scheduled run loses the race rather than sending twice.
+              Events are delivered automatically a moment after whatever created
+              them, and anything that misses out — a failed row waiting on its
+              retry, or a row queued while this page was half set up — is picked up
+              by a full sweep once a day. Running one by hand here is safe at any
+              time: rows are claimed under a lease, so an overlapping automatic run
+              loses the race rather than sending twice.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -641,7 +644,7 @@ export function GhlSettings() {
             {/* The confusing zero, explained where it happens. */}
             {drainResult.claimed === 0 && drainResult.leaseLost > 0 && (
               <p className="mt-1">
-                Nothing was delivered because the scheduled drain had already claimed
+                Nothing was delivered because the automatic drain had already claimed
                 those rows. Nothing is wrong, and nothing was sent twice.
               </p>
             )}

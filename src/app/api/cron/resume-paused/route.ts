@@ -10,6 +10,9 @@ import { formatAccessDate } from "@/lib/billing/cancellation";
 import { sendPauseEndingSoonEmail } from "@/lib/mailgun";
 import { logActivity } from "@/lib/activity-log";
 import { getAppUrl } from "@/lib/app-url";
+import { createGhlClient } from "@/lib/ghl/client";
+import { loadGhlConfig, describeGhlConfig } from "@/lib/ghl/config";
+import { drainGhlOutbox, GHL_DRAIN_BATCH_SIZE } from "@/lib/ghl/drain";
 
 // Node runtime: uses the service-role key.
 export const runtime = "nodejs";
@@ -33,6 +36,22 @@ export const dynamic = "force-dynamic";
  *      "we'll email you a week before billing restarts". A charge arriving
  *      unannounced weeks after the customer last thought about us is a dispute
  *      waiting to happen — and the charge being legitimate makes it worse.
+ *
+ *   3. DRAIN THE GOHIGHLEVEL OUTBOX, as a passenger. Not this route's
+ *      business, and it is here for a plan limit rather than a design reason:
+ *      Hobby allows two cron jobs and only daily schedules, so the outbox's
+ *      own ten-minute cron could not deploy. Normal delivery is now
+ *      opportunistic (`scheduleGhlDrain`, via `after()`, on every enqueue);
+ *      this is the daily SAFETY NET for what that misses — rows that failed
+ *      and backed off, rows enqueued while the integration was
+ *      mid-configuration, and retries. It runs LAST, after everything above
+ *      has finished and the summary is computed, and it is wrapped so that a
+ *      GHL problem cannot change this cron's outcome or its status code.
+ *
+ *      Hosted here rather than on /api/cron/initiative-reminders because this
+ *      route already holds a service-role client (that one delegates to a
+ *      service and builds none) and already returns a composed summary object,
+ *      so the passenger costs an import and a key instead of new plumbing.
  *
  * ONLY TOUCHES CUSTOMER PAUSES FOR THE REMINDER. An admin suspension is not
  * something to send cheerful "billing restarts soon" mail about. It DOES clear
@@ -80,6 +99,40 @@ function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * The passenger: one full-size outbox batch, reported, never fatal.
+ *
+ * TOTALLY ISOLATED FROM THE HOST. Every failure — an unreadable settings row,
+ * a thrown client, anything `drainGhlOutbox` does not already swallow — is
+ * caught here and turned into a value in the response body. The pause work has
+ * already happened and been counted by the time this is called, so there is no
+ * state left for a GHL error to corrupt, and the caller's status code is
+ * decided without reference to what this returns.
+ *
+ * FULL `GHL_DRAIN_BATCH_SIZE`, unlike the `after()` path's small batch: this is
+ * a cron, it is not sharing a 10-second window with a customer's request, and
+ * 25 is the number sized against GHL's rate limit.
+ */
+async function drainGhlOutboxForCron(db: SupabaseClient): Promise<Record<string, unknown>> {
+  try {
+    const config = await loadGhlConfig(db);
+    // Live configs are the only ones carrying credentials; null is correct for
+    // every other status, and is what makes a dry run unable to write.
+    const client = config.status === "live" ? createGhlClient(config.credentials) : null;
+
+    const summary = await drainGhlOutbox({ db, config, client });
+    const reported = { ...summary, status: config.status, batchSize: GHL_DRAIN_BATCH_SIZE };
+    console.log("[cron/resume-paused] ghl-outbox", JSON.stringify(reported));
+    // `describeGhlConfig` is credential-free by contract, so this is safe in a
+    // response body and tells an operator why nothing moved.
+    return { ...reported, config: describeGhlConfig(config) };
+  } catch (err: unknown) {
+    const message = errMessage(err);
+    console.error("[cron/resume-paused] ghl-outbox drain failed:", message);
+    return { error: message };
+  }
+}
+
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization");
   const secret = process.env.CRON_SECRET;
@@ -107,7 +160,14 @@ export async function GET(req: Request) {
     if (!config.stripeEnabled) {
       summary.skipped = "billing_disabled";
       console.log("[cron/resume-paused] Billing disabled — nothing to do.");
-      return NextResponse.json(summary);
+      /*
+       * STILL DRAINS. Billing being switched off says nothing about the CRM:
+       * logins, intake and plan generation all enqueue regardless, and this is
+       * their only scheduled delivery. Returning early here without the
+       * passenger would quietly remove the safety net on exactly the
+       * deployments that are not charging anyone.
+       */
+      return NextResponse.json({ ...summary, ghlOutbox: await drainGhlOutboxForCron(db) });
     }
 
     // Only paused rows with an end date. An open-ended pause never elapses and
@@ -305,7 +365,15 @@ export async function GET(req: Request) {
       "[cron/resume-paused]",
       JSON.stringify({ ...summary, leadDays: PAUSE_REMINDER_LEAD_DAYS })
     );
-    return NextResponse.json(summary);
+
+    /*
+     * LAST, and after the summary above is complete and logged, so the pause
+     * work's own record is written whatever the drain does. Reported under its
+     * own key rather than merged into `summary`, which is this cron's result
+     * and has a shape the admin tooling reads.
+     */
+    const ghlOutbox = await drainGhlOutboxForCron(db);
+    return NextResponse.json({ ...summary, ghlOutbox });
   } catch (err: unknown) {
     const message = errMessage(err);
     console.error("[cron/resume-paused] Error:", message);

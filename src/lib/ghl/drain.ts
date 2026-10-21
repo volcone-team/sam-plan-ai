@@ -46,9 +46,15 @@ import { ghlIsOn, type GhlConfig } from "@/lib/ghl/config";
  * The daily ceiling (200,000) is not a consideration at this volume: 25 rows
  * every few minutes is four orders of magnitude below it.
  *
- * Raising this is a decision about THEIR api, not about our throughput. If the
- * queue ever backs up, run the cron more often rather than taking bigger
- * bites — the same total rate, with the burst spread out.
+ * Raising this is a decision about THEIR api, not about our throughput.
+ *
+ * "RUN THE CRON MORE OFTEN" IS NO LONGER AN OPTION, which is what this comment
+ * used to advise. The outbox has no cron of its own: Hobby allows two cron
+ * jobs and daily schedules only. Delivery is opportunistic instead — a small
+ * batch after every enqueue (`schedule-drain.ts`) — with a full batch of this
+ * size once a day from /api/cron/resume-paused as the safety net. So a backed
+ * up queue is drained by more ENQUEUES, and the lever for a one-off backlog is
+ * the admin screen's "Run drain now", not a schedule.
  */
 export const GHL_DRAIN_BATCH_SIZE = 25;
 
