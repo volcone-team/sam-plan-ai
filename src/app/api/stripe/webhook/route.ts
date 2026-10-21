@@ -19,6 +19,11 @@ import {
   shouldClearPauseOnSync,
   PAUSE_CLEAR_PATCH,
 } from "@/lib/billing/webhook-logic";
+// Enqueue-only, never-throws. See the guarded block at the end of
+// syncSubscription for why that property is the whole point.
+import { enqueueBuyerStateEvent } from "@/lib/ghl/producers/subscription";
+import { enqueueCancellationEvent } from "@/lib/ghl/producers/cancellation";
+import { enqueueFounderEvent } from "@/lib/ghl/producers/founder";
 
 export const runtime = "nodejs";
 // Stripe retries on any non-2xx, so slow handling is safe — but a hung handler
@@ -157,7 +162,7 @@ async function handleEvent(
       const session = event.data.object as Stripe.Checkout.Session;
       // Subscription mode only; a one-off payment has no subscription to sync.
       if (session.mode === "subscription" && session.subscription) {
-        await syncSubscription(db, mode, String(session.subscription));
+        await syncSubscription(db, mode, String(session.subscription), event);
       }
       break;
     }
@@ -169,7 +174,7 @@ async function handleEvent(
       const sub = event.data.object as Stripe.Subscription;
       // Re-fetch rather than trusting the payload: events can arrive out of
       // order, and the API always returns current truth.
-      await syncSubscription(db, mode, sub.id);
+      await syncSubscription(db, mode, sub.id, event);
       break;
     }
 
@@ -185,7 +190,7 @@ async function handleEvent(
       const subId = subscriptionIdFromInvoice(
         invoice as unknown as Parameters<typeof subscriptionIdFromInvoice>[0]
       );
-      if (subId) await syncSubscription(db, mode, subId);
+      if (subId) await syncSubscription(db, mode, subId, event);
       break;
     }
   }
@@ -201,7 +206,11 @@ async function handleEvent(
 async function syncSubscription(
   db: SupabaseClient,
   mode: string,
-  subscriptionId: string
+  subscriptionId: string,
+  // Only for the GHL dedupe key and debug payload below. Never a decision
+  // input: subscription state is still re-fetched from Stripe, never trusted
+  // from the event, because events can arrive out of order.
+  event?: Stripe.Event
 ): Promise<void> {
   const stripe = getStripe();
   const sub = await stripe.subscriptions.retrieve(subscriptionId);
@@ -325,6 +334,110 @@ async function syncSubscription(
 
   const { error } = await db.from("subscriptions").update(patch).eq("company_id", companyId);
   if (error) throw new Error(`Subscription update failed: ${error.message}`);
+
+  /**
+   * GoHighLevel buyer-state tags. STRICTLY AFTER the write above, and
+   * strictly unable to affect it.
+   *
+   * THE SINGLE MOST IMPORTANT PROPERTY OF THIS BLOCK IS THAT IT CANNOT FAIL
+   * THE HANDLER. This route is the only writer of subscription state; a throw
+   * from here would be caught upstream, recorded as `failed`, and — worse for
+   * the cases it does not catch — any non-2xx makes Stripe REDELIVER A PAYMENT
+   * EVENT for the sake of a marketing tag. `enqueueBuyerStateEvent` is
+   * documented as never throwing and every lookup inside it is guarded, so
+   * this `try` is belt and braces rather than the only defence. It stays
+   * anyway: the cost is nothing and the failure it prevents is money.
+   *
+   * It is also deliberately the LAST thing in the function, so there is no
+   * path on which a CRM concern delays or precedes the subscription write.
+   */
+  try {
+    const ghl = await enqueueBuyerStateEvent(db, {
+      companyId,
+      planId,
+      status: patch.status as string,
+      billingCycle: patch.billing_cycle as string,
+      stripeEventId: event?.id ?? null,
+      stripeEventType: event?.type ?? null,
+    });
+    if (!ghl.ok) {
+      console.warn("[stripe/webhook] GHL buyer state not queued:", ghl.reason, ghl.message);
+    }
+
+    /*
+     * The cancellation tag, from the SAME state and inside the SAME guard.
+     *
+     * A SEPARATE EVENT ROW RATHER THAN MORE TAGS ON THE BUYER ROW, because the
+     * two are different questions with different lifetimes: the buyer tag says
+     * whether they are paying, this says whether they have asked to stop. They
+     * also reverse independently — a reactivation changes this and not that.
+     *
+     * `patch.cancel_at_period_end` is `isEnding(sub)`, computed above, which is
+     * the only reading that catches a dated `cancel_at` from the Stripe billing
+     * portal as well as the flag. Re-deriving it here would be a second answer
+     * to a question that already has one.
+     *
+     * The two producers fire from one Stripe event, so their dedupe keys MUST
+     * differ — 044's unique index has no event_type in it. Each producer owns
+     * its own intent suffix; see `cancellationDedupeKey`.
+     */
+    const ghlCancel = await enqueueCancellationEvent(db, {
+      companyId,
+      isEnding: patch.cancel_at_period_end as boolean,
+      status: patch.status as string,
+      stripeEventId: event?.id ?? null,
+      stripeEventType: event?.type ?? null,
+      source: "stripe_webhook",
+    });
+    if (!ghlCancel.ok) {
+      console.warn(
+        "[stripe/webhook] GHL cancellation not queued:",
+        ghlCancel.reason,
+        ghlCancel.message
+      );
+    }
+
+    /*
+     * The founder tag, from the SAME state and inside the SAME guard.
+     *
+     * HERE RATHER THAN AT SIGNUP BECAUSE A FOUNDER IS A FOUNDING *CUSTOMER*:
+     * firing on company creation would spend the hundred slots on trials and
+     * abandoned registrations. The producer decides "did they really buy" by
+     * running `patch.status` through `buyerPresenceForStatus` — the same pure
+     * function the buyer-state producer uses — rather than this route deciding
+     * it twice, and it reads the company's own `created_at` itself so the
+     * payment path owns none of that rule.
+     *
+     * ONE-SHOT, keyed `company:{id}:founder`, so this is a refused insert on
+     * every renewal for a founder and two cheap reads for everybody past the
+     * limit. Its key shares the `company:` namespace with the milestone
+     * producer and fires from the same Stripe event as the two above, so the
+     * `:founder` suffix is what keeps 044's event_type-less unique index from
+     * reporting one of them as a silent `duplicate`.
+     */
+    const ghlFounder = await enqueueFounderEvent(db, {
+      companyId,
+      status: patch.status as string,
+      stripeEventId: event?.id ?? null,
+      stripeEventType: event?.type ?? null,
+      source: "stripe_webhook",
+    });
+    if (!ghlFounder.ok) {
+      console.warn(
+        "[stripe/webhook] GHL founder tag not queued:",
+        ghlFounder.reason,
+        ghlFounder.message
+      );
+    }
+  } catch (err: unknown) {
+    // Unreachable by contract. Logged rather than ignored so that a future
+    // change which breaks the contract is visible instead of silent.
+    console.error(
+      // Covers every producer in this block; none may cost a payment event.
+      "[stripe/webhook] GHL tagging threw (ignored):",
+      err instanceof Error ? err.message : String(err)
+    );
+  }
 }
 
 async function resolveCompanyId(

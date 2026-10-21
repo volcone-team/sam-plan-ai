@@ -10,6 +10,8 @@ import {
 } from "@/lib/billing/stripe-client";
 import { canReactivate, formatAccessDate } from "@/lib/billing/cancellation";
 import { logActivity } from "@/lib/activity-log";
+// Enqueue-only, never-throws. See the guarded block after the local patch.
+import { enqueueCancellationEvent } from "@/lib/ghl/producers/cancellation";
 import { sendSubscriptionReactivatedEmail } from "@/lib/mailgun";
 import { getAppUrl } from "@/lib/app-url";
 
@@ -208,6 +210,42 @@ export async function POST() {
 
     if (patchError) {
       console.error("[billing/reactivate] Local patch failed:", patchError.message);
+    }
+
+    /**
+     * TAKE THE CANCELLATION TAG OFF AGAIN. The reason the tag is modelled as a
+     * state rather than an event: this flow genuinely saves customers, and a
+     * customer who stays must not be left sitting in a churn or win-back
+     * sequence. A remove is a no-op in GHL for a contact that does not hold the
+     * tag, so this is safe even for the paths that never added it.
+     *
+     * Immediate rather than webhook-only for the same reasons as the cancel
+     * route: the webhook agrees but can be late and cannot reach localhost, and
+     * sending the same state twice is a no-op.
+     *
+     * NO DEDUPE KEY — no Stripe event id, a user-initiated action that happened
+     * once, and any invented key would make a later genuine reversal lose to
+     * this one as a "duplicate".
+     *
+     * CANNOT FAIL THE REACTIVATION. Stripe has already accepted it.
+     *
+     * `updated.status` and not the pre-update local status: the decision reads
+     * "not ending AND live", and this is Stripe's own answer to the second half
+     * as of a moment ago.
+     */
+    try {
+      const ghl = await enqueueCancellationEvent(db, {
+        companyId,
+        // The flag has just been cleared, which is the whole operation.
+        isEnding: false,
+        status: updated.status ?? resolvedStatus,
+        source: "billing_reactivate",
+      });
+      if (!ghl.ok) {
+        console.warn("[billing/reactivate] GHL cancellation not queued:", ghl.reason, ghl.message);
+      }
+    } catch (err: unknown) {
+      console.error("[billing/reactivate] GHL cancellation threw (ignored):", errMessage(err));
     }
 
     if (me.email) {

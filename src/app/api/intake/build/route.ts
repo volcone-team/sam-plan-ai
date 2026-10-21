@@ -51,6 +51,7 @@ import {
 import { sequenceEventDates } from "@/lib/plan-schedule";
 import { toDateOnly } from "@/lib/plan-dates";
 import { snapshotProducts } from "@/lib/snapshot-products";
+import { enqueueMilestoneEvent } from "@/lib/ghl/producers/milestone";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -815,6 +816,56 @@ export async function POST(request: NextRequest) {
     // now that it has succeeded. recordUsage never throws.
     if (regenPeriod && wiped.deleted > 0) {
       await recordUsage(db, companyId, LIMIT_KEYS.PLAN_REGENERATIONS, regenPeriod);
+    }
+
+    /**
+     * GoHighLevel: BOTH milestones, because this one route is both of them.
+     *
+     * This is the intake's single commit point AND the only way a customer
+     * gets a plan in the current product — onboarding sends them to
+     * /intake/start and the intake commits here (see onboarding/welcome), and
+     * /api/generate-plan has no caller in the UI at all any more. Firing only
+     * `finished intake` would mean no customer ever receives
+     * `plan generated`, and the client's workflow for it would be dead.
+     *
+     * ONE-SHOT PER COMPANY, which is what makes it safe to fire both from a
+     * route that is also the REBUILD path (it meters plan_regenerations, so
+     * rebuilding is expected). The dedupe key is scoped to the company, so a
+     * rebuild reports `duplicate` and writes nothing — the client's onboarding
+     * email is not re-sent to a customer who tidied up their plan. See
+     * producers/milestone.ts.
+     *
+     * AFTER EVERYTHING IS COMMITTED, AND WRAPPED, deliberately. The plan is on
+     * disk, the lifecycle is stamped and the regeneration is metered by this
+     * point, and the build may have spent an Anthropic call on task lists. A
+     * throw here would report a finished plan as a 500 and the customer would
+     * press the button again — spending the tokens twice for a marketing tag.
+     * `enqueueMilestoneEvent` never throws by contract; the catch is for the
+     * contract being wrong.
+     *
+     * Attributed to the company OWNER even when a member clicked. Deliberate
+     * — only the owner is a GHL contact. The producer explains why.
+     */
+    try {
+      for (const milestone of ["finished_intake", "plan_generated"] as const) {
+        await enqueueMilestoneEvent(db, {
+          milestone,
+          companyId,
+          userId: user.id,
+          source: "intake_build",
+          context: {
+            initiativeCount,
+            productCount: productIdByIntakeId.size,
+            // Counts already in hand; nothing here costs a query.
+            rebuild: wiped.deleted > 0,
+          },
+        });
+      }
+    } catch (err: unknown) {
+      console.error(
+        "[intake/build] GHL milestone enqueue failed (plan is already built):",
+        err instanceof Error ? err.message : String(err)
+      );
     }
 
     return NextResponse.json({

@@ -13,6 +13,7 @@ import {
   productAdditions,
 } from "@/lib/billing/live-limits";
 import { logGenerationEvent, type GenerationEventType } from "@/lib/generation-events";
+import { enqueueMilestoneEvent } from "@/lib/ghl/producers/milestone";
 import { classifyAiFailure, aiFailureLogDetail, operatorHint } from "@/lib/ai-errors";
 import { toDateOnly, clampDayOfMonth, resolvePlanStart, planMonthToCalendar, todayDateOnly, requiredRunwayDays } from "@/lib/plan-dates";
 import { sequenceEventDates } from "@/lib/plan-schedule";
@@ -936,6 +937,53 @@ Generate a complete revenue plan as JSON.`;
       LIMIT_KEYS.AI_USES_MONTH,
       entitlement.period
     );
+
+    /**
+     * GoHighLevel: `plan generated`, and ONLY that one. This route is not the
+     * intake — it takes questionnaire answers directly — so it has no business
+     * claiming the customer finished one. `/api/intake/build` fires both.
+     *
+     * FIRED ON A REGENERATION TOO, and that is safe rather than sloppy: the
+     * milestone is one-shot per COMPANY (the dedupe key is
+     * `company:{id}:plan_generated`), so the second and every later run report
+     * `duplicate` and write nothing. Suppressing it on `plan_regeneration`
+     * instead would be wrong in the one case that matters — `isRegeneration`
+     * falls back to "has this company ever snapshotted a plan", which is true
+     * for an account whose first real generation follows a reset, and that
+     * customer would silently never be tagged.
+     *
+     * `billingDb` is the SERVICE-ROLE client, which this needs: `ghl_events`
+     * has RLS on with no policies, and `profiles` is not readable from the
+     * user-scoped `supabase` client used elsewhere in this route. Same client
+     * recordUsage above is already using at this point.
+     *
+     * AFTER THE PLAN IS WRITTEN AND METERED, AND WRAPPED. A throw here would
+     * turn a plan that cost a real Claude call into a 500 and invite the
+     * customer to spend those tokens again. The producer never throws by
+     * contract; the catch is for the contract being wrong. It is also outside
+     * the route's own catch on purpose — that path calls logGenerationEvent
+     * with `status: "failed"` and must NOT fire a milestone, because no plan
+     * was produced.
+     */
+    try {
+      await enqueueMilestoneEvent(billingDb, {
+        milestone: "plan_generated",
+        companyId,
+        userId: check.userId,
+        source: "generate_plan",
+        context: {
+          // Already in hand from the generation; nothing here costs a query.
+          regeneration: eventType === "plan_regeneration",
+          initiativeCount: generatedInitiatives.length,
+          productCount: productIds.length,
+        },
+      });
+    } catch (err: unknown) {
+      console.error(
+        "[generate-plan] GHL milestone enqueue failed (plan is already saved):",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
 
     return NextResponse.json({
       success: true,

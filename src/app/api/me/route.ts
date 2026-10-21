@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { cancelSubscriptionsForCompany } from "@/lib/billing/cancel-on-delete";
+import { enqueueFirstLoginEvent } from "@/lib/ghl/producers/first-login";
 import {
   IMPERSONATION_MARKER_COOKIE,
   IMPERSONATION_RETURN_COOKIE,
@@ -138,7 +139,13 @@ export async function GET() {
 
     const { data: profile, error } = await adminClient
       .from("profiles")
-      .select("company_id, first_name, last_name, role, is_active, is_admin, admin_level")
+      // `ghl_first_login_at` is ONE MORE COLUMN ON A SELECT THAT ALREADY RUNS,
+      // never a query of its own: this route executes on every page load, and
+      // after the first time the entire cost of the first-login tag is a null
+      // check on data already in hand. See lib/ghl/producers/first-login.ts.
+      .select(
+        "company_id, first_name, last_name, role, is_active, is_admin, admin_level, ghl_first_login_at"
+      )
       .eq("id", userId)
       .single();
 
@@ -173,6 +180,48 @@ export async function GET() {
       const value = meta[key];
       return typeof value === "string" && value.length > 0 ? value : null;
     };
+
+    /*
+     * THE FIRST-LOGIN TAG. There is no login event in this app — 2FA plus a
+     * 30-day trusted-device cookie means a returning user may never hit the
+     * verify route — so "the first time we ever saw this person authenticated"
+     * is the honest definition, and this is the one route where it is
+     * observable: AuthProvider cannot render anything without it.
+     *
+     * MUST NEVER FAIL OR MEANINGFULLY SLOW THIS REQUEST. /api/me failing is an
+     * app that cannot render, so the producer never throws by contract and this
+     * is wrapped anyway. It does ZERO queries while the integration is off, and
+     * after the first page load it exits on a null check against the column
+     * just selected.
+     *
+     * `impersonation !== null` IS THE CONDITION MOST EASILY FORGOTTEN: a super
+     * admin opening a customer's account from /admin/companies is signed in AS
+     * that customer, same session and same profile row, and must not stamp that
+     * customer's first login or fire the welcome workflow behind it. There is
+     * no undo on an email that has been sent.
+     *
+     * AWAITED, NOT FLOATING. A floating promise here is a real hazard rather
+     * than a style point: this runs in a serverless function, the invocation
+     * can be frozen the moment the response is returned, and the work would be
+     * abandoned somewhere between the stamp and the insert — precisely the one
+     * interleaving that spends the one-shot without queueing the tag. The cost
+     * of awaiting is paid once per person.
+     */
+    try {
+      await enqueueFirstLoginEvent(adminClient, {
+        userId,
+        companyId: profile.company_id,
+        role: profile.role,
+        firstLoginAt: profile.ghl_first_login_at ?? null,
+        isImpersonating: impersonation !== null,
+        source: "api_me",
+      });
+    } catch (err: unknown) {
+      console.error(
+        "[api/me] first-login tag failed:",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
 
     console.log(
       "[api/me]", userEmail,

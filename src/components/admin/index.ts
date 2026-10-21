@@ -9,6 +9,7 @@ export { CompanyManagement } from "./company-management";
 export { CompanyDetail } from "./company-detail";
 export { AdminAnalytics } from "./admin-analytics";
 export { AdminSettings } from "./admin-settings";
+export { GhlSettings } from "./ghl-settings";
 export { NotificationSettings } from "./notification-settings";
 export { ActivityLog } from "./activity-log";
 export { AiTools } from "./ai-tools";

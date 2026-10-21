@@ -5,6 +5,7 @@ import { CheckCircle, Settings, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RoleManagement } from "./role-management";
 import { LegalLinksSettings } from './legal-links-settings';
+import { GhlSettings } from './ghl-settings';
 
 /* ------------------------------------------------------------------
    Types
@@ -110,7 +111,14 @@ function ToggleSwitch({
 export function AdminSettings() {
   const [settings, setSettings] = useState<PlatformSettings>(DEFAULT_PLATFORM_SETTINGS);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'platform' | 'roles'>('platform');
+  /*
+   * THE GHL TAB LIVES HERE AND NOT ON SUBSCRIPTIONS. The call gate and
+   * retention sit beside the subscription because they are "what happens to a
+   * customer at the edges of their subscription". The GoHighLevel sync is
+   * platform plumbing — an outbox, a cron and two environment variables — and
+   * its global off switch is the one the client asked for.
+   */
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'platform' | 'roles' | 'ghl'>('platform');
   // Server-persisted, unlike the platform settings above. Applies to every visitor.
   const [deterDevtools, setDeterDevtools] = useState(false);
   const [deterError, setDeterError] = useState<string | null>(null);
@@ -193,6 +201,7 @@ export function AdminSettings() {
         {([
           { key: 'platform', label: 'Platform Settings', icon: Settings },
           { key: 'roles', label: 'Role Management', icon: Settings },
+          { key: 'ghl', label: 'GoHighLevel', icon: Settings },
         ] as const).map(tab => (
           <button
             key={tab.key}
@@ -411,6 +420,17 @@ export function AdminSettings() {
       {activeSettingsTab === 'roles' && (
       <section aria-label="Role Management">
         <RoleManagement />
+      </section>
+      )}
+
+      {/*
+        GoHighLevel. Mounted only when its tab is active, so the panel's three
+        requests (settings, outbox counts, delivery log) are not fired at every
+        admin who opens this page to change the support email.
+      */}
+      {activeSettingsTab === 'ghl' && (
+      <section aria-label="GoHighLevel sync">
+        <GhlSettings />
       </section>
       )}
     </div>

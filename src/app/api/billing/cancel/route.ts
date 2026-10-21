@@ -20,6 +20,8 @@ import {
 } from "@/lib/billing/cancellation";
 import { recordCancellationFeedback } from "@/lib/billing/cancellation-record";
 import { logActivity } from "@/lib/activity-log";
+// Enqueue-only, never-throws. See the guarded block after the local patch.
+import { enqueueCancellationEvent } from "@/lib/ghl/producers/cancellation";
 import { sendSubscriptionCancelledEmail } from "@/lib/mailgun";
 import { getAppUrl } from "@/lib/app-url";
 
@@ -386,6 +388,41 @@ export async function POST(request: Request) {
       // this is a display problem, not a billing one. The webhook or a
       // reconcile will correct the row.
       console.error("[billing/cancel] Local patch failed:", patchError.message);
+    }
+
+    /**
+     * GoHighLevel's cancellation tag, now rather than when the webhook lands.
+     *
+     * WHY NOT JUST LET THE WEBHOOK DO IT — it will, and with the same decision.
+     * But `customer.subscription.updated` can be seconds or minutes late and
+     * cannot reach localhost at all, and a retention workflow is most useful
+     * immediately after somebody presses cancel. Both paths send the same
+     * state, and sending a state twice is a no-op, so the overlap is free.
+     *
+     * NO DEDUPE KEY, DELIBERATELY. There is no Stripe event id here, and
+     * inventing a stable key (company + day, say) would make the webhook's own
+     * row or a second genuine cancellation lose to it as a "duplicate". This is
+     * a user-initiated action that happened exactly once — they pressed a
+     * button — so enqueueing unconditionally is the honest record.
+     *
+     * CANNOT FAIL THE CANCELLATION. Stripe has already accepted it; the
+     * customer's request succeeded whatever happens to a marketing tag. The
+     * producer is documented as never throwing and this `try` is belt and
+     * braces, kept because the cost is nothing.
+     */
+    try {
+      const ghl = await enqueueCancellationEvent(db, {
+        companyId,
+        // They asked to stop. The local patch above has just written the same.
+        isEnding: true,
+        status: resolvedStatus,
+        source: "billing_cancel",
+      });
+      if (!ghl.ok) {
+        console.warn("[billing/cancel] GHL cancellation not queued:", ghl.reason, ghl.message);
+      }
+    } catch (err: unknown) {
+      console.error("[billing/cancel] GHL cancellation threw (ignored):", errMessage(err));
     }
 
     const balanceOutstanding =

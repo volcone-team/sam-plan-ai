@@ -382,6 +382,21 @@ Suggest improvements to this plan as JSON.`;
     // must not consume the customer's allowance.
     await recordUsage(billingDb, companyId, LIMIT_KEYS.AI_USES_MONTH, entitlement.period);
 
+    /**
+     * NO GoHighLevel MILESTONE HERE, deliberately. Stated because the two
+     * sibling AI routes (/api/generate-plan, /api/intake/build) both fire one
+     * at exactly this point, so the absence would otherwise read as an
+     * oversight.
+     *
+     * Enhancement is not generation. It writes `plan_suggestions` rows for an
+     * EXISTING plan and creates no initiatives; the client's tag list has no
+     * "plan enhanced" tag, and the only tag that could plausibly be stretched
+     * to cover it — `plan generated` — is wired to their onboarding workflow.
+     * Firing it would mail a welcome sequence to a long-standing customer for
+     * pressing Enhance. The milestone is also one-shot per company, so for the
+     * customers it would be wrong for it has already been spent anyway.
+     */
+
     return NextResponse.json({ success: true, batchId, count: rows.length });
   } catch (err: any) {
     // Record the failure so a broken enhance path is visible on the dashboard
