@@ -38,6 +38,8 @@ import { NumberInputRaw } from '@/components/ui/number-input';
 import { formatMoney } from '@/lib/format-money';
 import { sumInitiatives, goalProgress, goalCoverage, shouldTrackPace, trackingStartsLabel } from '@/lib/plan-totals';
 import { usePlanYears } from '@/hooks/use-plan-years';
+import { launchDate, needsDates, needsDatesNotice } from '@/lib/initiatives/schedule';
+import { parseDateOnly } from '@/lib/plan-dates';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -55,7 +57,7 @@ interface TimelineInitiative {
   id: string;
   name: string;
   status: string;
-  activationDate: Date;
+  activationDate: Date | null;
   eventDate?: Date;
 }
 
@@ -94,6 +96,8 @@ export function YearAtAGlance() {
   const [annualPlan, setAnnualPlan] = useState<AnnualPlan | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
   const [initiatives, setInitiatives] = useState<TimelineInitiative[]>([]);
+  /** Month-only + undated initiatives in this year's plan. */
+  const [needsDatesCount, setNeedsDatesCount] = useState(0);
   /** Full initiative rows for the redesigned Active Initiatives cards. */
   const [initiativeRows, setInitiativeRows] = useState<Initiative[]>([]);
   /** Actual revenue + spend per initiative, from results/expenses. */
@@ -136,9 +140,11 @@ export function YearAtAGlance() {
         let projections: any[] = [];
         let products: Array<{ id: string; name: string }> = [];
         let initiativesData: Initiative[] = [];
+        let needsDatesCount = 0;
 
         if (cached) {
           ({ plan, quarters, projections, products, initiativesData } = cached.value);
+          needsDatesCount = Number(cached.value.needsDatesCount) || 0;
           console.log('[YearAtAGlance] Served from cache (stale:', cached.stale, ')');
         }
 
@@ -163,9 +169,16 @@ export function YearAtAGlance() {
           // initiatives activate in 2027 - filtering by annual_plan_id hid all
           // of those, which is why 2027 was empty everywhere except the
           // Initiatives page (which filters by nothing).
-          const initiativesInYear = initiativesData.filter(
-            (i) => new Date(i.activationDate).getFullYear() === selectedYear
-          );
+          //
+          // "Activation date" here is launchDate(): the activation date for
+          // every legacy row, and for a new-intake row without one its event
+          // date. An undated row is in no year (see needsDatesCount below).
+          const allInitiatives = initiativesData;
+          const inSelectedYear = (i: Initiative) => {
+            const launch = launchDate(i);
+            return launch !== null && Number(launch.slice(0, 4)) === selectedYear;
+          };
+          const initiativesInYear = initiativesData.filter(inSelectedYear);
           if (initiativesInYear.length > 0) {
             // The year has real initiatives. Keep them, and keep the goals of
             // the plan that generated them - a spanned year is the SAME plan,
@@ -190,13 +203,20 @@ export function YearAtAGlance() {
             initiativesData = [];
           }
 
+          // Month-only initiatives in this year, plus undated ones saved to
+          // this year's plan: neither can be placed on a day yet, and the
+          // undated ones would otherwise vanish from the year without a trace.
+          needsDatesCount = allInitiatives.filter((i) =>
+            needsDates(i) &&
+            (inSelectedYear(i) || (launchDate(i) === null && !!plan?.id && i.annualPlanId === plan.id))
+          ).length;
           cacheSet(cacheKey, {
-            plan, quarters, projections, products, initiativesData,
+            plan, quarters, projections, products, initiativesData, needsDatesCount,
           });
         }
 
         setAnnualPlan(plan);
-
+        setNeedsDatesCount(needsDatesCount);
         // Build monthly data from projections
         const goodProj = projections.find((p: any) => p.scenario === 'good');
         const betterProj = projections.find((p: any) => p.scenario === 'better');
@@ -307,7 +327,10 @@ export function YearAtAGlance() {
         const sumExpected = (from: Date) =>
           initiativesData
             .filter((i) => {
-              const d = new Date(i.activationDate);
+              // launchDate: activation for legacy rows; undated rows expect nothing.
+              const launch = launchDate(i);
+              if (launch === null) return false;
+              const d = parseDateOnly(launch);
               return d >= from && d <= cutoff;
             })
             .reduce((sum, i) => sum + (i.revenueScenarios?.better || 0), 0);
@@ -399,7 +422,7 @@ export function YearAtAGlance() {
           i.name,
           i.kind,
           i.status,
-          new Date(i.activationDate).toISOString().split('T')[0],
+          i.activationDate ? new Date(i.activationDate).toISOString().split('T')[0] : '',
           String(i.revenueScenarios?.better || 0),
           String(a.revenue),
           String(i.plannedBudget || 0),
@@ -979,6 +1002,15 @@ export function YearAtAGlance() {
 
       {/* ACTIVE INITIATIVES — the projects that produce the revenue */}
       <section>
+        {needsDatesNotice(needsDatesCount) && (
+          <Link
+            href="/initiatives"
+            className="mb-4 flex items-center gap-2 rounded-[var(--radius-lg)] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+          >
+            <CalendarDays className="h-4 w-4 shrink-0" aria-hidden="true" />
+            {needsDatesNotice(needsDatesCount)}
+          </Link>
+        )}
         <div className="flex items-end justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
@@ -1207,7 +1239,8 @@ function initiativeHealth(initiative: Initiative, actualRevenue: number): {
   label: string; dot: string; tone: string;
 } {
   const planned = initiative.revenueScenarios?.better || 0;
-  const started = new Date(initiative.activationDate) <= new Date();
+  const launch = launchDate(initiative);
+  const started = launch !== null && parseDateOnly(launch) <= new Date();
   if (!started || initiative.status === 'planned') {
     return { label: 'Draft', dot: 'bg-[hsl(var(--foreground-subtle))]', tone: 'text-[hsl(var(--foreground-muted))]' };
   }

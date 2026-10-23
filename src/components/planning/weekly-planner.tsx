@@ -27,6 +27,7 @@ import { initiativeService } from '@/services/initiative.service';
 import { taskService } from '@/services/task.service';
 import { resultService } from '@/services/result.service';
 import { updateInitiativeStatusFromTasks } from '@/lib/update-initiative-status';
+import { activeInWeek } from '@/lib/initiatives/schedule';
 import { formatMoney } from '@/lib/format-money';
 import { NumberInputRaw } from '@/components/ui/number-input';
 import { MetricInputs } from '@/components/initiatives/metric-inputs';
@@ -187,20 +188,11 @@ export function WeeklyPlanner() {
 
         setWeeklyPlan(plan);
 
-        // Filter initiatives active during this week
-        const weekInitiatives = activeInitiatives.filter(init => {
-          const activation = new Date(init.activationDate);
-          const eventDate = init.eventDate ? new Date(init.eventDate) : null;
-
-          if (init.kind === 'evergreen') {
-            return activation <= end;
-          }
-          // One-time or recurring: check if activation is before week end and event is after week start
-          if (eventDate) {
-            return activation <= end && eventDate >= weekStart;
-          }
-          return activation <= end;
-        });
+        // Filter initiatives active during this week. activeInWeek keeps this
+        // planner's old rule for legacy rows verbatim; new-intake rows use
+        // launch -> revenue close, and month-only / undated ones are excluded
+        // because they were never given the days that would place them in a week.
+        const weekInitiatives = activeInitiatives.filter(init => activeInWeek(init, weekStart, end));
         setInitiatives(weekInitiatives);
 
         console.log("[WeeklyPlanner] Loaded", weekInitiatives.length, "initiatives for week");

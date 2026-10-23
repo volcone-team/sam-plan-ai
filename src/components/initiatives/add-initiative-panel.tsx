@@ -20,6 +20,12 @@ import { MetricSetPicker, DEFAULT_METRIC_CHOICE, type MetricChoice } from './met
 import type { StoredMetrics } from '@/lib/metrics/parse-metrics';
 import { LimitReachedError, type LimitNotice as LimitNoticeData } from '@/lib/billing/limit-notice';
 import { LimitNotice } from '@/components/billing/limit-notice';
+import type { PickerItem } from '@/lib/intake-v3/picker';
+import { IntakePicker } from './intake-picker';
+import { IntakeForm } from './intake-form';
+import { useIntakePickerLoad } from './use-intake-picker-load';
+import { chooseAddFlow } from './add-initiative-flow';
+import type { HandoffInitiative } from '@/lib/initiatives/lead-handoff';
 
 export interface AddInitiativePanelProps {
   open: boolean;
@@ -28,6 +34,10 @@ export interface AddInitiativePanelProps {
   onSubmit: (request: CreateInitiativeRequest) => Promise<void>;
   products: Array<{ id: string; name: string }>;
   annualPlanId: string;
+  /** The year of `annualPlanId`'s plan. The intake form defaults an ongoing close date to its end. */
+  planYear?: number | null;
+  /** The company's loaded initiatives, for the lead-handoff select. */
+  handoffTargets?: readonly HandoffInitiative[];
 }
 
 type PanelStep = 'pick-type' | 'configure';
@@ -39,8 +49,17 @@ type Selection =
 
 /**
  * Slide-over panel for adding a new initiative.
- * Two-step flow: pick an initiative from the ACTIVE workbook library (or
- * Custom) → configure details. The type mapping happens server-side.
+ *
+ * New Initiative Intake (when the admin switch is on, or the caller is a
+ * super admin previewing it, and GET /api/intake-v3/picker offers anything):
+ * IntakePicker → IntakeForm for the picked record.
+ *
+ * Legacy fallback (picker failed, or nothing offered — see chooseAddFlow):
+ * pick an initiative from the ACTIVE workbook library (or Custom) → configure
+ * details. The type mapping happens server-side.
+ *
+ * Either way the request goes to the caller's onSubmit (POST /api/initiatives)
+ * and success closes the panel.
  */
 export function AddInitiativePanel({
   open,
@@ -48,11 +67,16 @@ export function AddInitiativePanel({
   onSubmit,
   products,
   annualPlanId,
+  planYear = null,
+  handoffTargets,
 }: AddInitiativePanelProps) {
   const [step, setStep] = useState<PanelStep>('pick-type');
   const [choice, setChoice] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<Selection | null>(null);
   const library = useCustomerLibrary(open);
+  const addFlow = chooseAddFlow(useIntakePickerLoad(open));
+  /** The record picked in the new intake picker; null on the picker screen. */
+  const [intakeItem, setIntakeItem] = useState<PickerItem | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   /** A plan-limit refusal, shown with an Upgrade link for owners. */
@@ -97,6 +121,7 @@ export function AddInitiativePanel({
   const resetForm = () => {
     setSubmitError(null);
     setSubmitLimit(null);
+    setIntakeItem(null);
     setStep('pick-type');
     setChoice(null);
     setSelectedType(null);
@@ -224,7 +249,110 @@ export function AddInitiativePanel({
     }
   };
 
+  /** The new intake form's submit: same request target, same success path. */
+  const handleIntakeSubmit = async (request: CreateInitiativeRequest) => {
+    setSubmitting(true);
+    setSubmitError(null);
+    setSubmitLimit(null);
+    try {
+      await onSubmit(request);
+      handleClose();
+    } catch (err) {
+      // Shown through the form's `error` prop (or the limit notice); not
+      // rethrown, so the form does not show it a second time.
+      if (err instanceof LimitReachedError) {
+        setSubmitLimit(err.notice);
+      } else {
+        setSubmitError(err instanceof Error ? err.message : 'Could not save the initiative.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleIntakeBack = () => {
+    setIntakeItem(null);
+    setSubmitError(null);
+    setSubmitLimit(null);
+  };
+
   if (!open) return null;
+
+  if (addFlow.flow !== 'legacy') {
+    const intakeConfig =
+      addFlow.flow === 'intake' && intakeItem ? addFlow.load.configs[intakeItem.key] : undefined;
+    return (
+      <>
+        {/* Backdrop */}
+        <div
+          className="fixed inset-0 z-40 bg-black/30 transition-opacity"
+          onClick={handleClose}
+          aria-hidden="true"
+        />
+
+        {/* Panel */}
+        <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col bg-card shadow-xl">
+          {/* Header. The form carries its own Back and heading. */}
+          <div className="flex items-center justify-between border-b border-border px-6 py-4">
+            <h2 className="text-lg font-semibold text-[hsl(var(--foreground))]">New Initiative</h2>
+            <button
+              onClick={handleClose}
+              className="rounded-[var(--radius-md)] p-1.5 text-[hsl(var(--foreground-muted))] hover:bg-background hover:text-[hsl(var(--foreground))] transition-colors"
+              aria-label="Close panel"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto px-6 py-5">
+            {addFlow.flow === 'intake' && addFlow.load.preview && (
+              <p
+                role="note"
+                className="mb-4 rounded-[var(--radius-md)] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300"
+              >
+                Preview — customers still see the current form.
+              </p>
+            )}
+
+            {addFlow.flow === 'loading' && (
+              <p role="status" className="px-1 py-6 text-center text-sm text-[hsl(var(--foreground-muted))]">
+                Loading initiatives…
+              </p>
+            )}
+
+            {addFlow.flow === 'intake' && intakeItem && intakeConfig ? (
+              <div className="space-y-4">
+                <LimitNotice notice={submitLimit} />
+                <IntakeForm
+                  key={intakeItem.key}
+                  item={intakeItem}
+                  config={intakeConfig}
+                  products={products}
+                  annualPlanId={annualPlanId}
+                  planYear={planYear}
+                  onBack={handleIntakeBack}
+                  onSubmit={handleIntakeSubmit}
+                  submitting={submitting}
+                  error={submitError}
+                  handoffTargets={handoffTargets}
+                />
+              </div>
+            ) : (
+              addFlow.flow === 'intake' && (
+                <div className="space-y-4">
+                  <p className="text-sm text-[hsl(var(--foreground-muted))]">
+                    Choose an initiative to add to your plan.
+                  </p>
+                  <IntakePicker load={addFlow.load} onSelect={setIntakeItem} onCancel={handleClose} />
+                </div>
+              )
+            )}
+          </div>
+        </div>
+      </>
+    );
+  }
 
   const selectedName =
     selectedType?.kind === 'library' ? selectedType.name : 'Custom Initiative';

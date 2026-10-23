@@ -15,6 +15,8 @@ import type {
 import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
 import { toDateOnly, parseDateOnly } from '@/lib/plan-dates';
 import { readMetricSet } from '@/lib/metrics/metric-set';
+import { overlapsPeriod } from '@/lib/initiatives/schedule';
+import { LEAD_HANDOFF_ATTR, handoffCleanup } from '@/lib/initiatives/lead-handoff';
 
 export class InitiativeService {
   /**
@@ -260,17 +262,26 @@ export class InitiativeService {
         const startStr = toDateOnly(startDate);
         const endStr = toDateOnly(endDate);
 
+        /**
+         * The database narrows to a SUPERSET (anything launching by the period
+         * end, plus rows with no activation date, which only the new intake
+         * writes) and `overlapsPeriod` decides. For a legacy row that rule is
+         * the old filter exactly - activation <= end AND (event >= start OR
+         * no event) - so the result is unchanged; a new-intake row is judged
+         * launch -> revenue close instead of by its event date.
+         */
         const { data, error } = await supabase
           .from('initiatives')
           .select('*')
           .eq('company_id', companyId)
-          .lte('activation_date', endStr)
-          .or(`event_date.gte.${startStr},event_date.is.null`);
+          .or(`activation_date.lte.${endStr},activation_date.is.null`);
 
         if (error) console.error("[Supabase initiatives]", (error as any).message, "|details:", (error as any).details, "|hint:", (error as any).hint, "|code:", (error as any).code);
 
         if (!error && data) {
-          return data.map(row => this.mapRowToInitiative(row));
+          return data
+            .map(row => this.mapRowToInitiative(row))
+            .filter(i => overlapsPeriod(i, startStr, endStr));
         }
       } catch (e) { console.error("[Supabase]", e); }
     }
@@ -357,12 +368,46 @@ export class InitiativeService {
       if (error) {
         throw new Error(error.message);
       }
+      await this.clearLeadHandoffsTo(id);
       return;
     }
 
     // Mock data removed - return empty
     console.log("[initiative] No data in Supabase, returning empty");
     console.log("[initiative] No data"); return;
+  }
+
+  /**
+   * After a delete: clear attrs.lead_handoff_to on every initiative that sent
+   * its leads to the deleted one, so it reverts to "no handoff" rather than
+   * pointing at nothing. RLS scopes the lookup to the caller's company.
+   *
+   * BEST-EFFORT. The delete has already happened; a failure here is logged
+   * and swallowed, and readers treat a dangling id as blank anyway.
+   */
+  private async clearLeadHandoffsTo(deletedId: string): Promise<void> {
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('initiatives')
+        .select('id, attrs')
+        .eq(`attrs->>${LEAD_HANDOFF_ATTR}`, deletedId);
+      if (error) {
+        console.error('[initiative] lead handoff cleanup lookup failed:', error.message);
+        return;
+      }
+      for (const row of handoffCleanup((data ?? []) as Array<{ id: string; attrs: unknown }>, deletedId)) {
+        const { error: updateError } = await supabase
+          .from('initiatives')
+          .update({ attrs: row.attrs })
+          .eq('id', row.id);
+        if (updateError) {
+          console.error('[initiative] lead handoff cleanup failed for', row.id, updateError.message);
+        }
+      }
+    } catch (e) {
+      console.error('[initiative] lead handoff cleanup failed:', e instanceof Error ? e.message : String(e));
+    }
   }
 
   /**
@@ -382,8 +427,20 @@ export class InitiativeService {
       description: (row.description as string) || '',
       kind: row.kind as InitiativeKind,
       status: row.status as InitiativeStatus,
-      activationDate: parseDateOnly(row.activation_date as string),
+      // Nullable since migration 045 (an unscheduled new-intake row). Parsing
+      // null would yield 1 Jan 1970 and file the initiative there.
+      activationDate: row.activation_date ? parseDateOnly(row.activation_date as string) : null,
       eventDate: row.event_date ? parseDateOnly(row.event_date as string) : undefined,
+      // Migration 045; an absent column reads as the column default.
+      revenueCloseDate: row.revenue_close_date ? parseDateOnly(row.revenue_close_date as string) : null,
+      activationDatePrecision: row.activation_date_precision === 'month' ? 'month' : 'day',
+      eventDatePrecision: row.event_date_precision === 'month' ? 'month' : 'day',
+      categoryId: typeof row.category_id === 'string' && row.category_id !== '' ? row.category_id : null,
+      conversionPath: typeof row.conversion_path === 'string' && row.conversion_path !== '' ? row.conversion_path : null,
+      attrs:
+        typeof row.attrs === 'object' && row.attrs !== null && !Array.isArray(row.attrs)
+          ? (row.attrs as Record<string, unknown>)
+          : {},
       trafficInput: row.traffic_input as number | undefined,
       revenueScenarios: {
         good: Number(row.revenue_good) || 0,

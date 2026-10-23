@@ -1,4 +1,14 @@
 import type { InitiativeKind } from "@/types";
+import {
+  CONVERSION_PATHS,
+  INITIATIVE_FORMATS,
+  isCategoryId,
+  type CategoryId,
+  type ConversionPath,
+  type InitiativeFormat,
+} from "@/lib/intake-v3/library-config";
+
+export type DatePrecision = "day" | "month";
 
 /**
  * The body of POST /api/initiatives — creating one initiative from the in-app
@@ -11,12 +21,13 @@ import type { InitiativeKind } from "@/types";
 export interface CreateInitiativeRequest {
   libraryKey: string | null;
   annualPlanId: string;
-  productId: string;
+  /** Null only on a new-form request (categoryId set): migration 045 relaxed the NOT NULL. */
+  productId: string | null;
   name: string;
   description: string;
   kind: InitiativeKind;
-  /** YYYY-MM-DD. */
-  activationDate: string;
+  /** YYYY-MM-DD. Null only on a new-form request (categoryId set), as productId. */
+  activationDate: string | null;
   /** YYYY-MM-DD, or null when not set. */
   eventDate: string | null;
   trafficInput: number | null;
@@ -33,6 +44,103 @@ export interface CreateInitiativeRequest {
     /** Selection ids of optional metrics the customer unticked. */
     excludedOptional?: string[];
   };
+
+  /*
+   * Migration 045 columns, written by the new intake form. ALL OPTIONAL: a
+   * key is set on the parsed value only when the body carried it, and the
+   * route writes the column only then, so an old-form request is untouched.
+   * `categoryId` (non-null) is what marks a request as new-form.
+   */
+  conversionPath?: ConversionPath | null;
+  audienceSource?: "own" | "borrowed" | null;
+  format?: InitiativeFormat | null;
+  categoryId?: CategoryId | null;
+  /** YYYY-MM-DD, or null. */
+  revenueCloseDate?: string | null;
+  activationDatePrecision?: DatePrecision;
+  eventDatePrecision?: DatePrecision;
+  /** The variable layers of the form. Always a plain object. */
+  attrs?: Record<string, unknown>;
+}
+
+const AUDIENCE_SOURCES = ["own", "borrowed"] as const;
+const DATE_PRECISIONS: readonly DatePrecision[] = ["day", "month"];
+
+/** One of `allowed`, or null when the body sent null; "invalid" for anything else. */
+function nullableEnum<T extends string>(v: unknown, allowed: readonly T[]): T | null | "invalid" {
+  if (v === null) return null;
+  return allowed.find((a) => a === v) ?? "invalid";
+}
+
+/** A JSON-style plain object: not an array, not null, no exotic prototype. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
+type NewFields = Pick<
+  CreateInitiativeRequest,
+  | "conversionPath"
+  | "audienceSource"
+  | "format"
+  | "categoryId"
+  | "revenueCloseDate"
+  | "activationDatePrecision"
+  | "eventDatePrecision"
+  | "attrs"
+>;
+
+/** Validate the 045 fields. Each is checked only when its key is present. */
+function parseNewFields(body: Record<string, unknown>): { ok: true; value: NewFields } | { ok: false; error: string } {
+  const out: NewFields = {};
+
+  if (body.conversionPath !== undefined) {
+    const v = nullableEnum(body.conversionPath, CONVERSION_PATHS);
+    if (v === "invalid") return { ok: false, error: "Invalid conversion path." };
+    out.conversionPath = v;
+  }
+  if (body.audienceSource !== undefined) {
+    const v = nullableEnum(body.audienceSource, AUDIENCE_SOURCES);
+    if (v === "invalid") return { ok: false, error: "Invalid audience source." };
+    out.audienceSource = v;
+  }
+  if (body.format !== undefined) {
+    const v = nullableEnum(body.format, INITIATIVE_FORMATS);
+    if (v === "invalid") return { ok: false, error: "Invalid format." };
+    out.format = v;
+  }
+  if (body.categoryId !== undefined) {
+    if (body.categoryId !== null && !isCategoryId(body.categoryId)) {
+      return { ok: false, error: "Invalid category." };
+    }
+    out.categoryId = body.categoryId;
+  }
+  if (body.revenueCloseDate !== undefined) {
+    if (body.revenueCloseDate === null) out.revenueCloseDate = null;
+    else {
+      const d = validDate(body.revenueCloseDate);
+      if (!d) return { ok: false, error: "Enter a valid close date." };
+      out.revenueCloseDate = d;
+    }
+  }
+  // NOT NULL columns (default 'day'): null is not a value they can hold.
+  if (body.activationDatePrecision !== undefined) {
+    const v = DATE_PRECISIONS.find((p) => p === body.activationDatePrecision);
+    if (!v) return { ok: false, error: "Invalid activation date precision." };
+    out.activationDatePrecision = v;
+  }
+  if (body.eventDatePrecision !== undefined) {
+    const v = DATE_PRECISIONS.find((p) => p === body.eventDatePrecision);
+    if (!v) return { ok: false, error: "Invalid event date precision." };
+    out.eventDatePrecision = v;
+  }
+  if (body.attrs !== undefined) {
+    if (!isPlainObject(body.attrs)) return { ok: false, error: "Invalid attributes." };
+    out.attrs = body.attrs;
+  }
+
+  return { ok: true, value: out };
 }
 
 const MAX_SELECTION = 200;
@@ -81,9 +189,18 @@ export function parseCreateInitiativeRequest(body: unknown): Parsed {
   const annualPlanId = typeof body.annualPlanId === "string" ? body.annualPlanId : "";
   if (!UUID_RE.test(annualPlanId)) return { ok: false, error: "Generate your plan first." };
 
-  const productId = typeof body.productId === "string" ? body.productId : "";
-  if (!UUID_RE.test(productId)) {
-    return { ok: false, error: "Add a product first — every initiative must be tied to a product." };
+  const extra = parseNewFields(body);
+  if (!extra.ok) return extra;
+  // A request carrying a category is from the new form, which may leave the
+  // product and activation date unset (migration 045). Otherwise: today's rules.
+  const newForm = typeof extra.value.categoryId === "string";
+
+  let productId: string | null = null;
+  if (!(newForm && (body.productId === null || body.productId === undefined))) {
+    productId = typeof body.productId === "string" ? body.productId : "";
+    if (!UUID_RE.test(productId)) {
+      return { ok: false, error: "Add a product first — every initiative must be tied to a product." };
+    }
   }
 
   const name = typeof body.name === "string" ? body.name.trim() : "";
@@ -93,8 +210,11 @@ export function parseCreateInitiativeRequest(body: unknown): Parsed {
   const kind = KINDS.find((k) => k === body.kind);
   if (!kind) return { ok: false, error: "Choose one-time, recurring or evergreen." };
 
-  const activationDate = validDate(body.activationDate);
-  if (!activationDate) return { ok: false, error: "Enter a valid activation date." };
+  let activationDate: string | null = null;
+  if (!(newForm && (body.activationDate === null || body.activationDate === undefined))) {
+    activationDate = validDate(body.activationDate);
+    if (!activationDate) return { ok: false, error: "Enter a valid activation date." };
+  }
 
   let eventDate: string | null = null;
   if (body.eventDate !== null && body.eventDate !== undefined && body.eventDate !== "") {
@@ -139,6 +259,7 @@ export function parseCreateInitiativeRequest(body: unknown): Parsed {
         best: amount(scenarios.best),
       },
       ...(metricSelection ? { metricSelection } : {}),
+      ...extra.value,
     },
   };
 }

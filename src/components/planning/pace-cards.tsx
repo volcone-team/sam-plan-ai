@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { CheckCircle2, Clock, Info } from 'lucide-react';
+import { launchDate } from '@/lib/initiatives/schedule';
+import { parseDateOnly } from '@/lib/plan-dates';
 import { initiativeService } from '@/services/initiative.service';
 import { resultService } from '@/services/result.service';
 import { formatMoney } from '@/lib/format-money';
@@ -113,7 +115,10 @@ export function PaceCards({ companyId, asOf }: { companyId: string; asOf?: Date 
         const sumExpected = (from: Date) =>
           initiatives
             .filter((i) => {
-              const d = new Date(i.activationDate);
+              // launchDate: activation for legacy rows; undated rows expect nothing.
+              const launch = launchDate(i);
+              if (launch === null) return false;
+              const d = parseDateOnly(launch);
               return d >= from && d <= cutoff;
             })
             .reduce((sum, i) => sum + (i.revenueScenarios?.better || 0), 0);

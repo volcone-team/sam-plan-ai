@@ -181,6 +181,7 @@ describe('InitiativesList Filtering Logic', () => {
 
       const filterQuarter = (initiative: Initiative, quarter: string): boolean => {
         const eventDate = initiative.eventDate || initiative.activationDate;
+        if (!eventDate) return false;
         const month = eventDate.getMonth() + 1;
         const year = eventDate.getFullYear();
 

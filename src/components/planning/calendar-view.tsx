@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { initiativeService } from '@/services/initiative.service';
 import { taskService } from '@/services/task.service';
+import { inMonthWithoutDay, onCalendarDay } from '@/lib/initiatives/schedule';
 import type { Initiative, Task } from '@/types';
 
 
@@ -139,11 +140,10 @@ export function CalendarView() {
 
     return days.map(date => {
       // Find initiatives with event dates on this day
-      const dayInitiatives = initiatives.filter(init => {
-        if (init.eventDate && isSameDay(new Date(init.eventDate), date)) return true;
-        if (isSameDay(new Date(init.activationDate), date)) return true;
-        return false;
-      });
+      // Legacy rows: their activation and event days, as before. New-intake
+      // ongoing rows span launch -> close; month-only rows are listed for the
+      // month below instead of being pinned to a day nobody gave.
+      const dayInitiatives = initiatives.filter(init => onCalendarDay(init, date));
 
       // Find tasks due on this day
       const dayTasks = allTasks.filter(t => isSameDay(new Date(t.dueDate), date));
@@ -164,6 +164,12 @@ export function CalendarView() {
       };
     });
   }, [currentYear, currentMonth, initiatives, allTasks, today]);
+
+  /** Month-only initiatives active this month: known to the month, not the day. */
+  const monthOnlyInitiatives = useMemo(
+    () => initiatives.filter(init => inMonthWithoutDay(init, currentYear, currentMonth)),
+    [initiatives, currentYear, currentMonth]
+  );
 
   if (loading) {
     return (
@@ -223,6 +229,25 @@ export function CalendarView() {
         </div>
       </div>
 
+      {/* Month-only initiatives: this month, no exact day */}
+      {monthOnlyInitiatives.length > 0 && (
+        <div className="rounded-[var(--radius-lg)] border border-border bg-card p-3 space-y-2">
+          <p className="text-xs font-medium text-[hsl(var(--foreground-muted))]">
+            This month, no exact day yet ({monthOnlyInitiatives.length})
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {monthOnlyInitiatives.map(init => (
+              <button
+                key={init.id}
+                onClick={() => router.push(`/initiatives/${init.id}`)}
+                className="px-2.5 py-1 rounded-[var(--radius-lg)] border border-blue-200 bg-blue-50 text-xs font-medium text-blue-900 hover:bg-blue-100 transition-colors"
+              >
+                {init.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {/* Calendar Grid */}
       <div className="rounded-[var(--radius-lg)] border border-border bg-card overflow-hidden">
         {/* Day headers */}

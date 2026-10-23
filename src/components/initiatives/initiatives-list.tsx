@@ -97,6 +97,8 @@ export function InitiativesList({
       // Quarter filter
       if (filters.quarter.length > 0) {
         const eventDate = initiative.eventDate || initiative.activationDate;
+        // Undated (unscheduled) initiatives are in no quarter.
+        if (!eventDate) return false;
         const month = eventDate.getMonth() + 1;
         const year = eventDate.getFullYear();
 

@@ -17,6 +17,7 @@ import {
   Settings,
   Shield,
   Gauge,
+  SlidersHorizontal,
   Menu,
   X,
 } from "lucide-react";
@@ -58,6 +59,8 @@ const navItems: NavItem[] = [
    * gone, and rows are created and read by src/lib/workbook/initiative-type.ts.
    */
   { label: "AI Workbook", href: "/admin/ai-workbook", icon: Sparkles },
+  // Super admin only: its API (/api/admin/initiative-config) is.
+  { label: "Intake Config", href: "/admin/initiative-config", icon: SlidersHorizontal, superAdminOnly: true },
   { label: "Benchmarks", href: "/admin/benchmarks", icon: BarChart3 },
   { label: "Content", href: "/admin/content", icon: BookOpen },
   { label: "Subscriptions", href: "/admin/subscriptions", icon: CreditCard },

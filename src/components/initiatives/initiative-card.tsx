@@ -2,11 +2,13 @@
 
 import { useState } from 'react';
 import { ArrowUpRight, CalendarDays, Trash2, Trophy } from 'lucide-react';
-import { formatDate, formatRelativeDays } from '@/lib/format-date';
+import { formatRelativeDays } from '@/lib/format-date';
 import { formatMoney } from '@/lib/format-money';
 import { progressPercent } from '@/lib/top-performers';
+import { formatScheduleDate, isUnscheduled } from '@/lib/initiatives/schedule';
 import type { Initiative } from '@/types';
 import type { DifficultyDimensions } from '@/types/initiative-type.types';
+import { hasNoPromotionMarker } from '@/lib/intake-v3/universal-form';
 
 export interface InitiativeCardProps {
   initiative: Initiative;
@@ -215,7 +217,18 @@ export function InitiativeCard({
   const spendPercent = progressPercent(spend, plannedBudget);
 
   const anchorDate = initiative.eventDate || initiative.activationDate;
-  const relativeDate = formatRelativeDays(anchorDate);
+  const anchorPrecision = initiative.eventDate
+    ? initiative.eventDatePrecision
+    : initiative.activationDatePrecision;
+  const unscheduled = isUnscheduled(initiative);
+  // A month-only date counts from a 1st nobody chose, so it shows as the
+  // month ("March 2027") rather than a day count.
+  const relativeDate = !anchorDate
+    ? ''
+    : anchorPrecision === 'month'
+      ? formatScheduleDate(anchorDate, 'month')
+      : formatRelativeDays(anchorDate);
+  const anchorLabel = anchorDate ? formatScheduleDate(anchorDate, anchorPrecision) : '';
 
   return (
     <div className="group relative flex h-full flex-col rounded-[var(--radius-lg)] border border-border bg-card p-4 transition-colors hover:border-[hsl(var(--primary))] sm:p-5">
@@ -241,6 +254,22 @@ export function InitiativeCard({
           <span className="rounded-full bg-[hsl(var(--background-muted))] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
             {initiative.kind}
           </span>
+          {unscheduled && (
+            <span
+              className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"
+              title="No activation or event date yet"
+            >
+              Unscheduled
+            </span>
+          )}
+          {hasNoPromotionMarker(initiative) && (
+            <span
+              className="text-[10px] font-medium text-[hsl(var(--foreground-subtle))]"
+              title="Saved with nothing promoting it"
+            >
+              no promotion
+            </span>
+          )}
           {lastYear && (
             <span className="inline-flex items-center gap-1 rounded-full bg-[hsl(var(--primary)/0.1)] px-1.5 py-0.5 text-[10px] font-semibold text-[hsl(var(--primary))]">
               <Trophy className="h-2.5 w-2.5" aria-hidden="true" />#{lastYear.rank} last year
@@ -290,12 +319,12 @@ export function InitiativeCard({
         {relativeDate && (
           <span
             className="flex shrink-0 items-center gap-1 text-xs text-[hsl(var(--foreground-muted))]"
-            title={formatDate(anchorDate)}
+            title={anchorLabel}
           >
             <CalendarDays className="h-3 w-3" aria-hidden="true" />
             {/* "13d out" on its own is ambiguous without the date it counts to. */}
             <span className="sr-only">
-              {initiative.eventDate ? 'Event date' : 'Activation date'}: {formatDate(anchorDate)},{' '}
+              {initiative.eventDate ? 'Event date' : 'Activation date'}: {anchorLabel},{' '}
             </span>
             {relativeDate}
           </span>

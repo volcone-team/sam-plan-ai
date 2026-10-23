@@ -1,5 +1,6 @@
 'use client';
 import { formatDate } from "@/lib/format-date";
+import { formatScheduleDate } from "@/lib/initiatives/schedule";
 
 import { useEffect, useState } from 'react';
 import { Calendar, Package, Tag, Clock, Zap, Pencil, Loader2 } from 'lucide-react';
@@ -488,7 +489,9 @@ export function InitiativeOverview({
                 Activation
               </span>
               <span className="text-sm font-medium text-[hsl(var(--foreground))]">
-                {formatDate(initiative.activationDate)}
+                {initiative.activationDate
+                  ? formatScheduleDate(initiative.activationDate, initiative.activationDatePrecision)
+                  : 'Not set'}
               </span>
             </div>
 
@@ -500,7 +503,19 @@ export function InitiativeOverview({
                   Event Date
                 </span>
                 <span className="text-sm font-medium text-[hsl(var(--foreground))]">
-                  {formatDate(initiative.eventDate)}
+                  {formatScheduleDate(initiative.eventDate, initiative.eventDatePrecision)}
+                </span>
+              </div>
+            )}
+            {/* Revenue close (migration 045): only rows the new intake wrote carry one. */}
+            {initiative.revenueCloseDate && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-[hsl(var(--foreground-muted))] flex items-center gap-2">
+                  <Calendar className="h-3.5 w-3.5" />
+                  Revenue closes
+                </span>
+                <span className="text-sm font-medium text-[hsl(var(--foreground))]">
+                  {formatDate(initiative.revenueCloseDate)}
                 </span>
               </div>
             )}
@@ -529,11 +544,15 @@ export function InitiativeOverview({
             <div className="mt-4 pt-4 border-t border-border">
               <h3 className="text-sm font-semibold text-[hsl(var(--foreground))] mb-2">Date Range</h3>
               <div className="flex items-center gap-3 text-sm text-[hsl(var(--foreground-muted))]">
-                <span>{formatDate(initiative.activationDate)}</span>
+                <span>
+                  {initiative.activationDate
+                    ? formatScheduleDate(initiative.activationDate, initiative.activationDatePrecision)
+                    : 'Unscheduled'}
+                </span>
                 {initiative.eventDate && (
                   <>
                     <span className="text-[hsl(var(--border-strong))]">→</span>
-                    <span>{formatDate(initiative.eventDate)}</span>
+                    <span>{formatScheduleDate(initiative.eventDate, initiative.eventDatePrecision)}</span>
                   </>
                 )}
               </div>

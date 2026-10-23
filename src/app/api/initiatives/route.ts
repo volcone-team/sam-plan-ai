@@ -15,6 +15,9 @@ import { resolveLibraryMetricSet } from "@/lib/metrics/library-metric-set";
 import type { InitiativeMetricSet } from "@/lib/metrics/metric-set";
 import { resolveTasks } from "@/lib/workbook/tasks-for-initiatives";
 import { todayDateOnly } from "@/lib/plan-dates";
+import { taskAnchorDate } from "@/lib/initiatives/schedule";
+import { readHandoffId, withHandoff } from "@/lib/initiatives/lead-handoff";
+import { isInitiativeId } from "@/lib/initiatives/recurring-request";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -67,10 +70,34 @@ export async function POST(request: NextRequest) {
 
     const [{ data: plan }, { data: product }] = await Promise.all([
       db.from("annual_plans").select("id, year").eq("id", req.annualPlanId).eq("company_id", companyId).maybeSingle(),
-      db.from("products").select("id").eq("id", req.productId).eq("company_id", companyId).maybeSingle(),
+      // productId is null only on a new-form request (the parser guarantees it).
+      req.productId === null
+        ? Promise.resolve({ data: null })
+        : db.from("products").select("id").eq("id", req.productId).eq("company_id", companyId).maybeSingle(),
     ]);
     if (!plan) return NextResponse.json({ error: "That plan was not found." }, { status: 404 });
-    if (!product) return NextResponse.json({ error: "That product was not found." }, { status: 404 });
+    if (req.productId !== null && !product) {
+      return NextResponse.json({ error: "That product was not found." }, { status: 404 });
+    }
+
+    /**
+     * Lead handoff target: must be one of this company's initiatives in the
+     * same plan. Anything else is dropped (written as "Decide later") rather
+     * than refused — the handoff is optional and only ever warns.
+     */
+    const handoffTo = readHandoffId(req.attrs);
+    if (handoffTo !== null && req.attrs) {
+      const { data: target } = isInitiativeId(handoffTo)
+        ? await db
+            .from("initiatives")
+            .select("id")
+            .eq("id", handoffTo)
+            .eq("company_id", companyId)
+            .eq("annual_plan_id", plan.id)
+            .maybeSingle()
+        : { data: null };
+      if (!target) req.attrs = withHandoff(req.attrs, null);
+    }
 
     /* ---- Plan limit: max_initiatives, live, per plan year ---- */
 
@@ -165,6 +192,16 @@ export async function POST(request: NextRequest) {
         planned_budget: req.plannedBudget,
         actual_spend: 0,
         display_order: 0,
+        // Migration 045 columns: written only when the body carried them, so a
+        // request without them inserts exactly the row it always did.
+        ...(req.conversionPath !== undefined ? { conversion_path: req.conversionPath } : {}),
+        ...(req.audienceSource !== undefined ? { audience_source: req.audienceSource } : {}),
+        ...(req.format !== undefined ? { format: req.format } : {}),
+        ...(req.categoryId !== undefined ? { category_id: req.categoryId } : {}),
+        ...(req.revenueCloseDate !== undefined ? { revenue_close_date: req.revenueCloseDate } : {}),
+        ...(req.activationDatePrecision !== undefined ? { activation_date_precision: req.activationDatePrecision } : {}),
+        ...(req.eventDatePrecision !== undefined ? { event_date_precision: req.eventDatePrecision } : {}),
+        ...(req.attrs !== undefined ? { attrs: req.attrs } : {}),
       },
       req.libraryKey,
       (row) => db.from("initiatives").insert(row).select("id").single(),
@@ -204,7 +241,8 @@ export async function POST(request: NextRequest) {
          * only anchor there is — preparation work then lands on or before the
          * day the initiative starts, which is the right end of it.
          */
-        eventDate: req.eventDate ?? req.activationDate,
+        // Both dates may be unset on a new-form request; today is the anchor then.
+        eventDate: taskAnchorDate(req, todayDateOnly()),
         userId,
       });
     }

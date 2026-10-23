@@ -14,6 +14,10 @@ import { initiativeService } from '@/services/initiative.service';
 import { productService } from '@/services/product.service';
 import type { Initiative, Product } from '@/types';
 
+/** Where an initiative starts on the timeline: activation, else its event; null when undated. */
+const startOf = (i: Pick<Initiative, 'activationDate' | 'eventDate'>): Date | null =>
+  i.activationDate ?? i.eventDate ?? null;
+
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -100,7 +104,11 @@ export function TimelineView() {
     ];
 
     filteredInitiatives.forEach(init => {
-      const activationQ = getQuarterForDate(new Date(init.activationDate));
+      // An unscheduled (undated) initiative sits in no quarter; one with only
+      // an event date starts there.
+      const start = startOf(init);
+      if (!start) return;
+      const activationQ = getQuarterForDate(new Date(start));
       const groupIdx = activationQ - 1;
       if (groupIdx >= 0 && groupIdx < 4) {
         groups[groupIdx].initiatives.push(init);
@@ -110,7 +118,7 @@ export function TimelineView() {
     // Sort within each quarter by activation date
     groups.forEach(g => {
       g.initiatives.sort(
-        (a, b) => new Date(a.activationDate).getTime() - new Date(b.activationDate).getTime()
+        (a, b) => new Date(startOf(a)!).getTime() - new Date(startOf(b)!).getTime()
       );
     });
 
@@ -203,7 +211,7 @@ export function TimelineView() {
             ) : (
               <div className="space-y-2">
                 {group.initiatives.map(initiative => {
-                  const startPos = getMonthPosition(new Date(initiative.activationDate));
+                  const startPos = getMonthPosition(new Date(startOf(initiative)!));
                   const endDate = initiative.eventDate
                     ? new Date(initiative.eventDate)
                     : new Date(2026, 11, 31);

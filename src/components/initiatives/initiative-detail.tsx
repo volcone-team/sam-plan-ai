@@ -17,6 +17,9 @@ import { InitiativeMetrics } from './initiative-metrics';
 import { InitiativeProjectPlan } from './initiative-project-plan';
 import { InitiativeTasks } from './initiative-tasks';
 import { InitiativeResults } from './initiative-results';
+import { RecurringPrompts } from './recurring-prompts';
+import { LeadHandoffCard } from './lead-handoff-card';
+import { usePermissions } from '@/hooks/use-permission';
 
 export interface InitiativeDetailProps {
   initiativeId: string;
@@ -52,6 +55,9 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
+  /** The company's initiatives, for the lead handoff (both directions). */
+  const [companyInitiatives, setCompanyInitiatives] = useState<Initiative[]>([]);
+  const { canEdit } = usePermissions({ canEdit: 'initiatives.edit' });
 
   useEffect(() => {
     const loadData = async () => {
@@ -82,12 +88,15 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
          * product name costs a label, not the page — so they are settled
          * individually and never blank the screen.
          */
-        const [typeData, productData, allTypes, allProducts] = await Promise.allSettled([
+        const [typeData, productData, allTypes, allProducts, allInitiatives] = await Promise.allSettled([
           initiativeTypeService.getInitiativeType(initiativeData.initiativeTypeId),
           productService.getProduct(initiativeData.productId),
           initiativeTypeService.getAllInitiativeTypes(),
           productService.getProductsByCompany(initiativeData.companyId),
+          initiativeService.getInitiativesByCompany(initiativeData.companyId),
         ]);
+        if (allInitiatives.status === "fulfilled") setCompanyInitiatives(allInitiatives.value);
+        else console.error("[initiative-detail] company initiatives unavailable:", allInitiatives.reason);
 
         if (typeData.status === "fulfilled") setInitiativeType(typeData.value);
         else console.error("[initiative-detail] initiative type unavailable:", typeData.reason);
@@ -172,6 +181,19 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
         }
       />
 
+      {/* "Did this run?" and the correction card; renders nothing when there is nothing to ask */}
+      <div className="mb-6 empty:hidden">
+        <RecurringPrompts
+          initiativeId={initiativeId}
+          onInitiativeChanged={() => {
+            initiativeService
+              .getInitiative(initiativeId)
+              .then(setInitiative)
+              .catch(err => console.error('[initiative-detail] reload after correction failed:', err));
+          }}
+        />
+      </div>
+
       {/* Tab Navigation */}
       <nav className="border-b border-border" aria-label="Initiative sections">
         <div className="-mb-px flex gap-1 overflow-x-auto">
@@ -196,6 +218,15 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
       <div className="pt-2">
         {activeTab === 'overview' && (
           <div className="space-y-8">
+            <LeadHandoffCard
+              initiative={initiative}
+              all={companyInitiatives}
+              canEdit={canEdit}
+              onSaved={attrs => {
+                setInitiative(prev => (prev ? { ...prev, attrs } : prev));
+                setCompanyInitiatives(prev => prev.map(i => (i.id === initiative.id ? { ...i, attrs } : i)));
+              }}
+            />
             <InitiativeOverview
               initiative={initiative}
               initiativeType={initiativeType}

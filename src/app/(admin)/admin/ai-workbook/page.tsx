@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { AIWorkbook } from "@/components/admin";
 import { InitiativeLibraryToggles } from "@/components/admin/initiative-library-toggles";
 import { RecommendationWeightSetting } from "@/components/admin/recommendation-weight-setting";
@@ -27,6 +28,14 @@ export default function AdminAIWorkbookPage() {
         on their own page they would just look like another list.
       */}
       <section className="mt-10 border-t border-border pt-8">
+        <p className="mb-4 text-sm">
+          <Link
+            href="/admin/initiative-config"
+            className="font-medium text-[hsl(var(--primary))] hover:underline"
+          >
+            Configure how each initiative behaves in the new intake form →
+          </Link>
+        </p>
         <InitiativeLibraryToggles />
       </section>
       {/*

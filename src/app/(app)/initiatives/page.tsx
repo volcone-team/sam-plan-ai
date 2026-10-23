@@ -56,6 +56,8 @@ export default function InitiativesPage() {
    * either failed the FK or attached to unrelated data.
    */
   const [annualPlanId, setAnnualPlanId] = useState<string | null>(null);
+  /** That plan's year, for the intake form's ongoing close-date default. */
+  const [planYear, setPlanYear] = useState<number | null>(null);
   const [products, setProducts] = useState<Array<{ id: string; name: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +88,7 @@ export default function InitiativesPage() {
           }
         }
         setAnnualPlanId(plan?.id ?? null);
+        setPlanYear(plan?.year ?? null);
 
         // Questionnaire fallback for the top-performers band. Best effort: it
         // only feeds an empty state, so a failure here must not break the page.
@@ -288,6 +291,8 @@ export default function InitiativesPage() {
         onSubmit={handleAddInitiative}
         products={products}
         annualPlanId={annualPlanId ?? ''}
+        planYear={planYear}
+        handoffTargets={initiatives}
       />
     </PageContainer>
   );

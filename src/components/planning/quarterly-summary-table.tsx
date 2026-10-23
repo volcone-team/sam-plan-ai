@@ -430,7 +430,7 @@ function InitiativeChildRow({ initiative }: InitiativeChildRowProps) {
             {initiative.kind.replace('-', ' ')}
           </span>
           <span className="text-xs text-[hsl(var(--foreground-muted))] shrink-0">
-            {formatDate(eventDate)}
+            {eventDate ? formatDate(eventDate) : ''}
           </span>
         </div>
       </td>
