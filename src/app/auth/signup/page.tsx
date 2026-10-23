@@ -8,7 +8,11 @@ import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { BrandLogo } from '@/components/brand-logo';
 import { getAppUrl } from '@/lib/app-url';
-import { asPlanId, pathForStep } from '@/lib/billing/signup-flow';
+import { asBillingCycle, asPlanId, pathForStep } from '@/lib/billing/signup-flow';
+import {
+  decideDirectSignupOutcome,
+  pathAfterSignupTrust,
+} from '@/lib/auth/direct-signup';
 import { ResendConfirmation } from '@/components/auth/resend-confirmation';
 import { useLegalUrls } from '@/hooks/use-legal-urls';
 import { LegalLink } from '@/components/legal-link';
@@ -89,6 +93,13 @@ export default function SignupPage() {
    */
   const [promotionalConsent, setPromotionalConsent] = useState(false);
 
+  /**
+   * Honeypot. Hidden from people and assistive technology; a bot filling
+   * every field fills this too, and /api/auth/signup then answers 200 while
+   * creating nothing.
+   */
+  const [website, setWebsite] = useState('');
+
   /** The policy links, read from admin settings. */
   const legal = useLegalUrls();
 
@@ -158,6 +169,8 @@ export default function SignupPage() {
     e.preventDefault();
     setError(null);
     setLoading(true);
+    /** Set once we are leaving the page, so the button stays disabled. */
+    let navigating = false;
 
     try {
       // Validate passwords match
@@ -209,6 +222,13 @@ export default function SignupPage() {
       const selectedPlan = asPlanId(
         new URLSearchParams(window.location.search).get('plan')
       );
+      /**
+       * The billing cycle picked on /get-started, carried with the plan so
+       * /checkout charges the cycle that was chosen. Equally untrusted.
+       */
+      const selectedCycle = asBillingCycle(
+        new URLSearchParams(window.location.search).get('cycle')
+      );
 
       // ONLY an explicit ?next= is honoured, for flows that genuinely need to
       // resume a specific page.
@@ -234,9 +254,85 @@ export default function SignupPage() {
        */
       const destination =
         requestedNext ||
-        (selectedPlan ? pathForStep('checkout', selectedPlan) : '/onboarding/welcome');
+        (selectedPlan ? pathForStep('checkout', selectedPlan, selectedCycle) : '/onboarding/welcome');
 
       setConfirmDestination(destination);
+
+      /**
+       * 0. DIRECT SIGNUP FIRST (email verification switched off by the admin).
+       *
+       * The server creates the account already confirmed, so no confirmation
+       * email is sent and the user goes straight to payment. When the switch
+       * is on (409 verification_required), or the route cannot be reached or
+       * fails, the old signUp() path below runs unchanged and they get the
+       * "Check your email" screen. See decideDirectSignupOutcome.
+       */
+      const phoneE164 = composeE164(phoneCode, formData.phone);
+      let directResponse: { status: number; body: unknown } | null = null;
+      try {
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: formData.email,
+            password: formData.password,
+            firstName: formData.firstName,
+            lastName: formData.lastName,
+            companyName: formData.companyName,
+            phoneE164,
+            termsAccepted,
+            promotionalConsent,
+            website,
+          }),
+        });
+        directResponse = { status: res.status, body: await res.json().catch(() => null) };
+      } catch {
+        directResponse = null;
+      }
+
+      const outcome = decideDirectSignupOutcome(directResponse);
+
+      if (outcome.kind === 'error') {
+        setError(outcome.message);
+        return;
+      }
+
+      if (outcome.kind === 'sign_in') {
+        // The server stored the address trimmed and lower-cased.
+        const email = formData.email.trim().toLowerCase();
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password: formData.password,
+        });
+
+        if (signInError) {
+          // The account exists and is confirmed; an ordinary sign-in works.
+          navigating = true;
+          router.push(`/auth/login?next=${encodeURIComponent(destination)}`);
+          return;
+        }
+
+        /**
+         * Device trust for this brand-new account, so paying is not preceded
+         * by an emailed code. Best effort: when refused, the code challenge
+         * is the fallback and it returns to the same destination.
+         */
+        let trusted = false;
+        try {
+          const trust = await fetch('/api/auth/2fa/signup-trust', {
+            method: 'POST',
+            credentials: 'same-origin',
+          });
+          trusted = trust.ok;
+        } catch {
+          trusted = false;
+        }
+
+        navigating = true;
+        router.push(pathAfterSignupTrust(trusted, destination));
+        return;
+      }
 
 
       // 1. Sign up with Supabase Auth
@@ -336,7 +432,7 @@ export default function SignupPage() {
     } catch {
       setError('Something went wrong. Please try again.');
     } finally {
-      setLoading(false);
+      if (!navigating) setLoading(false);
     }
   };
 
@@ -498,6 +594,30 @@ export default function SignupPage() {
               onChange={handleChange}
               className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
               placeholder="sarah@company.com"
+            />
+            <p className="text-xs text-[hsl(var(--foreground-muted))]">
+              We&apos;ll send your receipt and login details to this address.
+            </p>
+          </div>
+
+          {/*
+            HONEYPOT. Off-screen rather than display:none, which some bots
+            skip. aria-hidden and tabIndex -1 keep it away from screen readers
+            and keyboard users; autocomplete off keeps browsers from filling it.
+          */}
+          <div
+            aria-hidden="true"
+            className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden"
+          >
+            <label htmlFor="website">Website</label>
+            <input
+              id="website"
+              name="website"
+              type="text"
+              tabIndex={-1}
+              autoComplete="off"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
             />
           </div>
 

@@ -4,6 +4,7 @@ import {
   afterRegistration,
   pathForStep,
   asPlanId,
+  asBillingCycle,
   shouldShowWelcome,
   type SignupContext,
 } from "./signup-flow";
@@ -131,5 +132,31 @@ describe("shouldShowWelcome", () => {
    */
   it("does not show it to someone with no active plan", () => {
     expect(shouldShowWelcome({ hasActivePlan: false, hasBuiltPlan: false })).toBe(false);
+  });
+});
+
+describe("billing cycle carried with the plan", () => {
+  it("accepts only monthly and annual", () => {
+    expect(asBillingCycle("monthly")).toBe("monthly");
+    expect(asBillingCycle("annual")).toBe("annual");
+    for (const junk of ["yearly", "ANNUAL", "", null, undefined, 12]) {
+      expect(asBillingCycle(junk)).toBeNull();
+    }
+  });
+
+  it("appends the cycle to register and checkout paths", () => {
+    expect(pathForStep("register", PLAN, "annual")).toBe(`/auth/signup?plan=${PLAN}&cycle=annual`);
+    expect(pathForStep("checkout", PLAN, "annual")).toBe(`/checkout?plan=${PLAN}&cycle=annual`);
+    expect(pathForStep("checkout", PLAN, "monthly")).toBe(`/checkout?plan=${PLAN}&cycle=monthly`);
+  });
+
+  it("leaves paths unchanged when no cycle is given", () => {
+    expect(pathForStep("checkout", PLAN)).toBe(`/checkout?plan=${PLAN}`);
+    expect(pathForStep("register", PLAN, null)).toBe(`/auth/signup?plan=${PLAN}`);
+  });
+
+  it("never attaches a cycle without a plan", () => {
+    expect(pathForStep("checkout", null, "annual")).toBe("/choose-plan");
+    expect(pathForStep("register", null, "annual")).toBe("/auth/signup");
   });
 });

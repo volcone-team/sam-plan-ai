@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, TriangleAlert } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
-import { asPlanId } from "@/lib/billing/signup-flow";
+import { asBillingCycle, asPlanId, pathForStep } from "@/lib/billing/signup-flow";
 
 /**
  * Starts Stripe Checkout for the plan chosen before registration.
@@ -17,6 +17,12 @@ export function CheckoutClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const planId = asPlanId(searchParams.get("plan"));
+  /**
+   * The cycle picked on /get-started, carried in the URL like the plan.
+   * Absent (e.g. a confirmation link sent before the cycle was carried) means
+   * monthly, as before.
+   */
+  const cycle = asBillingCycle(searchParams.get("cycle"));
 
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -45,7 +51,7 @@ export function CheckoutClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           planId,
-          billingCycle: "monthly",
+          billingCycle: cycle ?? "monthly",
           // Lands on the welcome page after paying, not settings.
           returnTo: "welcome",
         }),
@@ -60,7 +66,7 @@ export function CheckoutClient() {
          * better than failing: they return here with a working session.
          */
         router.replace(
-          `/auth/login?next=${encodeURIComponent(`/checkout?plan=${planId}`)}`
+          `/auth/login?next=${encodeURIComponent(pathForStep("checkout", planId, cycle))}`
         );
         return;
       }
@@ -84,7 +90,7 @@ export function CheckoutClient() {
     } catch {
       setError("Could not reach the server. Please try again.");
     }
-  }, [planId, router]);
+  }, [planId, cycle, router]);
 
   useEffect(() => {
     if (startedRef.current) return;

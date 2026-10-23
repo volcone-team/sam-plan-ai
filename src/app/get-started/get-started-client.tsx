@@ -61,10 +61,11 @@ export function GetStartedClient({ plans }: { plans: SignupPlan[] }) {
   const [cycle, setCycle] = useState<Cycle>("monthly");
 
   const choose = (planId: string) => {
-    // The cycle is NOT carried: it is re-chosen at checkout, where the price
-    // being charged is actually shown. Carrying it through signup and an email
-    // round trip would risk billing annually for a monthly intent.
-    router.push(pathForStep("register", planId));
+    // The cycle IS carried, alongside the plan, through signup to /checkout.
+    // /checkout starts Stripe on its own and has no cycle picker, so dropping
+    // it here billed an annual choice monthly. Stripe's hosted page shows the
+    // amount and interval before anything is charged.
+    router.push(pathForStep("register", planId, cycle));
   };
 
   return (

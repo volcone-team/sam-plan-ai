@@ -368,6 +368,14 @@ export async function updateSession(request: NextRequest) {
     // and always answers 200, so being public leaks nothing.
     request.nextUrl.pathname === '/api/auth/forgot-password' ||
     /**
+     * Direct signup (email verification off). The caller has no account yet,
+     * so it has no session by definition. EXACT match only: nothing else under
+     * /api/auth becomes public. The handler protects itself with a honeypot,
+     * per-IP and per-email rate limits and full re-validation, and it creates
+     * nothing at all while the admin's verification switch is on.
+     */
+    request.nextUrl.pathname === '/api/auth/signup' ||
+    /**
      * Whether signup must start with a plan choice. The signup page is reached
      * by ANONYMOUS visitors, so a 401 here would make the page unable to learn
      * the rule and it would fall back to skipping plan selection. Returns a

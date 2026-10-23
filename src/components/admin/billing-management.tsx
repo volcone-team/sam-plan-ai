@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LoadingPanel } from "@/components/ui/spinner";
+import { EmailVerificationToggle } from "./email-verification-toggle";
 import { formatMoneyFromMinor } from "@/lib/format-money";
 import { pickMoneyFormatter } from "@/lib/results-tab-totals";
 
@@ -547,6 +548,9 @@ export function BillingManagement() {
                 </div>
               )}
             </div>
+
+            {/* Email verification at signup (migration 049) */}
+            <EmailVerificationToggle />
 
             {/* Dunning */}
             <div className="border-t border-border pt-5">

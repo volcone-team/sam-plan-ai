@@ -71,16 +71,46 @@ export function afterRegistration(
   return "checkout";
 }
 
-/** Path for a step. One place, so no caller hardcodes a route. */
-export function pathForStep(step: SignupStep, planId?: string | null): string {
+/** A billing cycle chosen on /get-started. */
+export type SignupBillingCycle = "monthly" | "annual";
+
+/**
+ * Validate a billing cycle arriving from a URL. UNTRUSTED like the plan: it
+ * only chooses which price to offer, and Stripe's hosted page shows the actual
+ * amount before anything is charged.
+ */
+export function asBillingCycle(value: unknown): SignupBillingCycle | null {
+  return value === "monthly" || value === "annual" ? value : null;
+}
+
+/** `&cycle=...` when a cycle is known, else nothing (checkout defaults to monthly). */
+function cycleSuffix(cycle: SignupBillingCycle | null | undefined): string {
+  return cycle ? `&cycle=${cycle}` : "";
+}
+
+/**
+ * Path for a step. One place, so no caller hardcodes a route.
+ *
+ * The plan and the cycle ride along together, through signup and the
+ * confirmation email link, to checkout.
+ */
+export function pathForStep(
+  step: SignupStep,
+  planId?: string | null,
+  cycle?: SignupBillingCycle | null
+): string {
   switch (step) {
     case "choose_plan":
       return "/choose-plan";
     case "register":
       // The plan rides along so it survives into the confirmation email link.
-      return planId ? `/auth/signup?plan=${encodeURIComponent(planId)}` : "/auth/signup";
+      return planId
+        ? `/auth/signup?plan=${encodeURIComponent(planId)}${cycleSuffix(cycle)}`
+        : "/auth/signup";
     case "checkout":
-      return planId ? `/checkout?plan=${encodeURIComponent(planId)}` : "/choose-plan";
+      return planId
+        ? `/checkout?plan=${encodeURIComponent(planId)}${cycleSuffix(cycle)}`
+        : "/choose-plan";
     case "welcome":
       return "/welcome";
     case "dashboard":
