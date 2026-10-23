@@ -8,6 +8,9 @@ import { createClient } from "@/lib/supabase/client";
 import type { LockoutCopy } from "@/lib/billing/lockout";
 import type { AccessReason } from "@/lib/billing/entitlement";
 import { formatMoney, formatNumber } from "@/lib/format-money";
+import type { PricingTable } from "@/lib/billing/pricing-table";
+import { PlanComparison } from "@/components/billing/plan-comparison";
+import type { ComparisonPlan } from "@/components/billing/plan-comparison-view";
 
 /**
  * The interactive half of the purchase screen.
@@ -32,6 +35,14 @@ export interface PurchasablePlan {
 
 type Cycle = "monthly" | "annual";
 
+/** The comparison table's data, already matched to the offered plans. */
+export interface PlanComparisonData {
+  table: PricingTable;
+  annualNote: string | null;
+  annualNoteValueCents: number | null;
+  plans: ComparisonPlan[];
+}
+
 const money = formatMoney;
 
 /** -1 means unlimited; 0 means not included on this plan. */
@@ -47,14 +58,16 @@ export function ChoosePlanClient({
   plans,
   canPurchase,
   email,
+  comparison,
 }: {
   copy: LockoutCopy;
   reason: AccessReason;
   plans: PurchasablePlan[];
   canPurchase: boolean;
   email: string | null;
+  /** The comparison table for the offered plans; null renders the cards. */
+  comparison: PlanComparisonData | null;
 }) {
-  const [cycle, setCycle] = useState<Cycle>("monthly");
   const [busyPlanId, setBusyPlanId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** True while recovering a payment Stripe made but no webhook recorded. */
@@ -142,7 +155,7 @@ export function ChoosePlanClient({
     }
   };
 
-  const subscribe = async (planId: string) => {
+  const subscribe = async (planId: string, cycle: Cycle) => {
     setBusyPlanId(planId);
     setError(null);
     try {
@@ -198,6 +211,112 @@ export function ChoosePlanClient({
     }
     window.location.assign("/auth/login");
   };
+
+  if (!comparison) {
+    return (
+      <ChoosePlanCardsFallback
+        copy={copy}
+        plans={plans}
+        canPurchase={canPurchase}
+        email={email}
+        isPaymentFailure={isPaymentFailure}
+        busyPlanId={busyPlanId}
+        error={error}
+        openPortal={openPortal}
+        subscribe={subscribe}
+        signOut={signOut}
+      />
+    );
+  }
+
+  /*
+   * The same two non-purchase states as the cards, in the comparison's dark
+   * style: a team member cannot buy, and a failed payment is fixed in the
+   * portal (never by buying a second subscription).
+   */
+  const notice = !canPurchase ? (
+    <p className="mx-auto mt-8 max-w-md rounded-xl border border-white/10 bg-white/[0.04] px-5 py-4 text-center text-sm text-white/70">
+      Only the account owner can choose a plan. Ask them to restore access for
+      your team.
+    </p>
+  ) : isPaymentFailure ? (
+    <div className="mx-auto mt-8 max-w-md text-center">
+      <button
+        type="button"
+        onClick={openPortal}
+        disabled={busyPlanId !== null}
+        className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-teal-400 to-blue-500 px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b1520] disabled:opacity-50 motion-safe:transition-opacity"
+      >
+        {busyPlanId === "portal" && (
+          <Loader2 aria-hidden="true" className="h-4 w-4 motion-safe:animate-spin" />
+        )}
+        {copy.cta}
+      </button>
+      <p className="mt-3 text-xs text-white/50">
+        You keep your current plan — this only updates how you pay.
+      </p>
+    </div>
+  ) : undefined;
+
+  return (
+    <PlanComparison
+      table={comparison.table}
+      annualNote={comparison.annualNote}
+      annualNoteValueCents={comparison.annualNoteValueCents}
+      plans={comparison.plans}
+      title={copy.title}
+      subtitle={copy.body}
+      headerRight={
+        <div className="flex items-center gap-3">
+          {email && <span className="hidden text-xs text-white/60 sm:inline">{email}</span>}
+          <button
+            type="button"
+            onClick={signOut}
+            className="inline-flex items-center gap-1.5 rounded-md border border-white/15 px-2.5 py-1.5 text-xs font-medium text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 motion-safe:transition-colors"
+          >
+            <LogOut aria-hidden="true" className="h-3.5 w-3.5" />
+            Sign out
+          </button>
+        </div>
+      }
+      onChoose={(planId, cycle) => void subscribe(planId, cycle)}
+      busyPlanId={busyPlanId}
+      notice={notice}
+      error={error}
+      footerExtra={
+        <p className="mt-2 text-center text-xs text-white/50">
+          Questions? Email support@samplan.ai
+        </p>
+      }
+    />
+  );
+}
+
+/** The plan cards shown before the comparison table existed. */
+function ChoosePlanCardsFallback({
+  copy,
+  plans,
+  canPurchase,
+  email,
+  isPaymentFailure,
+  busyPlanId,
+  error,
+  openPortal,
+  subscribe,
+  signOut,
+}: {
+  copy: LockoutCopy;
+  plans: PurchasablePlan[];
+  canPurchase: boolean;
+  email: string | null;
+  isPaymentFailure: boolean;
+  busyPlanId: string | null;
+  error: string | null;
+  openPortal: () => void;
+  subscribe: (planId: string, cycle: Cycle) => void;
+  signOut: () => void;
+}) {
+  const [cycle, setCycle] = useState<Cycle>("monthly");
 
   return (
     <div className="flex min-h-dvh flex-col bg-[hsl(var(--background-subtle))]">
@@ -374,7 +493,7 @@ export function ChoosePlanClient({
 
                         <div className="mt-5 pt-1">
                           <button
-                            onClick={() => subscribe(plan.id)}
+                            onClick={() => subscribe(plan.id, cycle)}
                             disabled={!buyable || busyPlanId !== null}
                             className={cn(
                               "inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-md)] px-4 py-2.5 text-sm font-semibold transition-opacity",

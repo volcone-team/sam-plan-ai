@@ -8,6 +8,9 @@ import { cn } from "@/lib/utils";
 import { BrandLogo } from "@/components/brand-logo";
 import { pathForStep } from "@/lib/billing/signup-flow";
 import { formatMoney, formatNumber } from "@/lib/format-money";
+import type { PricingTable } from "@/lib/billing/pricing-table";
+import { PlanComparison } from "@/components/billing/plan-comparison";
+import type { ComparisonPlan } from "@/components/billing/plan-comparison-view";
 
 /**
  * Plan selection for a visitor with no account yet.
@@ -56,17 +59,68 @@ function annualSaving(plan: SignupPlan): number | null {
   return saving > 0 ? saving : null;
 }
 
-export function GetStartedClient({ plans }: { plans: SignupPlan[] }) {
-  const router = useRouter();
-  const [cycle, setCycle] = useState<Cycle>("monthly");
+/** The comparison table's data, already matched to the offered plans. */
+export interface SignupComparison {
+  table: PricingTable;
+  annualNote: string | null;
+  annualNoteValueCents: number | null;
+  plans: ComparisonPlan[];
+}
 
-  const choose = (planId: string) => {
-    // The cycle IS carried, alongside the plan, through signup to /checkout.
-    // /checkout starts Stripe on its own and has no cycle picker, so dropping
-    // it here billed an annual choice monthly. Stripe's hosted page shows the
-    // amount and interval before anything is charged.
+/**
+ * The comparison table when migration 050 has data for the offered plans,
+ * else the plan cards (GetStartedCardsFallback), unchanged.
+ */
+export function GetStartedClient({
+  plans,
+  comparison,
+}: {
+  plans: SignupPlan[];
+  comparison: SignupComparison | null;
+}) {
+  const router = useRouter();
+
+  // The cycle IS carried, alongside the plan, through signup to /checkout.
+  // /checkout starts Stripe on its own and has no cycle picker, so dropping
+  // it here billed an annual choice monthly. Stripe's hosted page shows the
+  // amount and interval before anything is charged.
+  const choose = (planId: string, cycle: Cycle) => {
     router.push(pathForStep("register", planId, cycle));
   };
+
+  if (!comparison) return <GetStartedCardsFallback plans={plans} onChoose={choose} />;
+
+  return (
+    <PlanComparison
+      table={comparison.table}
+      annualNote={comparison.annualNote}
+      annualNoteValueCents={comparison.annualNoteValueCents}
+      plans={comparison.plans}
+      title="Choose your plan"
+      subtitle="Pick the plan that fits, then create your account. You can change or cancel at any time."
+      headerRight={
+        <Link
+          href="/auth/login"
+          className="rounded text-xs font-medium text-white/70 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+        >
+          Already have an account? Sign in
+        </Link>
+      }
+      onChoose={choose}
+    />
+  );
+}
+
+/** The plan cards shown before the comparison table existed. */
+function GetStartedCardsFallback({
+  plans,
+  onChoose,
+}: {
+  plans: SignupPlan[];
+  onChoose: (planId: string, cycle: Cycle) => void;
+}) {
+  const [cycle, setCycle] = useState<Cycle>("monthly");
+  const choose = (planId: string) => onChoose(planId, cycle);
 
   return (
     <div className="flex min-h-dvh flex-col bg-[hsl(var(--background-subtle))]">

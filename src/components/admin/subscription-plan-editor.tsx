@@ -7,6 +7,7 @@ import { LIMIT_KEYS, FEATURE_KEYS } from '@/types/subscription-plan.types';
 import type { SubscriptionPlanFull } from '@/types/subscription-plan.types';
 import { NumberInputRaw } from '@/components/ui/number-input';
 import { pickMoneyFormatter } from '@/lib/results-tab-totals';
+import { PricingTableEditor } from './pricing-table-editor';
 
 /**
  * Admin Subscription Plans Editor.
@@ -292,6 +293,8 @@ export function SubscriptionPlanEditor() {
           </div>
         );
       })}
+      {/* The plan picker's comparison table (migration 050). */}
+      <PricingTableEditor />
     </div>
   );
 }

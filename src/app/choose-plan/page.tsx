@@ -6,7 +6,13 @@ import { loadBillingConfig, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client"
 import { evaluateAccess } from "@/lib/billing/entitlement";
 import { lockoutCopy } from "@/lib/billing/lockout";
 import { decideChoosePlanPage } from "@/lib/billing/billing-gate";
-import { ChoosePlanClient, type PurchasablePlan } from "./choose-plan-client";
+import { loadPricingTable } from "@/lib/billing/load-pricing-table";
+import { selectComparisonPlans } from "@/components/billing/plan-comparison-view";
+import {
+  ChoosePlanClient,
+  type PlanComparisonData,
+  type PurchasablePlan,
+} from "./choose-plan-client";
 
 export const metadata = {
   title: "Choose a plan | SAM Plan AI",
@@ -156,28 +162,32 @@ export default async function ChoosePlanPage() {
 
   /* ---- The plans they can actually buy ---- */
 
-  const { data: plansRaw } = await db
-    .from("subscription_plans")
-    .select(
-      "id, name, description, tagline, monthly_price, annual_price, " +
-      "is_default, display_order"
-    )
-    .eq("is_active", true)
-    .order("display_order");
+  // A plan with no synced price for the active Stripe mode cannot go through
+  // checkout, so offering it would produce a dead button. The comparison
+  // table (migration 050) is read alongside; null means "show the plan
+  // cards", including when 050 is not applied.
+  const [{ data: plansRaw }, { data: prices }, pricing] = await Promise.all([
+    db
+      .from("subscription_plans")
+      .select(
+        "id, name, description, tagline, monthly_price, annual_price, " +
+        "is_default, display_order"
+      )
+      .eq("is_active", true)
+      .order("display_order"),
+    db
+      .from("stripe_prices")
+      .select("plan_id, billing_cycle")
+      .eq("stripe_mode", STRIPE_MODE_TAG)
+      .eq("is_current", true),
+    loadPricingTable(db),
+  ]);
 
   const plans = (plansRaw ?? []) as unknown as {
     id: string; name: string; description: string | null;
     tagline: string | null; monthly_price: number; annual_price: number;
     is_default: boolean;
   }[];
-
-  // A plan with no synced price for the active Stripe mode cannot go through
-  // checkout, so offering it would produce a dead button.
-  const { data: prices } = await db
-    .from("stripe_prices")
-    .select("plan_id, billing_cycle")
-    .eq("stripe_mode", STRIPE_MODE_TAG)
-    .eq("is_current", true);
 
   const purchasable = new Set(
     ((prices ?? []) as { plan_id: string; billing_cycle: string }[]).map(
@@ -233,6 +243,19 @@ export default async function ChoosePlanPage() {
     features: featuresByPlan.get(p.id) ?? [],
   }));
 
+  // Only plans both in the table and offered above, in table order. None in
+  // common means there is no table to show, so the cards render instead.
+  const comparisonPlans = pricing ? selectComparisonPlans(pricing.table, offered) : [];
+  const comparison: PlanComparisonData | null =
+    pricing && comparisonPlans.length > 0
+      ? {
+          table: pricing.table,
+          annualNote: pricing.annualNote,
+          annualNoteValueCents: pricing.annualNoteValueCents,
+          plans: comparisonPlans,
+        }
+      : null;
+
   // The plan they HAD, for the cancellation copy. Resolved against all plans,
   // including retired ones, so a retired plan still has a name.
   const { data: previousPlan } = sub?.plan_id
@@ -257,6 +280,7 @@ export default async function ChoosePlanPage() {
       // being given a button that fails at the API.
       canPurchase={!role || role === "owner"}
       email={user.email ?? null}
+      comparison={comparison}
     />
   );
 }
