@@ -505,6 +505,7 @@ export const VOICE_FIELDS = [
   "ideal_customer",
   "problem_solved",
   "what_worked_notes",
+  "what_failed_notes",
   "challenge_notes",
 ] as const;
 
@@ -659,11 +660,10 @@ export const FIELD_COPY: Record<
   },
   has_run_before: { label: "Have you run this before?" },
 
-  // Screen 6
-  worked_initiatives: { label: "What has driven real sales for you?" },
-  what_worked_notes: { label: "What worked best, and why?" },
-  didnt_work: { label: "What have you tried that didn't work?" },
-  failure_reason: { label: "Why?" },
+  // Screen 6 — two optional free-text answers. The old initiative pickers
+  // (`worked_initiatives`, `didnt_work`, `failure_reason`) are gone.
+  what_worked_notes: { label: "What has driven real sales for you?" },
+  what_failed_notes: { label: "What have you tried that didn't work?" },
 
   // Screen 7
   sells_to: { label: "Do you sell to businesses, consumers, or both?" },

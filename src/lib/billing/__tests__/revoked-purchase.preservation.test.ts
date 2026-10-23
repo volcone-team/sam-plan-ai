@@ -366,7 +366,11 @@ describe("Property 6: preservation for every state outside the bug condition", (
   });
 
   it("comp guard: refuses exactly when a paid sub is live (route source unchanged)", () => {
-    const src = readFileSync(resolve(__dirname, "../../../app/api/admin/subscribers/route.ts"), "utf8");
+    // The guard lives in the shared comp helper (used by the subscribers route
+    // and the admin create route); the route must still go through it.
+    const route = readFileSync(resolve(__dirname, "../../../app/api/admin/subscribers/route.ts"), "utf8");
+    expect(route).toContain("applyComp(db, {");
+    const src = readFileSync(resolve(__dirname, "../comp.ts"), "utf8");
     expect(src).toContain('["active", "trialing", "past_due"].includes(existing.stripe_status ?? "")');
     expect(src).toContain('error: "has_paid_subscription"');
   });

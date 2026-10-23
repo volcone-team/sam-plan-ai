@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import { DateInput } from "@/components/ui/date-input";
 import { formatMoneyFromMinor } from "@/lib/format-money";
+import { adminAccessAction } from "@/lib/billing/admin-access-action";
 
 /** The subscription half of a row. Null when the company has no subscription. */
 interface CompanySubscription {
@@ -260,6 +261,13 @@ export function CompanyManagement() {
   const [addSuccess, setAddSuccess] = useState<string | null>(null);
   const [addWarning, setAddWarning] = useState<string | null>(null);
   const [addForm, setAddForm] = useState({ companyName: "", ownerEmail: "", ownerFirstName: "", ownerLastName: "" });
+  /**
+   * "Grant full access" on the create form. Ticked by default: a company an
+   * admin sets up by hand is normally one they are giving access to. Sent to
+   * the create route, which comps it the same way the Grant access dialog
+   * does. Empty planId means "the first plan in the list" (see below).
+   */
+  const [addGrant, setAddGrant] = useState({ grantAccess: true, planId: "", compUntil: "", compReason: "" });
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -497,19 +505,46 @@ export function CompanyManagement() {
     setAddWarning(null);
     setAddLoading(true);
     try {
+      const grantPlanId = addGrant.planId || plans[0]?.id || "";
+      if (addGrant.grantAccess && !grantPlanId) {
+        setAddError("Choose a plan to grant, or untick \u201cGrant full access\u201d.");
+        return;
+      }
       const res = await fetch("/api/admin/companies/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(addForm),
+        body: JSON.stringify({
+          ...addForm,
+          grantAccess: addGrant.grantAccess,
+          ...(addGrant.grantAccess
+            ? {
+                planId: grantPlanId,
+                compUntil: addGrant.compUntil || null,
+                compReason: addGrant.compReason || undefined,
+              }
+            : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) { setAddError(data.error || "Failed"); return; }
-      if (data.invited) {
-        setAddSuccess(`${data.company.name} was created — an invite email was sent to ${data.user.email}.`);
+      const warnings: string[] = [];
+      if (data.grantAccessRequested && !data.granted) {
+        warnings.push(
+          `Full access was NOT granted${data.grantError ? ` (${data.grantError})` : ""}. Use Grant access on the company row.`
+        );
+      }
+      if (!data.invited) {
+        warnings.push("The invite email couldn\u2019t be sent. You can resend it from the customer\u2019s team settings.");
+      }
+      if (warnings.length === 0) {
+        setAddSuccess(
+          `${data.company.name} was created${data.granted ? " with full access" : ""} — an invite email was sent to ${data.user.email}.`
+        );
       } else {
-        setAddWarning(`${data.company.name} was created, but the invite email couldn\u2019t be sent. You can resend it from the customer\u2019s team settings.`);
+        setAddWarning(`${data.company.name} was created, but: ${warnings.join(" ")}`);
       }
       setAddForm({ companyName: "", ownerEmail: "", ownerFirstName: "", ownerLastName: "" });
+      setAddGrant({ grantAccess: true, planId: "", compUntil: "", compReason: "" });
       loadCompanies(search);
     } catch (err) {
       setAddError("Network error");
@@ -609,6 +644,56 @@ export function CompanyManagement() {
               <div><label className="mb-1 block text-xs font-medium">Last Name</label><input type="text" value={addForm.ownerLastName} onChange={(e) => setAddForm(f => ({ ...f, ownerLastName: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" /></div>
             </div>
             <div><label className="mb-1 block text-xs font-medium">Owner Email *</label><input type="email" required value={addForm.ownerEmail} onChange={(e) => setAddForm(f => ({ ...f, ownerEmail: e.target.value }))} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" placeholder="owner@company.com" /></div>
+            <div className="rounded-md border border-border p-3 space-y-3">
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  checked={addGrant.grantAccess}
+                  onChange={(e) => setAddGrant(g => ({ ...g, grantAccess: e.target.checked }))}
+                />
+                Grant full access
+              </label>
+              {addGrant.grantAccess && (
+                <>
+                  <p className="text-xs text-[hsl(var(--foreground-muted))]">
+                    Free use of the chosen plan, with no payment and no onboarding-call wait. Plan limits still apply.
+                  </p>
+                  <div>
+                    <label htmlFor="add-comp-plan" className="mb-1 block text-xs font-medium">Plan</label>
+                    <select
+                      id="add-comp-plan"
+                      value={addGrant.planId || plans[0]?.id || ""}
+                      onChange={(e) => setAddGrant(g => ({ ...g, planId: e.target.value }))}
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                    >
+                      {plans.length === 0 && <option value="">No plans available</option>}
+                      {plans.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="add-comp-until" className="mb-1 block text-xs font-medium">Until (blank = no expiry)</label>
+                    <DateInput
+                      id="add-comp-until"
+                      value={addGrant.compUntil}
+                      onValueChange={(v) => setAddGrant(g => ({ ...g, compUntil: v }))}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="add-comp-reason" className="mb-1 block text-xs font-medium">Reason</label>
+                    <input
+                      id="add-comp-reason"
+                      type="text"
+                      value={addGrant.compReason}
+                      placeholder="Partner account, beta tester, etc."
+                      onChange={(e) => setAddGrant(g => ({ ...g, compReason: e.target.value }))}
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
             <p className="text-xs text-[hsl(var(--foreground-muted))]">The owner will receive an invite email with a link to set their own password.</p>
             <div className="flex gap-2 pt-2">
               <button type="submit" disabled={addLoading} className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">{addLoading ? "Creating..." : "Create Company"}</button>
@@ -1032,7 +1117,11 @@ export function CompanyManagement() {
                               )
                             )}
 
-                            {sub?.isComped ? (
+                            {/*
+                              Shown for a company with no subscriptions row
+                              too: the comp action creates the row first.
+                            */}
+                            {adminAccessAction(sub) === "revoke" ? (
                               <button
                                 onClick={() => revokeAccess(company)}
                                 disabled={accessBusy}
@@ -1040,15 +1129,15 @@ export function CompanyManagement() {
                               >
                                 Revoke access
                               </button>
-                            ) : sub?.isPaying ? (
+                            ) : adminAccessAction(sub) === "paying" ? (
                               <span className="text-xs text-[hsl(var(--foreground-muted))]">
                                 Paying customer — cancel in Stripe before granting a comp
                               </span>
-                            ) : sub ? (
+                            ) : (
                               <button
                                 onClick={() => {
                                   setCompTarget(company);
-                                  setCompPlanId(sub.planId ?? plans[0]?.id ?? "");
+                                  setCompPlanId(sub?.planId ?? plans[0]?.id ?? "");
                                   setAccessError(null);
                                 }}
                                 disabled={accessBusy}
@@ -1057,7 +1146,7 @@ export function CompanyManagement() {
                                 <Gift className="h-3.5 w-3.5" />
                                 Grant access
                               </button>
-                            ) : null}
+                            )}
 
                             {/* Delete sits last and apart, being irreversible. */}
                             <div className="ml-auto">

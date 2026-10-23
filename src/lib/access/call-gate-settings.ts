@@ -28,15 +28,47 @@ import { isUsableBookingUrl } from "@/lib/billing/booking";
 export interface CallGateSettings {
   /** The global switch. Read only at company creation, never as a live gate. */
   requireCall: boolean;
-  /** The GHL booking link for the thank-you page, or null when unusable/unset. */
+  /**
+   * The MONTHLY booking link (`onboarding_call_url`), also used for trials,
+   * comps and anyone without a paid subscription. Null when unusable/unset.
+   */
   bookingUrl: string | null;
+  /**
+   * The YEARLY booking link (`onboarding_call_url_yearly`, migration 048), or
+   * null when unusable, unset or the column does not exist yet. Never shown on
+   * its own: pick the customer's link with resolveOnboardingBookingUrl
+   * (src/lib/billing/booking.ts), which falls back to the monthly one.
+   */
+  bookingUrlYearly: string | null;
 }
 
 /** The answer whenever the setting cannot be read, and the shape of "off". */
 export const CALL_GATE_OFF: CallGateSettings = {
   requireCall: false,
   bookingUrl: null,
+  bookingUrlYearly: null,
 };
+
+/** 043's columns, which the gate cannot work without. */
+const BASE_COLUMNS = "require_call_before_access, onboarding_call_url";
+/** 043's plus 048's. */
+const ALL_COLUMNS = `${BASE_COLUMNS}, onboarding_call_url_yearly`;
+
+function usableOrNull(value: unknown): string | null {
+  return isUsableBookingUrl(value) ? value.trim() : null;
+}
+
+async function selectSettings(
+  db: SupabaseClient,
+  columns: string
+): Promise<{ data: unknown; error: { code?: string | null; message: string } | null }> {
+  const { data, error } = await db
+    .from("app_settings")
+    .select(columns)
+    .eq("id", "global")
+    .maybeSingle();
+  return { data, error };
+}
 
 /**
  * Read the switch and the booking link.
@@ -46,7 +78,11 @@ export const CALL_GATE_OFF: CallGateSettings = {
  */
 export async function loadCallGateSettings(db: SupabaseClient): Promise<CallGateSettings> {
   const state = await readCallGateSettings(db);
-  return { requireCall: state.requireCall, bookingUrl: state.bookingUrl };
+  return {
+    requireCall: state.requireCall,
+    bookingUrl: state.bookingUrl,
+    bookingUrlYearly: state.bookingUrlYearly,
+  };
 }
 
 export interface CallGateSettingsState extends CallGateSettings {
@@ -58,16 +94,31 @@ export interface CallGateSettingsState extends CallGateSettings {
    * `loadCallGateSettings` and ignore this.
    */
   available: boolean;
+  /**
+   * False when migration 048 has not been applied (no yearly column), so the
+   * admin screen can disable that one field. Only meaningful when `available`.
+   */
+  yearlyAvailable: boolean;
 }
 
 /** As loadCallGateSettings, also saying whether the columns exist. */
 export async function readCallGateSettings(db: SupabaseClient): Promise<CallGateSettingsState> {
   try {
-    const { data, error } = await db
-      .from("app_settings")
-      .select("require_call_before_access, onboarding_call_url")
-      .eq("id", "global")
-      .maybeSingle();
+    /*
+     * 048's column is asked for first, and a missing-column answer is retried
+     * WITHOUT it. One combined select would otherwise turn an unapplied 048
+     * into "the whole read failed", which this module answers with "gate off"
+     * — a yearly link nobody has set up yet switching the onboarding gate off
+     * for every new signup. The retry costs one query, and only until 048 is
+     * applied.
+     */
+    let yearlyAvailable = true;
+    let { data, error } = await selectSettings(db, ALL_COLUMNS);
+
+    if (error && isMissingColumnError(error)) {
+      yearlyAvailable = false;
+      ({ data, error } = await selectSettings(db, BASE_COLUMNS));
+    }
 
     if (error) {
       const missing = isMissingColumnError(error);
@@ -76,12 +127,13 @@ export async function readCallGateSettings(db: SupabaseClient): Promise<CallGate
         // migration is expected and is not.
         console.error("[access/call-gate] settings read failed, gate off:", error.message);
       }
-      return { ...CALL_GATE_OFF, available: !missing };
+      return { ...CALL_GATE_OFF, available: !missing, yearlyAvailable: !missing && yearlyAvailable };
     }
 
     const row = (data ?? null) as {
       require_call_before_access?: unknown;
       onboarding_call_url?: unknown;
+      onboarding_call_url_yearly?: unknown;
     } | null;
 
     return {
@@ -94,17 +146,17 @@ export async function readCallGateSettings(db: SupabaseClient): Promise<CallGate
        * edited directly in the SQL editor — the thank-you page must not be the
        * first place a `javascript:` URL is discovered.
        */
-      bookingUrl: isUsableBookingUrl(row?.onboarding_call_url)
-        ? row.onboarding_call_url.trim()
-        : null,
+      bookingUrl: usableOrNull(row?.onboarding_call_url),
+      bookingUrlYearly: yearlyAvailable ? usableOrNull(row?.onboarding_call_url_yearly) : null,
       available: true,
+      yearlyAvailable,
     };
   } catch (err: unknown) {
     console.error(
       "[access/call-gate] settings read threw, gate off:",
       err instanceof Error ? err.message : String(err)
     );
-    return { ...CALL_GATE_OFF, available: true };
+    return { ...CALL_GATE_OFF, available: true, yearlyAvailable: true };
   }
 }
 

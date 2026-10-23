@@ -47,7 +47,13 @@ function makeDb(): SupabaseClient {
       };
       builder.maybeSingle = () => {
         calls.push({ table, method: "maybeSingle", args: [] });
-        return Promise.resolve(responses[table] ?? { data: null, error: null });
+        // A response keyed by the exact column list wins, so a test can answer
+        // the with-048 select and the 043-only retry differently.
+        const lastSelect = [...calls]
+          .reverse()
+          .find((c) => c.table === table && c.method === "select");
+        const byColumns = lastSelect ? responses[`${table}|${String(lastSelect.args[0])}`] : undefined;
+        return Promise.resolve(byColumns ?? responses[table] ?? { data: null, error: null });
       };
       return builder;
     },
@@ -85,6 +91,7 @@ describe("loadCallGateSettings", () => {
     expect(await loadCallGateSettings(makeDb())).toEqual({
       requireCall: true,
       bookingUrl: BOOKING,
+      bookingUrlYearly: null,
     });
 
     const settingsCalls = calls.filter((c) => c.table === "app_settings");
@@ -99,6 +106,7 @@ describe("loadCallGateSettings", () => {
     expect(await loadCallGateSettings(makeDb())).toEqual({
       requireCall: false,
       bookingUrl: BOOKING,
+      bookingUrlYearly: null,
     });
   });
 
@@ -162,12 +170,115 @@ describe("loadCallGateSettings", () => {
   });
 });
 
+describe("the yearly booking link (migration 048)", () => {
+  const YEARLY = "https://calendar.example.com/sam/onboarding-yearly";
+  const WITH_048 =
+    "app_settings|require_call_before_access, onboarding_call_url, onboarding_call_url_yearly";
+  const WITHOUT_048 = "app_settings|require_call_before_access, onboarding_call_url";
+  const MISSING_YEARLY = {
+    code: "42703",
+    message: "column app_settings.onboarding_call_url_yearly does not exist",
+  };
+
+  it("reads the yearly link alongside the monthly one", async () => {
+    responses.app_settings = {
+      data: {
+        require_call_before_access: true,
+        onboarding_call_url: BOOKING,
+        onboarding_call_url_yearly: `  ${YEARLY}  `,
+      },
+      error: null,
+    };
+    expect(await readCallGateSettings(makeDb())).toEqual({
+      requireCall: true,
+      bookingUrl: BOOKING,
+      bookingUrlYearly: YEARLY,
+      available: true,
+      yearlyAvailable: true,
+    });
+  });
+
+  it("drops a yearly link it would not render", async () => {
+    responses.app_settings = {
+      data: {
+        require_call_before_access: true,
+        onboarding_call_url: BOOKING,
+        onboarding_call_url_yearly: "javascript:alert(1)",
+      },
+      error: null,
+    };
+    expect((await loadCallGateSettings(makeDb())).bookingUrlYearly).toBeNull();
+  });
+
+  /**
+   * The case that matters: before 048 is applied the combined select fails,
+   * and that must not read as "settings unreadable, gate off".
+   */
+  for (const [label, missing] of [
+    ["42703", MISSING_YEARLY],
+    [
+      "PGRST204",
+      {
+        code: "PGRST204",
+        message: "Could not find the 'onboarding_call_url_yearly' column of 'app_settings' in the schema cache",
+      },
+    ],
+  ] as const) {
+    it(`keeps the gate and the monthly link when the yearly column is missing (${label})`, async () => {
+      responses[WITH_048] = { data: null, error: missing };
+      responses[WITHOUT_048] = {
+        data: { require_call_before_access: true, onboarding_call_url: BOOKING },
+        error: null,
+      };
+
+      expect(await readCallGateSettings(makeDb())).toEqual({
+        requireCall: true,
+        bookingUrl: BOOKING,
+        bookingUrlYearly: null,
+        available: true,
+        yearlyAvailable: false,
+      });
+      expect(console.error).not.toHaveBeenCalled();
+    });
+  }
+
+  it("still stamps new companies when only 048 is missing", async () => {
+    responses[WITH_048] = { data: null, error: MISSING_YEARLY };
+    responses[WITHOUT_048] = {
+      data: { require_call_before_access: true, onboarding_call_url: BOOKING },
+      error: null,
+    };
+    responses.companies = {
+      data: {
+        id: "co-1",
+        created_at: new Date().toISOString(),
+        requires_call_unlock: false,
+        portal_access_granted_at: null,
+      },
+      error: null,
+    };
+
+    expect((await stampCallUnlockForNewCompany(makeDb(), "co-1")).stamped).toBe(true);
+  });
+
+  it("does not retry on a failure that is not a missing column", async () => {
+    responses.app_settings = { data: null, error: { code: "08006", message: "connection failure" } };
+    expect(await readCallGateSettings(makeDb())).toMatchObject({
+      requireCall: false,
+      available: true,
+      yearlyAvailable: true,
+    });
+    expect(calls.filter((c) => c.table === "app_settings" && c.method === "select")).toHaveLength(1);
+  });
+});
+
 describe("readCallGateSettings", () => {
   it("reports the migration as missing so the admin screen can say so", async () => {
     responses.app_settings = { data: null, error: MISSING_COLUMN };
     expect(await readCallGateSettings(makeDb())).toMatchObject({
       requireCall: false,
       available: false,
+      yearlyAvailable: false,
     });
   });
 

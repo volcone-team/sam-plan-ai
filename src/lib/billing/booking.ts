@@ -68,6 +68,71 @@ export function resolveBookingUrls(raw: {
 }
 
 /* ------------------------------------------------------------------ *
+ * The onboarding call link, by billing cycle
+ * ------------------------------------------------------------------ */
+
+/**
+ * Billing-cycle values that mean "yearly".
+ *
+ * `subscriptions.billing_cycle` stores "annual" (migration 022's CHECK, and the
+ * webhook writes it from the Stripe interval); "yearly" is the client's word
+ * for the same thing (see the annual/yearly note in src/lib/ghl/tags.ts), so
+ * both are accepted rather than one being a silent miss.
+ */
+const YEARLY_CYCLES = new Set(["annual", "yearly"]);
+
+/**
+ * Which onboarding booking link a customer should see.
+ *
+ * `monthlyUrl` is `app_settings.onboarding_call_url` (migration 043), which
+ * also serves trials, comped accounts and anyone without a paid subscription;
+ * `yearlyUrl` is `onboarding_call_url_yearly` (migration 048).
+ *
+ * A YEARLY CUSTOMER FALLS BACK TO THE MONTHLY LINK when no usable yearly link
+ * is set, so an operator with one calendar fills in one field and everybody can
+ * book. The reverse fallback is deliberately absent: a monthly customer never
+ * gets the yearly calendar, because a separate yearly calendar is exactly the
+ * thing the operator set up to keep apart.
+ *
+ * `billingCycle` should be null for anything that is not a paid subscription —
+ * see `onboardingBookingCycle`. Anything other than "annual"/"yearly" (case and
+ * whitespace ignored) reads as monthly. Both links are re-validated here with
+ * isUsableBookingUrl, so a value can be passed straight from the database.
+ */
+export function resolveOnboardingBookingUrl(args: {
+  monthlyUrl: unknown;
+  yearlyUrl: unknown;
+  billingCycle: unknown;
+}): string | null {
+  const monthly = isUsableBookingUrl(args.monthlyUrl) ? args.monthlyUrl.trim() : null;
+  const cycle =
+    typeof args.billingCycle === "string" ? args.billingCycle.trim().toLowerCase() : "";
+
+  if (YEARLY_CYCLES.has(cycle) && isUsableBookingUrl(args.yearlyUrl)) {
+    return args.yearlyUrl.trim();
+  }
+  return monthly;
+}
+
+/**
+ * The billing cycle to choose the onboarding link by, from the access decision.
+ *
+ * Only a PAID subscription has a cycle worth honouring. A trial, a comp, open
+ * access with billing switched off, and no subscription at all read as null
+ * (the monthly link), whatever `subscriptions.billing_cycle` happens to hold:
+ * that column is NOT NULL with a 'monthly' default, so trial rows carry a
+ * value nobody chose, and a comp layered over an old annual row is not a yearly
+ * purchase.
+ */
+export function onboardingBookingCycle(args: {
+  accessReason: string | null | undefined;
+  billingCycle: string | null | undefined;
+}): string | null {
+  if (args.accessReason !== "active" && args.accessReason !== "grace_period") return null;
+  return args.billingCycle ?? null;
+}
+
+/* ------------------------------------------------------------------ *
  * Copy
  * ------------------------------------------------------------------ */
 

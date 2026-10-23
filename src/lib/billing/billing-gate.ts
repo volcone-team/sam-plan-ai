@@ -39,6 +39,32 @@ export interface GateSubRow {
   stripe_mode: string | null;
 }
 
+/**
+ * The entitlement evaluation both gates share. The pause is deliberately
+ * evaluated as off: decideBillingGate handles it before asking this, so this
+ * answers "what lies underneath the pause".
+ */
+function evaluateGateAccess(
+  settings: BillingSettings,
+  gateSub: GateSubRow | null,
+  now?: number
+): AccessDecision {
+  return evaluateAccess(
+    settings,
+    {
+      status: (gateSub?.stripe_status ?? gateSub?.status ?? null) as never,
+      isComped: gateSub?.is_comped ?? false,
+      compedUntil: gateSub?.comped_until ?? null,
+      trialEndsAt: gateSub?.trial_ends_at ?? null,
+      currentPeriodEnd: gateSub?.current_period_end ?? null,
+      pastDueSince: gateSub?.past_due_since ?? null,
+      cancelAtPeriodEnd: gateSub?.cancel_at_period_end ?? false,
+      isPaused: false,
+    },
+    now
+  );
+}
+
 export type GateDecision =
   | { kind: "pass" }
   | { kind: "paused" }
@@ -65,21 +91,7 @@ export function decideBillingGate(args: {
     // Falls through to the entitlement gate, which allows these same paths.
   }
 
-  const access = evaluateAccess(
-    args.settings,
-    {
-      status: (gateSub?.stripe_status ?? gateSub?.status ?? null) as never,
-      isComped: gateSub?.is_comped ?? false,
-      compedUntil: gateSub?.comped_until ?? null,
-      trialEndsAt: gateSub?.trial_ends_at ?? null,
-      currentPeriodEnd: gateSub?.current_period_end ?? null,
-      pastDueSince: gateSub?.past_due_since ?? null,
-      cancelAtPeriodEnd: gateSub?.cancel_at_period_end ?? false,
-      // The pause was handled above; evaluate what lies underneath it.
-      isPaused: false,
-    },
-    args.now
-  );
+  const access = evaluateGateAccess(args.settings, gateSub, args.now);
 
   if (
     !access.allowed &&
@@ -163,6 +175,21 @@ export function decideAccessGates(args: {
     now: args.now,
   });
   if (billing.kind !== "pass") return billing;
+
+  /*
+   * The call gate applies to ENTITLED companies only. Billing also answers
+   * "pass" for an unentitled company on a path it may use while locked out
+   * (/api/stripe/checkout, /api/billing/*). The call gate deliberately blocks
+   * buying, so letting it see that request would stop a flagged company from
+   * ever paying. The owner's rule: the call comes AFTER payment.
+   */
+  if (
+    args.hasCompany &&
+    !args.isAdmin &&
+    !evaluateGateAccess(args.settings, args.sub, args.now).allowed
+  ) {
+    return { kind: "pass" };
+  }
 
   const call = decideCallGate({
     isAdmin: args.isAdmin,

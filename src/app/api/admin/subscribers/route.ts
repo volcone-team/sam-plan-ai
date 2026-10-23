@@ -4,6 +4,7 @@ import { requireSuperAdmin } from "@/lib/require-admin";
 import { logActivity } from "@/lib/activity-log";
 import { loadBillingConfig } from "@/lib/billing/stripe-client";
 import { evaluateAccess } from "@/lib/billing/entitlement";
+import { applyComp, parseCompInput } from "@/lib/billing/comp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -331,69 +332,37 @@ export async function POST(req: Request) {
       .from("profiles").select("email").eq("id", check.userId).maybeSingle();
 
     if (body.action === "comp") {
-      if (typeof body.planId !== "string" || !body.planId) {
-        return NextResponse.json({ error: "planId" }, { status: 400 });
+      const parsed = parseCompInput({
+        planId: body.planId,
+        until: body.until,
+        reason: body.reason,
+      });
+      if (!parsed.ok) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 });
       }
 
       /**
-       * Refuse to comp a PAYING customer.
-       *
-       * Enforced here and not only by hiding the button, because a hidden button
-       * is not a control. Comping an active subscriber would grant free access
-       * while Stripe keeps charging their card, and would also corrupt the comped
-       * flag — which is how "who is not paying" is answered.
-       *
-       * Cancel their subscription first if the intent really is to move them to
-       * complimentary access.
+       * Shared with the admin create route. applyComp ensures the company has
+       * a subscriptions row first (admin-created companies had none, so this
+       * update used to match nothing), refuses a paying customer, then writes
+       * the comp fields.
        */
-      const { data: existing } = await db
-        .from("subscriptions")
-        .select("stripe_subscription_id, stripe_status")
-        .eq("company_id", body.companyId)
-        .maybeSingle();
+      const result = await applyComp(db, {
+        companyId: body.companyId,
+        actorUserId: check.userId,
+        input: parsed.value,
+      });
 
-      if (
-        existing?.stripe_subscription_id &&
-        ["active", "trialing", "past_due"].includes(existing.stripe_status ?? "")
-      ) {
-        return NextResponse.json(
-          {
-            error: "has_paid_subscription",
-            message:
-              "This account has an active paid subscription. Cancel it in Stripe " +
-              "before granting complimentary access.",
-          },
-          { status: 400 }
-        );
-      }
-
-      let until: string | null = null;
-      if (typeof body.until === "string" && body.until.trim()) {
-        const t = new Date(body.until).getTime();
-        if (!Number.isFinite(t)) {
-          return NextResponse.json({ error: "until" }, { status: 400 });
+      if (!result.ok) {
+        if (result.status >= 500) {
+          console.error("[admin/subscribers] Comp failed:", result.error);
         }
-        until = new Date(t).toISOString();
-      }
-
-      const { error } = await db
-        .from("subscriptions")
-        .update({
-          is_comped: true,
-          comped_until: until,
-          comped_reason:
-            typeof body.reason === "string" && body.reason.trim()
-              ? body.reason.trim().slice(0, 300)
-              : "Granted by super admin",
-          comped_by: check.userId,
-          plan_id: body.planId,
-          updated_at: now,
-        })
-        .eq("company_id", body.companyId);
-
-      if (error) {
-        console.error("[admin/subscribers] Comp failed:", error.message);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json(
+          result.message
+            ? { error: result.error, message: result.message }
+            : { error: result.error },
+          { status: result.status }
+        );
       }
 
       await logActivity(
@@ -404,18 +373,27 @@ export async function POST(req: Request) {
           targetType: "companies",
           targetId: body.companyId,
           targetLabel: null,
-          metadata: { planId: body.planId, until, reason: body.reason ?? null },
+          metadata: {
+            planId: parsed.value.planId,
+            until: result.until,
+            reason: body.reason ?? null,
+            subscriptionRowCreated: result.rowCreated,
+          },
         },
         db
       );
 
-      return NextResponse.json({ comped: true, until });
+      return NextResponse.json({ comped: true, until: result.until });
     }
 
     if (body.action === "uncomp") {
       // Clears the comp only. Any real Stripe subscription is untouched, so a
       // company that later subscribed properly keeps it.
-      const { error } = await db
+      //
+      // A company with no subscriptions row has no comp to clear: the update
+      // matches nothing and that is reported as a no-op rather than an error,
+      // because the outcome the admin asked for (no free access) already holds.
+      const { data: cleared, error } = await db
         .from("subscriptions")
         .update({
           is_comped: false,
@@ -424,11 +402,16 @@ export async function POST(req: Request) {
           comped_by: null,
           updated_at: now,
         })
-        .eq("company_id", body.companyId);
+        .eq("company_id", body.companyId)
+        .select("id");
 
       if (error) {
         console.error("[admin/subscribers] Uncomp failed:", error.message);
         return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      if (!Array.isArray(cleared) || cleared.length === 0) {
+        return NextResponse.json({ comped: false, noSubscription: true });
       }
 
       await logActivity(

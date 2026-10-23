@@ -3,8 +3,10 @@ import {
   derivePortalAccessState,
   decidePortalAccessChange,
   portalAccessPatch,
+  newCompanyGateAction,
   type PortalAccessCompany,
 } from "./portal-access";
+import { needsCallUnlock } from "./call-gate";
 
 const GRANTED_AT = "2026-10-12T09:00:00.000Z";
 const ADMIN_ID = "11111111-1111-4111-8111-111111111111";
@@ -155,5 +157,32 @@ describe("portalAccessPatch", () => {
   it("puts a granted company into the open state", () => {
     const patch = portalAccessPatch("granted", ADMIN_ID, GRANTED_AT);
     expect(derivePortalAccessState({ ...waiting, ...patch })).toBe("open");
+  });
+});
+
+describe("newCompanyGateAction (admin create company)", () => {
+  it("stamps the call gate as before when no grant was requested", () => {
+    expect(
+      newCompanyGateAction({ grantRequested: false, adminId: ADMIN_ID, now: GRANTED_AT })
+    ).toEqual({ kind: "stamp" });
+  });
+
+  it("records the portal as open, flag untouched, when full access was requested", () => {
+    const action = newCompanyGateAction({
+      grantRequested: true,
+      adminId: ADMIN_ID,
+      now: GRANTED_AT,
+    });
+    expect(action).toEqual({
+      kind: "record_grant",
+      patch: { portal_access_granted_at: GRANTED_AT, portal_access_granted_by: ADMIN_ID },
+    });
+    if (action.kind !== "record_grant") throw new Error("unreachable");
+    expect(Object.keys(action.patch)).not.toContain("requires_call_unlock");
+
+    // The resulting row is decided, not gated, and never waiting.
+    const row = { requires_call_unlock: false, ...action.patch };
+    expect(needsCallUnlock(row)).toBe(false);
+    expect(derivePortalAccessState(row)).toBe("not_gated");
   });
 });

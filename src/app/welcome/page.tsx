@@ -10,6 +10,10 @@ import {
   stampCallUnlockForNewCompany,
 } from "@/lib/access/call-gate-settings";
 import { isMissingColumnError } from "@/lib/supabase/missing-column";
+import {
+  resolveOnboardingBookingUrl,
+  onboardingBookingCycle,
+} from "@/lib/billing/booking";
 import { WelcomeClient } from "./welcome-client";
 import { ConfirmPayment } from "./confirm-payment";
 
@@ -85,7 +89,7 @@ export default async function WelcomePage({
         .select(
           "plan_id, status, stripe_status, is_comped, comped_until, " +
           "trial_ends_at, current_period_end, past_due_since, " +
-          "cancel_at_period_end, is_paused, pause_resumes_at"
+          "cancel_at_period_end, is_paused, pause_resumes_at, billing_cycle"
         )
         .eq("company_id", companyId)
         .maybeSingle()
@@ -97,6 +101,7 @@ export default async function WelcomePage({
     trial_ends_at: string | null; current_period_end: string | null;
     past_due_since: string | null; cancel_at_period_end: boolean;
     is_paused: boolean | null; pause_resumes_at: string | null;
+    billing_cycle: string | null;
   } | null;
 
   const access = evaluateAccess(
@@ -224,6 +229,21 @@ export default async function WelcomePage({
 
   const awaitingCall = needsCallUnlock(callGateCompany);
 
+  /*
+   * Monthly or yearly calendar. Only a paid subscription's cycle counts — a
+   * trial or comp gets the monthly link whatever the row's NOT NULL
+   * billing_cycle default says — and a yearly customer with no yearly link
+   * set falls back to the monthly one.
+   */
+  const bookingUrl = resolveOnboardingBookingUrl({
+    monthlyUrl: callSettings.bookingUrl,
+    yearlyUrl: callSettings.bookingUrlYearly,
+    billingCycle: onboardingBookingCycle({
+      accessReason: access.reason,
+      billingCycle: sub?.billing_cycle ?? null,
+    }),
+  });
+
   const { data: plan } = sub?.plan_id
     ? await db
         .from("subscription_plans")
@@ -254,7 +274,7 @@ export default async function WelcomePage({
       isTrial={access.reason === "trialing"}
       trialDaysRemaining={access.daysRemaining}
       awaitingCall={awaitingCall}
-      bookingUrl={callSettings.bookingUrl}
+      bookingUrl={bookingUrl}
     />
   );
 }

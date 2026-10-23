@@ -143,6 +143,36 @@ describe("decideAccessGates", () => {
       .toBe("paused");
   });
 
+  /**
+   * The call gate applies to ENTITLED companies only. A flagged company with no
+   * entitlement must be able to buy: the call comes after payment.
+   */
+  it("lets an unentitled flagged company reach the purchase APIs", () => {
+    expect(decide(WAITING, "/api/stripe/checkout", { sub: null, method: "POST" })).toBe("pass");
+    expect(decide(WAITING, "/api/billing/reconcile", { sub: null, method: "POST" })).toBe("pass");
+    const canceled: GateSubRow = { ...ROW, stripe_status: "canceled", status: "canceled" };
+    expect(decide(WAITING, "/api/stripe/checkout", { sub: canceled, method: "POST" })).toBe("pass");
+  });
+
+  it("sends an unentitled flagged company to buy from a product API, not to the call", () => {
+    expect(decide(WAITING, "/api/initiatives", { sub: null })).toBe("purchase");
+    expect(decide(WAITING, "/api/initiatives", { sub: null, method: "POST" })).toBe("purchase");
+  });
+
+  it("still holds an entitled flagged company at the call gate, including for buying", () => {
+    expect(decide(WAITING, "/year-at-a-glance")).toBe("awaiting_call");
+    expect(decide(WAITING, "/api/stripe/checkout", { method: "POST" })).toBe("awaiting_call");
+    const trial: GateSubRow = {
+      ...ROW,
+      status: "trialing",
+      stripe_status: null,
+      stripe_subscription_id: null,
+      trial_ends_at: "2999-01-01T00:00:00.000Z",
+    };
+    expect(decide(WAITING, "/year-at-a-glance", { sub: trial })).toBe("awaiting_call");
+    expect(decide(WAITING, "/api/stripe/checkout", { sub: trial, method: "POST" })).toBe("awaiting_call");
+  });
+
   it("leaves an ungated company's billing answers exactly as they were", () => {
     const canceled: GateSubRow = { ...ROW, stripe_status: "canceled", status: "canceled" };
     expect(decide(null, "/settings")).toBe("pass");

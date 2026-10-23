@@ -465,41 +465,18 @@ export function funnelErrors(initiative: InitiativeRow): FieldErrors {
 }
 
 /**
- * Screen 6. Nothing is required — a business with no history is a legitimate
- * answer, and Path C users may have none at all.
- */
-/**
- * Screen 6. Nothing is required — a business with no history is a legitimate
- * answer, and Path C users may have none at all.
+ * Screen 6. Two optional free-text answers (`what_worked_notes`,
+ * `what_failed_notes`), so nothing here can block: a business with no history
+ * is a legitimate answer, and Path C users may have none at all.
  *
- * Reads the INITIATIVE ROWS rather than answer arrays, because the screen
- * stores wins and failures as `intake_initiatives` rows with a `source`. That
- * is also how the generator reads them, so validating the same shape avoids a
- * second representation that could disagree.
+ * The screen no longer writes 'worked' / 'failed' initiative rows, so there is
+ * no win-versus-flop contradiction to check. Legacy rows of that kind are left
+ * alone, and are not validated here either — the user can no longer see or
+ * edit them on this screen, so an error against them could never be fixed.
+ * No length cap either, consistent with the intake's other notes fields.
  */
-function validateWins(initiatives: readonly InitiativeRow[]): ValidationResult {
-  const keysFor = (source: string) =>
-    initiatives
-      .filter((row) => row.source === source)
-      .map((row) => (typeof row.initiative_key === "string" ? row.initiative_key : null))
-      .filter((key): key is string => key !== null);
-
-  const worked = keysFor("worked");
-  const didntWork = new Set(keysFor("failed"));
-
-  const errors: FieldErrors = {};
-
-  /**
-   * The same initiative cannot both have driven sales and have failed. Caught
-   * here because it reaches the generator as contradictory guidance: REQ-13.8
-   * would exclude it outright while the wins list argues for it, and whichever
-   * rule happens to run last would decide.
-   */
-  if (worked.some((key) => didntWork.has(key))) {
-    errors.didnt_work = "Something can't be both a win and a flop. Pick one.";
-  }
-
-  return result(errors);
+function validateWins(answers: IntakeAnswers): ValidationResult {
+  return result(requiredErrors("wins", answers));
 }
 
 function validateCustomer(answers: IntakeAnswers): ValidationResult {
@@ -581,7 +558,7 @@ export function validateScreen(args: ValidateArgs): ValidationResult {
     case "initiatives":
       return validateInitiatives(args.initiatives ?? []);
     case "wins":
-      return validateWins(args.initiatives ?? []);
+      return validateWins(answers);
     case "customer":
       return validateCustomer(answers);
     case "audience":

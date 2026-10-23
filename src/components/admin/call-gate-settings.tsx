@@ -28,9 +28,16 @@ import { cn } from '@/lib/utils';
 interface CallGateSettings {
   requireCall: boolean;
   bookingUrl: string | null;
+  /** Migration 048. Blank → yearly customers get the monthly link. */
+  bookingUrlYearly: string | null;
   /** False → migration 043 is missing. */
   available: boolean;
+  /** False → migration 048 is missing; only the yearly field is disabled. */
+  yearlyAvailable: boolean;
 }
+
+const INPUT_CLASS =
+  'w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))] focus:ring-1 focus:ring-[hsl(var(--primary))] disabled:opacity-50';
 
 export function CallGateSettings() {
   const [data, setData] = useState<CallGateSettings | null>(null);
@@ -41,6 +48,7 @@ export function CallGateSettings() {
 
   const [requireCall, setRequireCall] = useState(false);
   const [bookingUrl, setBookingUrl] = useState('');
+  const [bookingUrlYearly, setBookingUrlYearly] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -56,6 +64,7 @@ export function CallGateSettings() {
       setData(settings);
       setRequireCall(settings.requireCall);
       setBookingUrl(settings.bookingUrl ?? '');
+      setBookingUrlYearly(settings.bookingUrlYearly ?? '');
     } catch {
       setError('Could not reach the server.');
     } finally {
@@ -66,6 +75,8 @@ export function CallGateSettings() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const yearlyDirty = !!data && (data.bookingUrlYearly ?? '') !== bookingUrlYearly.trim();
 
   const save = async () => {
     setSaving(true);
@@ -81,6 +92,9 @@ export function CallGateSettings() {
         body: JSON.stringify({
           requireCall,
           bookingUrl: bookingUrl.trim() || null,
+          // Sent only when it changed, so a database without migration 048
+          // can still save the switch and the monthly link.
+          ...(yearlyDirty ? { bookingUrlYearly: bookingUrlYearly.trim() || null } : {}),
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -104,9 +118,12 @@ export function CallGateSettings() {
   if (loading) return <LoadingPanel />;
 
   const unavailable = data ? !data.available : false;
+  const yearlyUnavailable = unavailable || (data ? !data.yearlyAvailable : false);
   const dirty =
     !!data &&
-    (data.requireCall !== requireCall || (data.bookingUrl ?? '') !== bookingUrl.trim());
+    (data.requireCall !== requireCall ||
+      (data.bookingUrl ?? '') !== bookingUrl.trim() ||
+      yearlyDirty);
 
   return (
     <div className="space-y-6">
@@ -184,7 +201,7 @@ export function CallGateSettings() {
 
           <div className="space-y-1.5 border-t border-border pt-5">
             <label htmlFor="onboarding-call-url" className="text-sm font-medium">
-              Booking link
+              Onboarding call link — monthly plans (also used for trials)
             </label>
             <p className="text-xs text-[hsl(var(--foreground-muted))]">
               The calendar behind the &ldquo;Book a call with us&rdquo; button on the
@@ -202,7 +219,7 @@ export function CallGateSettings() {
               value={bookingUrl}
               onChange={(e) => setBookingUrl(e.target.value)}
               placeholder="https://link.gohighlevel.com/widget/bookings/your-calendar"
-              className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))] focus:ring-1 focus:ring-[hsl(var(--primary))] disabled:opacity-50"
+              className={INPUT_CLASS}
             />
             <p
               className={
@@ -215,6 +232,34 @@ export function CallGateSettings() {
                 ? 'The thank-you page shows the booking button.'
                 : 'No link set — the thank-you page tells customers you will be in touch instead of showing a button that goes nowhere.'}
             </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="onboarding-call-url-yearly" className="text-sm font-medium">
+              Onboarding call link — yearly plans
+            </label>
+            <p className="text-xs text-[hsl(var(--foreground-muted))]">
+              Leave blank to use the monthly link.
+            </p>
+            <input
+              id="onboarding-call-url-yearly"
+              type="url"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              disabled={yearlyUnavailable}
+              value={bookingUrlYearly}
+              onChange={(e) => setBookingUrlYearly(e.target.value)}
+              placeholder="https://link.gohighlevel.com/widget/bookings/your-yearly-calendar"
+              className={INPUT_CLASS}
+            />
+            {data && !data.yearlyAvailable && !unavailable && (
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                Migration 048 (<code>048_yearly_booking_link.sql</code>) has not been
+                applied yet, so there is nowhere to store this link. Yearly customers
+                get the monthly link until it is.
+              </p>
+            )}
           </div>
 
           {/*

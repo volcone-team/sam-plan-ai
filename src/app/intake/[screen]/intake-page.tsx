@@ -46,13 +46,13 @@ export function IntakePage({ screen }: { screen: ScreenId }) {
   const { state, path } = draft;
 
   /**
-   * The library is only needed by screens 5 and 6, but the hook is called
+   * The library is only needed by screen 5, but the hook is called
    * unconditionally — hooks cannot be conditional, and fetching 22 rows on the
    * other screens is cheaper than the bug a conditional hook would introduce.
+   * Screen 5 builds the plan and lists the ACTIVE library only. (Screen 6 used
+   * the "history" scope for its pickers; it is free text now.)
    */
-  // Screen 6 records history, so it may name an admin-disabled initiative;
-  // screen 5 builds the plan and lists the ACTIVE library only.
-  const library = useLibrary(screen === "wins" ? "history" : "plan");
+  const library = useLibrary("plan");
 
   /**
    * Resume where the user left off — ONCE, and never from a finished intake.
@@ -102,9 +102,10 @@ export function IntakePage({ screen }: { screen: ScreenId }) {
       return;
     }
 
-    // Screen 5 needs one card to fill in. Filtered on source because screen 6
-    // writes 'worked' and 'failed' rows into the same array, and those must not
-    // count towards the planned minimum.
+    // Screen 5 needs one card to fill in. Filtered on source because drafts
+    // saved before screen 6 became free text can still hold legacy 'worked' and
+    // 'failed' rows in the same array, and those must not count towards the
+    // planned minimum.
     if (screen === "initiatives") {
       const planned = state.initiatives.filter(
         (i) => (i.source ?? "planned") === "planned"
@@ -233,11 +234,6 @@ export function IntakePage({ screen }: { screen: ScreenId }) {
         <ScreenWins
           answers={state.answers}
           setAnswer={draft.setAnswer}
-          initiatives={state.initiatives}
-          setInitiatives={draft.setInitiatives}
-          library={library.initiatives}
-          libraryLoading={library.loading}
-          libraryError={library.error}
           errors={errors}
           path={path}
         />

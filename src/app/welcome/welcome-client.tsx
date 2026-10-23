@@ -98,7 +98,11 @@ export function WelcomeClient({
    * or its migration is not applied.
    */
   awaitingCall: boolean;
-  /** app_settings.onboarding_call_url, already validated as an https link. */
+  /**
+   * The customer's onboarding link, already chosen by billing cycle
+   * (resolveOnboardingBookingUrl: yearly link for a paid yearly plan, else
+   * app_settings.onboarding_call_url) and validated as an https link.
+   */
   bookingUrl: string | null;
 }) {
   return (

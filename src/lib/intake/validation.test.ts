@@ -562,51 +562,33 @@ describe("wins screen", () => {
     expect(validateScreen({ screen: "wins", answers: {} }).valid).toBe(true);
   });
 
+  it("accepts both free-text answers, long or short", () => {
+    const res = validateScreen({
+      screen: "wins",
+      answers: {
+        what_worked_notes: "Webinars after a podcast appearance.",
+        what_failed_notes: "x".repeat(5000),
+      },
+    });
+    expect(res.valid).toBe(true);
+  });
+
   /**
-   * The same initiative cannot be both a win and a flop: REQ-13.8 would exclude
-   * it while the wins list recommends it, so the generator gets contradictory
-   * guidance.
+   * Legacy 'worked' / 'failed' rows from the old pickers are no longer
+   * editable on this screen, so they must never block it — not even the old
+   * "both a win and a flop" contradiction.
    */
-  it("rejects an initiative listed as both a win and a flop", () => {
+  it("never blocks on legacy worked/failed rows", () => {
     const res = validateScreen({
       screen: "wins",
       answers: {},
       initiatives: [
-        { source: "worked", initiative_key: "webinar" },
         { source: "worked", initiative_key: "email-campaign" },
         { source: "failed", initiative_key: "email-campaign" },
       ],
     });
-    expect(res.errors.didnt_work).toBeDefined();
-  });
-
-  it("accepts disjoint win and flop lists", () => {
-    const res = validateScreen({
-      screen: "wins",
-      answers: {},
-      initiatives: [
-        { source: "worked", initiative_key: "webinar" },
-        { source: "failed", initiative_key: "paid-ads" },
-      ],
-    });
     expect(res.valid).toBe(true);
-  });
-
-  /**
-   * Screen 5's planned rows share the array. A planned webinar alongside a
-   * failed webinar is not a contradiction — they are different claims — so only
-   * worked-versus-failed is checked.
-   */
-  it("ignores planned rows when checking for a contradiction", () => {
-    const res = validateScreen({
-      screen: "wins",
-      answers: {},
-      initiatives: [
-        { source: "planned", initiative_key: "webinar" },
-        { source: "failed", initiative_key: "webinar" },
-      ],
-    });
-    expect(res.valid).toBe(true);
+    expect(res.errors).toEqual({});
   });
 });
 

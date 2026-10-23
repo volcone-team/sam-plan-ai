@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   isUsableBookingUrl,
   resolveBookingUrls,
+  resolveOnboardingBookingUrl,
+  onboardingBookingCycle,
   describeResetCallOffer,
   describeStrategyCallOffer,
   describeCallBooked,
@@ -179,4 +181,102 @@ describe("describeCallBooked", () => {
   it("sends them to a page that exists", () => {
     expect(describeCallBooked({ reasonWasResults: false }).ctaHref).toBe("/year-at-a-glance");
   });
+});
+
+describe("resolveOnboardingBookingUrl", () => {
+  const monthly = "https://link.gohighlevel.com/widget/bookings/sam-monthly";
+  const yearly = "https://link.gohighlevel.com/widget/bookings/sam-yearly";
+
+  it.each(["annual", "yearly", "ANNUAL", " Yearly "])(
+    "gives a %o customer the yearly link",
+    (billingCycle) => {
+      expect(resolveOnboardingBookingUrl({ monthlyUrl: monthly, yearlyUrl: yearly, billingCycle }))
+        .toBe(yearly);
+    }
+  );
+
+  it.each(["monthly", null, undefined, "", "weekly", 12, {}])(
+    "gives a %o customer the monthly link, never the yearly one",
+    (billingCycle) => {
+      expect(resolveOnboardingBookingUrl({ monthlyUrl: monthly, yearlyUrl: yearly, billingCycle }))
+        .toBe(monthly);
+    }
+  );
+
+  it.each([null, undefined, "", "   ", "javascript:alert(1)", "http://insecure.example.com", 7])(
+    "falls back to the monthly link for a yearly customer when the yearly link is %o",
+    (yearlyUrl) => {
+      expect(resolveOnboardingBookingUrl({ monthlyUrl: monthly, yearlyUrl, billingCycle: "annual" }))
+        .toBe(monthly);
+    }
+  );
+
+  it("is null when neither link is usable, whatever the cycle", () => {
+    for (const billingCycle of ["annual", "monthly", null]) {
+      expect(
+        resolveOnboardingBookingUrl({
+          monthlyUrl: "javascript:alert(1)",
+          yearlyUrl: null,
+          billingCycle,
+        })
+      ).toBeNull();
+    }
+  });
+
+  it("gives a yearly customer the yearly link even with no monthly link set", () => {
+    expect(resolveOnboardingBookingUrl({ monthlyUrl: null, yearlyUrl: yearly, billingCycle: "annual" }))
+      .toBe(yearly);
+  });
+
+  it("does not invent a monthly link from the yearly one", () => {
+    expect(resolveOnboardingBookingUrl({ monthlyUrl: null, yearlyUrl: yearly, billingCycle: "monthly" }))
+      .toBeNull();
+    expect(resolveOnboardingBookingUrl({ monthlyUrl: "", yearlyUrl: yearly, billingCycle: null }))
+      .toBeNull();
+  });
+
+  it("trims what it returns", () => {
+    expect(
+      resolveOnboardingBookingUrl({
+        monthlyUrl: `  ${monthly}  `,
+        yearlyUrl: `  ${yearly}  `,
+        billingCycle: "annual",
+      })
+    ).toBe(yearly);
+    expect(
+      resolveOnboardingBookingUrl({ monthlyUrl: `  ${monthly}  `, yearlyUrl: null, billingCycle: null })
+    ).toBe(monthly);
+  });
+
+  it("only ever returns one of the two links or null, for every combination", () => {
+    const urls = [monthly, yearly, null, "", "javascript:x", "http://a.b"];
+    const cycles = ["annual", "yearly", "monthly", null, "other"];
+    for (const monthlyUrl of urls) {
+      for (const yearlyUrl of urls) {
+        for (const billingCycle of cycles) {
+          const out = resolveOnboardingBookingUrl({ monthlyUrl, yearlyUrl, billingCycle });
+          const monthlyOk = isUsableBookingUrl(monthlyUrl) ? monthlyUrl : null;
+          const isYearly = billingCycle === "annual" || billingCycle === "yearly";
+          const expected = isYearly && isUsableBookingUrl(yearlyUrl) ? yearlyUrl : monthlyOk;
+          expect(out).toBe(expected);
+        }
+      }
+    }
+  });
+});
+
+describe("onboardingBookingCycle", () => {
+  it.each(["active", "grace_period"])("passes the cycle through for a paid %s subscription", (r) => {
+    expect(onboardingBookingCycle({ accessReason: r, billingCycle: "annual" })).toBe("annual");
+    expect(onboardingBookingCycle({ accessReason: r, billingCycle: "monthly" })).toBe("monthly");
+    expect(onboardingBookingCycle({ accessReason: r, billingCycle: null })).toBeNull();
+  });
+
+  /** Trial rows carry the column's 'monthly' default; a comp may sit on an old annual row. */
+  it.each(["trialing", "comped", "billing_disabled", "no_subscription", null, undefined])(
+    "reads %o as no cycle, which means the monthly link",
+    (accessReason) => {
+      expect(onboardingBookingCycle({ accessReason, billingCycle: "annual" })).toBeNull();
+    }
+  );
 });

@@ -27,6 +27,7 @@ import {
   type RecommendationExplanation,
 } from "@/lib/recommend/explain";
 import { explainRanked, rankForRecommendation, type ExplainedInitiative } from "@/lib/recommend/shortlist";
+import { HISTORY_PROMPT_RULE, historyPromptLines } from "@/lib/recommend/history-prompt";
 import type { LibraryInitiative } from "@/lib/intake/library";
 import {
   forecastForInitiative,
@@ -426,6 +427,7 @@ async function explainWithAi(args: {
         "- `watchOutFor`: one sentence drawn from its AVOID guidance, or null if none is given.\n" +
         "- `readinessQuestions`: 0-2 yes/no questions drawn from its NEEDS guidance, e.g. " +
         '"Do you have a talk that has sold from stage?"\n' +
+        `${HISTORY_PROMPT_RULE}\n` +
         "- Never quote a number that is not in the data given.\n" +
         "- No preamble, no code fence, no commentary.\n\n" +
         `SHORTLIST:\n${candidateList}`,
@@ -497,11 +499,8 @@ function describeBusiness(
       ? `Biggest challenges: ${arr(input.challenges).join(", ")}`
       : null,
     str(input.challenge_notes) ? `On those challenges: ${str(input.challenge_notes)}` : null,
-    str(input.what_worked_notes) ? `What has worked: ${str(input.what_worked_notes)}` : null,
-    // Stated so the explanations do not lean on something that already flopped.
-    ctx.didntWork.length > 0
-      ? `Already tried and failed: ${ctx.didntWork.join(", ")}`
-      : null,
+    // Wins and struggles: both free-text answers plus any legacy 'failed' keys.
+    ...historyPromptLines(input, ctx.didntWork),
   ].filter(Boolean);
 
   return `Explain each shortlisted initiative for this business.\n\n${lines.join("\n")}`;

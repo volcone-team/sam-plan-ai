@@ -43,10 +43,12 @@ export type PortalAccessState =
  * Which of the three states a company is in.
  *
  * `open` requires the FLAG as well as the timestamp. A grant without the flag
- * should not exist — nothing can create one, since granting an ungated company
- * is refused below — and if one somehow appears (a hand-written UPDATE, say)
- * calling it "open" would advertise a gate that was never there. It reads as
- * `not_gated`, which is what the customer experiences.
+ * means "decided: never gated". The admin create route writes exactly that
+ * when the company is created with full access (newCompanyGateAction), so the
+ * backstop stamps treat it as decided. Granting an existing ungated company is
+ * still refused below. Calling such a row "open" would advertise a gate that
+ * was never there, so it reads as `not_gated`, which is what the customer
+ * experiences.
  */
 export function derivePortalAccessState(
   company: PortalAccessCompany | null | undefined
@@ -165,4 +167,42 @@ export function portalAccessPatch(
   return outcome === "granted"
     ? { portal_access_granted_at: now, portal_access_granted_by: grantedBy }
     : { portal_access_granted_at: null, portal_access_granted_by: null };
+}
+
+export type NewCompanyGateAction =
+  /** Snapshot the global switch onto the company (stampCallUnlockForNewCompany). */
+  | { kind: "stamp" }
+  /** Record the admin's decision: portal open, flag left false. */
+  | {
+      kind: "record_grant";
+      patch: { portal_access_granted_at: string; portal_access_granted_by: string | null };
+    };
+
+/**
+ * What the admin create-company route does about the onboarding call gate.
+ *
+ * WITH "GRANT FULL ACCESS" the route used to skip the stamp and write nothing,
+ * which leaves the company looking undecided (flag false, no grant). The
+ * backstop stamps in the middleware and on /welcome read that as a new signup
+ * nobody has decided on and set the flag, locking the comped owner behind a
+ * call. Recording `portal_access_granted_at` marks the decision as made, so
+ * every backstop (all of which skip a row with a grant) leaves it alone.
+ *
+ * The flag stays false, so derivePortalAccessState reads this company as
+ * `not_gated`, which is what the customer experiences.
+ */
+export function newCompanyGateAction(args: {
+  grantRequested: boolean;
+  adminId: string | null;
+  now: string;
+}): NewCompanyGateAction {
+  if (!args.grantRequested) return { kind: "stamp" };
+  const patch = portalAccessPatch("granted", args.adminId, args.now);
+  return {
+    kind: "record_grant",
+    patch: {
+      portal_access_granted_at: patch.portal_access_granted_at as string,
+      portal_access_granted_by: patch.portal_access_granted_by,
+    },
+  };
 }

@@ -19,6 +19,7 @@ import {
   shouldClearPauseOnSync,
   PAUSE_CLEAR_PATCH,
 } from "@/lib/billing/webhook-logic";
+import { ensureSubscriptionRow, afterSubscriptionUpdate } from "@/lib/billing/subscription-row";
 // Enqueue-only, never-throws. See the guarded block at the end of
 // syncSubscription for why that property is the whole point.
 import { enqueueBuyerStateEvent } from "@/lib/ghl/producers/subscription";
@@ -332,8 +333,49 @@ async function syncSubscription(
     console.log("[stripe/webhook] New subscription", sub.id, "ends the pause for company", companyId);
   }
 
-  const { error } = await db.from("subscriptions").update(patch).eq("company_id", companyId);
-  if (error) throw new Error(`Subscription update failed: ${error.message}`);
+  /**
+   * The write, with a count. `.select("id")` returns the rows touched, so a
+   * company with NO subscriptions row (admin-created before the fix) is no
+   * longer a silent success that leaves a paying customer locked out.
+   *
+   * Zero rows → insert the default row (never overwrites) and retry ONCE.
+   * Still zero → log with the company and event ids and throw, which the
+   * caller already records as `failed` on the event row and answers 200 —
+   * the same outcome as any other handler failure, no new retry behaviour.
+   */
+  for (const attempt of [1, 2] as const) {
+    const { data: touched, error } = await db
+      .from("subscriptions")
+      .update(patch)
+      .eq("company_id", companyId)
+      .select("id");
+    if (error) throw new Error(`Subscription update failed: ${error.message}`);
+
+    const next = afterSubscriptionUpdate(Array.isArray(touched) ? touched.length : 0, attempt);
+    if (next === "done") break;
+
+    if (next === "ensure_and_retry") {
+      const ensured = await ensureSubscriptionRow(db, companyId);
+      console.warn(
+        "[stripe/webhook] No subscription row for company", companyId,
+        "event", event?.id ?? "unknown",
+        ensured.ok
+          ? `— default row ${ensured.created ? "created" : "already present"}, retrying`
+          : `— could not create default row: ${ensured.error}`
+      );
+      continue;
+    }
+
+    console.error(
+      "[stripe/webhook] Subscription update matched 0 rows after ensure+retry",
+      "| company", companyId,
+      "| event", event?.id ?? "unknown",
+      "| subscription", sub.id
+    );
+    throw new Error(
+      `Subscription update matched no row for company ${companyId} (event ${event?.id ?? "unknown"})`
+    );
+  }
 
   /**
    * GoHighLevel buyer-state tags. STRICTLY AFTER the write above, and
@@ -463,6 +505,20 @@ async function resolveCompanyId(
       .eq("company_id", fromMetadata)
       .maybeSingle();
     if (byId?.company_id) return byId.company_id as string;
+
+    /**
+     * The company exists but has no subscriptions row — an admin-created
+     * company before the fix. Resolving through `subscriptions` alone made
+     * this throw "No company" and the payment was never recorded. The
+     * metadata was set by our own Checkout and the event's signature is
+     * verified, so the id is ours; the update below ensures the row.
+     */
+    const { data: company } = await db
+      .from("companies")
+      .select("id")
+      .eq("id", fromMetadata)
+      .maybeSingle();
+    if (company?.id) return company.id as string;
   }
 
   return null;

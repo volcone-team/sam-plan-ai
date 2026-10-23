@@ -10,6 +10,7 @@ import {
 } from "@/lib/billing/stripe-client";
 import { getAppUrl } from "@/lib/app-url";
 import { isLiveSubscription } from "@/lib/billing/plan-change";
+import { ensureSubscriptionRow } from "@/lib/billing/subscription-row";
 
 export const runtime = "nodejs";
 
@@ -204,6 +205,21 @@ export async function POST(request: Request) {
         metadata: { company_id: companyId, user_id: user.id },
       });
       customerId = customer.id;
+
+      /**
+       * The row must exist for the customer id to land. A company created by
+       * the admin route had none, so this update matched nothing and the
+       * webhook later could not find the company by customer id. Never
+       * overwrites; a failure is logged and the session still proceeds,
+       * because the webhook resolves the company from metadata and ensures
+       * the row itself.
+       */
+      const ensured = await ensureSubscriptionRow(db, companyId);
+      if (!ensured.ok) {
+        console.error("[stripe/checkout] Could not ensure subscription row for", companyId, ensured.error);
+      } else if (ensured.created) {
+        console.warn("[stripe/checkout] Company", companyId, "had no subscription row; created the default");
+      }
 
       await db
         .from("subscriptions")

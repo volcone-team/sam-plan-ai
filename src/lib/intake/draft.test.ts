@@ -695,6 +695,61 @@ describe("restoreDraft", () => {
 });
 
 /* ------------------------------------------------------------------ *
+ * Wins screen (free text since the pickers were removed)
+ * ------------------------------------------------------------------ */
+
+describe("wins screen answers", () => {
+  it("round-trips both free-text answers, trimmed", () => {
+    const row = serialiseAnswers(
+      draft({
+        answers: {
+          what_worked_notes: "  Webinars after a podcast.  ",
+          what_failed_notes: "Cold Facebook ads to a webinar.",
+        },
+      })
+    );
+    expect(row.what_worked_notes).toBe("Webinars after a podcast.");
+    expect(row.what_failed_notes).toBe("Cold Facebook ads to a webinar.");
+
+    const restored = restoreDraft(row);
+    expect(restored.answers.what_worked_notes).toBe("Webinars after a podcast.");
+    expect(restored.answers.what_failed_notes).toBe("Cold Facebook ads to a webinar.");
+  });
+
+  it("stores a cleared or blank answer as null so clearing actually clears", () => {
+    const row = serialiseAnswers(
+      draft({ answers: { what_worked_notes: "   ", what_failed_notes: "" } })
+    );
+    expect(row.what_worked_notes).toBeNull();
+    expect(row.what_failed_notes).toBeNull();
+  });
+
+  /**
+   * Legacy 'worked' / 'failed' rows: the save deletes and re-inserts the whole
+   * initiatives array, so they survive only if a restore hands them back
+   * unchanged and a re-serialise keeps their source and reason.
+   */
+  it("keeps legacy worked/failed rows intact through restore and re-save", () => {
+    const stored = [
+      serialiseInitiative({ source: "planned", initiative_key: "webinar" }, 0),
+      serialiseInitiative({ source: "worked", initiative_key: "podcast_guest" }, 1),
+      serialiseInitiative(
+        { source: "failed", initiative_key: "paid_ads", failure_reason: "No shows" },
+        2
+      ),
+    ];
+    const { initiatives } = restoreDraft({}, [], stored);
+    const resaved = initiatives.map((i, index) => serialiseInitiative(i, index));
+
+    expect(resaved.map((r) => [r.source, r.initiative_key, r.failure_reason])).toEqual([
+      ["planned", "webinar", null],
+      ["worked", "podcast_guest", null],
+      ["failed", "paid_ads", "No shows"],
+    ]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
  * Lifecycle
  * ------------------------------------------------------------------ */
 

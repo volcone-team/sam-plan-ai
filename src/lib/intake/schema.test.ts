@@ -308,15 +308,22 @@ describe("required fields", () => {
 });
 
 describe("voice fields", () => {
-  // REQ-2.3 names exactly these five.
-  it("covers the five long-text fields", () => {
+  // REQ-2.3's five, plus the wins screen's "didn't work" box, which became a
+  // free-text answer when the initiative pickers were removed.
+  it("covers the long-text fields", () => {
     expect([...VOICE_FIELDS].sort()).toEqual([
       "business_description",
       "challenge_notes",
       "ideal_customer",
       "problem_solved",
+      "what_failed_notes",
       "what_worked_notes",
     ]);
+  });
+
+  it("labels the wins screen's two questions", () => {
+    expect(FIELD_COPY.what_worked_notes.label).toBe("What has driven real sales for you?");
+    expect(FIELD_COPY.what_failed_notes.label).toBe("What have you tried that didn't work?");
   });
 
   it("does not claim a mic on short fields", () => {

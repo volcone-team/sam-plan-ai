@@ -3,7 +3,10 @@ import { createClient } from "@supabase/supabase-js";
 import { requireSuperAdmin } from "@/lib/require-admin";
 import { logActivity } from "@/lib/activity-log";
 import { readCallGateSettings } from "@/lib/access/call-gate-settings";
-import { parseCallGateSettingsInput } from "@/lib/access/call-gate-input";
+import {
+  parseCallGateSettingsInput,
+  migrationForMissingColumn,
+} from "@/lib/access/call-gate-input";
 import { isMissingColumnError } from "@/lib/supabase/missing-column";
 
 export const runtime = "nodejs";
@@ -19,8 +22,13 @@ export const dynamic = "force-dynamic";
  * GET → the stored switch and URL, plus whether migration 043 is applied.
  * PUT → set the switch, set or clear the URL.
  *
- * Body (both optional, null or "" clears the URL):
- *   { requireCall?: boolean, bookingUrl?: string|null }
+ * Body (all optional, null or "" clears a URL):
+ *   { requireCall?: boolean, bookingUrl?: string|null, bookingUrlYearly?: string|null }
+ *
+ * `bookingUrl` is the MONTHLY link (also trials and comps); `bookingUrlYearly`
+ * (migration 048) is for yearly plans and falls back to the monthly one when
+ * blank. Writing the yearly link before 048 is applied returns 409
+ * `migration_required` naming 048.
  *
  * WHAT THIS ENDPOINT DOES NOT DO: it never touches an existing company. The
  * switch is snapshotted onto a company at creation
@@ -58,6 +66,17 @@ const MIGRATION_REQUIRED = {
     "in the Supabase SQL editor, then reload this page.",
 } as const;
 
+/** The same answer for the yearly link's column (migration 048). */
+const MIGRATION_048_REQUIRED = {
+  error: "migration_required",
+  migration: "048_yearly_booking_link",
+  message:
+    "Migration 048 (048_yearly_booking_link.sql) has not been applied to this " +
+    "database yet, so the yearly booking link cannot be saved. Run it in the " +
+    "Supabase SQL editor, then reload this page. Until then yearly customers " +
+    "get the monthly link.",
+} as const;
+
 export async function GET() {
   try {
     const check = await requireSuperAdmin();
@@ -74,8 +93,11 @@ export async function GET() {
     return NextResponse.json({
       requireCall: state.requireCall,
       bookingUrl: state.bookingUrl,
+      bookingUrlYearly: state.bookingUrlYearly,
       /** False → migration 043 is missing; the UI disables everything. */
       available: state.available,
+      /** False → migration 048 is missing; the UI disables the yearly field. */
+      yearlyAvailable: state.yearlyAvailable,
     });
   } catch (err: unknown) {
     const msg = errMessage(err);
@@ -118,7 +140,12 @@ export async function PUT(req: Request) {
 
     if (error) {
       if (isMissingColumnError(error)) {
-        return NextResponse.json(MIGRATION_REQUIRED, { status: 409 });
+        return NextResponse.json(
+          migrationForMissingColumn(error, parsed.patch) === "048"
+            ? MIGRATION_048_REQUIRED
+            : MIGRATION_REQUIRED,
+          { status: 409 }
+        );
       }
       console.error("[admin/call-gate-settings] Write failed:", error.message);
       return NextResponse.json({ error: error.message }, { status: 500 });
