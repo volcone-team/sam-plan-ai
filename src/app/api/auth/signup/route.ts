@@ -9,6 +9,7 @@ import {
   signupUserMetadata,
 } from "@/lib/auth/direct-signup";
 import { RateLimiter, clientIp } from "@/lib/rate-limit";
+import { enqueueRegisteredEvent } from "@/lib/ghl/producers/registration";
 
 export const runtime = "nodejs";
 
@@ -133,6 +134,29 @@ export async function POST(request: Request) {
     }
 
     console.log("[auth/signup] Created confirmed account", data.user.id);
+
+    /*
+     * GHL "registered - not paid" (and "opted - dnd" when the promotional box
+     * was left unticked). handle_new_user ran inside the createUser insert, so
+     * the profile and company already exist. Never throws; awaited so the
+     * serverless invocation is not frozen mid-insert. If the profile is not
+     * there, the first GET /api/me enqueues it instead (same dedupe key).
+     */
+    try {
+      const registered = await enqueueRegisteredEvent(adminClient, {
+        userId: data.user.id,
+        source: "direct_signup",
+      });
+      if (!registered.ok) {
+        console.error("[auth/signup] GHL registration not queued:", registered.message);
+      }
+    } catch (err: unknown) {
+      console.error(
+        "[auth/signup] GHL registration threw:",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
     console.error("[auth/signup] Error:", err instanceof Error ? err.message : String(err));

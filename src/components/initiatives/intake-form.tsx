@@ -451,7 +451,7 @@ export function IntakeForm({
           {layout.kind.state === 'rendered' && (
             <ChoiceGroup
               name={fieldDomId(base, 'kind')}
-              legend="Kind"
+              legend="Frequency"
               options={kindOptions(config, layout)}
               value={draft.kind}
               onChange={kind => setDraft(d => setDraftKind(d, config, kind, planYear))}

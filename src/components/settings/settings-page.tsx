@@ -1,7 +1,15 @@
 'use client';
 
-import { useState } from 'react';
-import { Building2, User, CreditCard, BarChart3, Users, Loader2 } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import {
+  Building2,
+  User,
+  CreditCard,
+  BarChart3,
+  Users,
+  ClipboardList,
+  Loader2,
+} from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { roleHasPermission, type Permission } from '@/lib/permissions';
 import { CompanySettings } from './company-settings';
@@ -10,7 +18,7 @@ import { SubscriptionSettings } from './subscription-settings';
 import { BenchmarkSettings } from './benchmark-settings';
 import { TeamMembers } from './team-members';
 
-type SettingsTab = 'company' | 'profile' | 'team' | 'subscription' | 'benchmarks';
+type SettingsTab = 'company' | 'profile' | 'team' | 'subscription' | 'benchmarks' | 'intake';
 
 /**
  * `requires` is the permission needed to SEE the tab, not merely to act in it.
@@ -24,7 +32,8 @@ type SettingsTab = 'company' | 'profile' | 'team' | 'subscription' | 'benchmarks
  *
  * `undefined` means everyone: Profile is the person's own account, and Company
  * and Benchmarks are gated inside their own components where an operator has
- * legitimate partial access.
+ * legitimate partial access. Intake answers is read-only company data every
+ * member may see.
  */
 const TABS: {
   id: SettingsTab;
@@ -37,13 +46,21 @@ const TABS: {
   { id: 'team', label: 'Team Members', icon: Users, requires: 'settings.manage_team' },
   { id: 'subscription', label: 'Subscription', icon: CreditCard, requires: 'settings.billing' },
   { id: 'benchmarks', label: 'Benchmarks', icon: BarChart3 },
+  { id: 'intake', label: 'Intake answers', icon: ClipboardList },
 ];
 
 function isSettingsTab(value: string | undefined): value is SettingsTab {
   return TABS.some((tab) => tab.id === value);
 }
 
-export function SettingsPage({ initialTab }: { initialTab?: string } = {}) {
+export function SettingsPage({
+  initialTab,
+  intakeAnswers,
+}: {
+  initialTab?: string;
+  /** Server-rendered "Intake answers" panel, passed in as a slot. */
+  intakeAnswers?: ReactNode;
+} = {}) {
   const { role, loading } = useAuth();
 
   const visibleTabs = TABS.filter(
@@ -119,6 +136,7 @@ export function SettingsPage({ initialTab }: { initialTab?: string } = {}) {
         {resolvedTab === 'team' && <TeamMembers />}
         {resolvedTab === 'subscription' && <SubscriptionSettings />}
         {resolvedTab === 'benchmarks' && <BenchmarkSettings />}
+        {resolvedTab === 'intake' && intakeAnswers}
       </div>
     </div>
   );

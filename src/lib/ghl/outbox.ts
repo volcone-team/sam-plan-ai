@@ -72,7 +72,12 @@ export type GhlEventType =
   | "finished_intake"
   | "plan_generated"
   | "first_login"
-  | "marketing_suppression";
+  | "marketing_suppression"
+  /**
+   * Added by migration 052. Until 052 is applied the CHECK refuses it with
+   * 23514, which the registration producer reads as "not delivered".
+   */
+  | "registered";
 
 export interface EnqueueGhlEventInput {
   eventType: GhlEventType;
@@ -138,7 +143,11 @@ export type EnqueueGhlEventResult =
   /** Nothing to do, and nothing wrong. See `reason`. */
   | { ok: true; outcome: "skipped"; reason: EnqueueSkipReason }
   /** The insert itself failed. The caller carries on regardless. */
-  | { ok: false; outcome: "failed"; message: string };
+  /**
+   * `code` is the Postgres / PostgREST error code when the insert itself was
+   * refused (e.g. 23514 for a CHECK that does not list the event type yet).
+   */
+  | { ok: false; outcome: "failed"; message: string; code?: string };
 
 /* ------------------------------------------------------------------ *
  * Enqueue
@@ -247,7 +256,12 @@ export async function enqueueGhlEvent(
         return { ok: true, outcome: "duplicate", id: null };
       }
       console.error(`[ghl/outbox] ${input.eventType}: insert failed:`, error.message);
-      return { ok: false, outcome: "failed", message: error.message };
+      return {
+        ok: false,
+        outcome: "failed",
+        message: error.message,
+        ...(typeof error.code === "string" && error.code ? { code: error.code } : {}),
+      };
     }
 
     /*

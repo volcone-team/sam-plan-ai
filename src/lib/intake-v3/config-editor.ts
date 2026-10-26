@@ -28,6 +28,7 @@ import {
   NAMED_DATES,
   PRICE_SOURCES,
   RECURRENCE_FREQUENCIES,
+  RECURRENCE_FREQUENCY_LABELS,
   categoryById,
   isStageCategory,
   type CategoryId,
@@ -65,11 +66,7 @@ export const PATH_LABEL: Readonly<Record<ConversionPath, string>> = Object.freez
   "speaker-fee": "Speaker fee",
 });
 
-export const FREQUENCY_LABEL: Readonly<Record<RecurrenceFrequency, string>> = Object.freeze({
-  weekly: "Weekly",
-  monthly: "Monthly",
-  quarterly: "Quarterly",
-});
+export const FREQUENCY_LABEL: Readonly<Record<RecurrenceFrequency, string>> = RECURRENCE_FREQUENCY_LABELS;
 
 export const FORMAT_LABEL: Readonly<Record<InitiativeFormat, string>> = Object.freeze({
   "in-person": "In person",
@@ -114,9 +111,11 @@ export const STATUS_LABEL: Readonly<Record<ConfigStatus["status"], string>> = Ob
 export const FIELD_LABEL: Readonly<Record<ConfigField, string>> = Object.freeze({
   categoryId: "Category",
   audienceSource: "Audience",
-  allowedKinds: "Allowed kinds",
+  // Admin-facing names follow the workbook columns ("Frequency",
+  // "Allowed Frequencies"); the code identifiers and DB columns keep their names.
+  allowedKinds: "Frequency",
   allowedPaths: "Allowed conversion paths",
-  allowedFrequencies: "Allowed frequencies",
+  allowedFrequencies: "Allowed frequency",
   formatOverride: "Format override",
   ongoingLabel: "Ongoing label",
   partnerBlock: "Partner block",
@@ -124,13 +123,13 @@ export const FIELD_LABEL: Readonly<Record<ConfigField, string>> = Object.freeze(
   fieldExtras: "Field extras",
 });
 
-/** The same, as it reads mid-sentence: "87 still need allowed kinds". */
+/** The same, as it reads mid-sentence: "87 still need a frequency". */
 const FIELD_PHRASE: Readonly<Record<ConfigField, string>> = Object.freeze({
   categoryId: "a category",
   audienceSource: "an audience",
-  allowedKinds: "allowed kinds",
+  allowedKinds: "a frequency",
   allowedPaths: "allowed conversion paths",
-  allowedFrequencies: "allowed frequencies",
+  allowedFrequencies: "an allowed frequency",
   formatOverride: "a format override",
   ongoingLabel: "an ongoing label",
   partnerBlock: "a partner block",

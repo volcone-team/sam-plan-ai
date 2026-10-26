@@ -349,7 +349,6 @@ const AGREEMENT = ["Sell", "Collect leads", "Mention only"] as const;
 const WHOSE_LIST = ["Theirs", "Yours", "Both"] as const;
 const SHOW_FORMAT = ["Audio only", "Audio + video"] as const;
 const ASK = ["Make an offer", "Drive to calls", "Collect leads"] as const;
-const TRAVELING_HINT = "If yes: will you have team on site?";
 
 const CHALLENGE_RECORDS = ["Challenge / Bootcamp (Free)", "Challenge / Bootcamp (Paid)"] as const;
 
@@ -518,7 +517,7 @@ const OWN_EVENT_IN_PERSON: CategorySchema = {
           type: "yesno",
           hint: "Drives the Physical Box Shipping Deadline maximizer — a real cutoff makes an honest deadline.",
         },
-        { key: "traveling", label: "Are you traveling to this?", type: "yesno", hint: TRAVELING_HINT },
+        { key: "traveling", label: "Are you traveling to this?", type: "yesno" },
       ],
     },
     {
@@ -634,13 +633,8 @@ const OPS_IN_PERSON: CategorySchema = {
         },
         { key: "talkCrafted", label: "Have you crafted your talk?", type: "single", options: ["Yes", "Not yet"] },
         { key: "deck", label: "Do you have a deck?", type: "single", options: ["Yes", "No", "Don't need one"] },
-        {
-          key: "booth",
-          label: "Will you have a booth or table?",
-          type: "yesno",
-          hint: "If yes: what assets are you printing? Will you be booking appointments on site?",
-        },
-        { key: "traveling", label: "Are you traveling to this?", type: "yesno", hint: TRAVELING_HINT },
+        { key: "booth", label: "Will you have a booth or table?", type: "yesno" },
+        { key: "traveling", label: "Are you traveling to this?", type: "yesno" },
       ],
     },
     {

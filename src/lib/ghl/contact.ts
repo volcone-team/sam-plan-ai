@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normaliseGhlEmail } from "@/lib/ghl/client";
+import { isMissingColumnError } from "@/lib/supabase/missing-column";
 
 /**
  * Who, exactly, is the GoHighLevel contact for a company?
@@ -64,6 +65,12 @@ export interface GhlOwnerContact {
   companyName: string | null;
   /** `profiles.id`, written to `ghl_events.user_id` so 044 can cascade it. */
   userId: string | null;
+  /**
+   * `profiles.phone` (migration 035), only when it is a well-formed E.164
+   * number. Null otherwise: GHL rejects a malformed phone on the upsert, and
+   * that would fail the whole row, tags included.
+   */
+  phone: string | null;
 }
 
 /**
@@ -102,6 +109,44 @@ interface OwnerRow {
   email?: unknown;
   first_name?: unknown;
   last_name?: unknown;
+  phone?: unknown;
+}
+
+/** `+` then 7 to 15 digits, no leading zero. The E.164 shape GHL accepts. */
+const E164 = /^\+[1-9]\d{6,14}$/;
+
+/**
+ * The phone to send GHL, or null.
+ *
+ * Trimmed, then accepted only in E.164 form. Exported for the tests and for
+ * any producer that holds a phone from somewhere other than this lookup.
+ */
+export function ghlPhoneOrNull(raw: unknown): string | null {
+  const value = textOrNull(raw);
+  return value && E164.test(value) ? value : null;
+}
+
+const OWNER_COLUMNS = "id, email, first_name, last_name, phone";
+/** Without `phone`, for a database where migration 035 is not applied. */
+const OWNER_COLUMNS_NO_PHONE = "id, email, first_name, last_name";
+
+async function readOwnerRow(db: SupabaseClient, company: string) {
+  const first = await db
+    .from("profiles")
+    .select(OWNER_COLUMNS)
+    .eq("company_id", company)
+    // THE WHOLE POINT. Dropping this predicate would resolve whichever
+    // member happened to sort first.
+    .eq("role", "owner")
+    .maybeSingle();
+  if (!first.error || !isMissingColumnError(first.error)) return first;
+  // `profiles.phone` is missing. The phone is decoration; the owner is not.
+  return db
+    .from("profiles")
+    .select(OWNER_COLUMNS_NO_PHONE)
+    .eq("company_id", company)
+    .eq("role", "owner")
+    .maybeSingle();
 }
 
 /**
@@ -137,14 +182,7 @@ export async function resolveGhlOwnerContact(
   }
 
   try {
-    const { data, error } = await db
-      .from("profiles")
-      .select("id, email, first_name, last_name")
-      .eq("company_id", company)
-      // THE WHOLE POINT. Dropping this predicate would resolve whichever
-      // member happened to sort first.
-      .eq("role", "owner")
-      .maybeSingle();
+    const { data, error } = await readOwnerRow(db, company);
 
     if (error) {
       console.error(
@@ -198,6 +236,7 @@ export async function resolveGhlOwnerContact(
         lastName: textOrNull(row.last_name),
         companyName: await readCompanyName(db, company),
         userId: typeof row.id === "string" ? row.id : null,
+        phone: ghlPhoneOrNull(row.phone),
       },
     };
   } catch (err: unknown) {

@@ -172,7 +172,9 @@ export default function ResetPasswordPage() {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center px-4">
         <div className="w-full max-w-sm space-y-6 text-center">
-          <BrandLogo width={140} height={47} />
+          <div className="flex justify-center">
+            <BrandLogo width={140} height={47} />
+          </div>
           <Loader2 className="h-6 w-6 animate-spin text-[hsl(var(--foreground-muted))] mx-auto" />
         </div>
       </div>
@@ -184,7 +186,9 @@ export default function ResetPasswordPage() {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center px-4">
         <div className="w-full max-w-sm space-y-6 text-center">
-          <BrandLogo width={140} height={47} />
+          <div className="flex justify-center">
+            <BrandLogo width={140} height={47} />
+          </div>
           <div className="space-y-3">
             <h1 className="text-2xl font-bold tracking-tight">Reset link expired</h1>
             <p className="text-sm text-[hsl(var(--foreground-muted))]">
@@ -212,7 +216,9 @@ export default function ResetPasswordPage() {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center px-4">
         <div className="w-full max-w-sm space-y-6 text-center">
-          <BrandLogo width={140} height={47} />
+          <div className="flex justify-center">
+            <BrandLogo width={140} height={47} />
+          </div>
           <div className="space-y-3">
             <CheckCircle2 className="h-12 w-12 text-[hsl(var(--success))] mx-auto" />
             <h1 className="text-2xl font-bold tracking-tight">Password updated</h1>

@@ -468,7 +468,9 @@ export default function SignupPage() {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center px-4">
         <div className="w-full max-w-sm space-y-6 text-center">
-          <BrandLogo width={140} height={47} />
+          <div className="flex justify-center">
+            <BrandLogo width={140} height={47} />
+          </div>
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight">Check your email</h1>
             <p className="text-sm text-[hsl(var(--foreground-muted))]">

@@ -691,6 +691,8 @@ export function RecommendationsPage() {
             {variant === "check_math" ? "To close the gap" : "What we'd add"}
           </h2>
 
+          <FitScoreExplainer />
+
           <div className="space-y-3">
             {shortlist.map((recommendation, slotIndex) => (
               <RecommendationCard
@@ -825,6 +827,35 @@ export function RecommendationsPage() {
         </Button>
       </div>
     </Frame>
+  );
+}
+
+/** Explains how the shortlist is chosen. Copy is the client's, verbatim. */
+function FitScoreExplainer() {
+  return (
+    <aside
+      aria-labelledby="fit-score-explainer-heading"
+      className="space-y-1.5 rounded-[var(--radius-lg)] border border-border bg-[hsl(var(--background-muted))] px-4 py-3 text-sm text-muted-foreground"
+    >
+      <h3
+        id="fit-score-explainer-heading"
+        className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+      >
+        FIT/SCORE SYSTEM EXPLAINED
+      </h3>
+      <p>
+        <strong className="font-semibold text-foreground">Step 1, FIT:</strong>{" "}
+        We remove any initiative that doesn’t match your industry or your
+        product’s price, or that needs a team you don’t have.
+      </p>
+      <p>
+        <strong className="font-semibold text-foreground">Step 2, SCORE:</strong>{" "}
+        Each remaining initiative is rated 1 to 5 on Speed, Cost, Odds of
+        success, Revenue potential, and Ease. 5 is always best. The ratings are
+        added up for a total out of 25, and the highest totals are your top
+        recommendations.
+      </p>
+    </aside>
   );
 }
 

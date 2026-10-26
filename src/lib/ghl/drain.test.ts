@@ -501,6 +501,33 @@ describe("drainGhlOutbox — delivery", () => {
     expect(summary).toMatchObject({ claimed: 1, delivered: 1, failed: 0, retrying: 0 });
   });
 
+  it("forwards the payload's phone to the contact upsert", async () => {
+    const state = freshState([
+      row({ payload: { firstName: "Olive", phone: " +447700900123 " } }),
+    ]);
+    const { client, calls } = makeClient();
+
+    await drainGhlOutbox({ db: makeDb(state), config: LIVE, client, now: NOW });
+
+    expect(calls[0].method).toBe("upsertContact");
+    expect(calls[0].args[0]).toMatchObject({
+      email: "owner@example.com",
+      firstName: "Olive",
+      phone: "+447700900123",
+    });
+  });
+
+  it("passes a blank or absent phone as null, never as an empty string", async () => {
+    for (const payload of [{}, { phone: "" }, { phone: "   " }, { phone: null }]) {
+      const state = freshState([row({ payload })]);
+      const { client, calls } = makeClient();
+
+      await drainGhlOutbox({ db: makeDb(state), config: LIVE, client, now: NOW });
+
+      expect((calls[0].args[0] as { phone?: unknown }).phone).toBeNull();
+    }
+  });
+
   it("does not call a tag endpoint with an empty list", async () => {
     const state = freshState([row({ tags_add: [TAG_FOUNDER], tags_remove: [] })]);
     const { client, calls } = makeClient();

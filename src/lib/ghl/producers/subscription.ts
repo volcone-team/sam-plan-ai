@@ -264,6 +264,7 @@ export async function enqueueBuyerStateEvent(
         firstName: owner.contact.firstName,
         lastName: owner.contact.lastName,
         companyName: owner.contact.companyName,
+        phone: owner.contact.phone,
       },
       dedupeKey: input.stripeEventId
         ? buyerStateDedupeKey(input.stripeEventId)

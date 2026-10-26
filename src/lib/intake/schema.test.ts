@@ -53,12 +53,15 @@ const MIGRATIONS = join(process.cwd(), "supabase", "migrations");
 const SQL_025 = readFileSync(join(MIGRATIONS, "025_intake_v2.sql"), "utf8");
 const SQL_026 = readFileSync(join(MIGRATIONS, "026_intake_v2_remaining.sql"), "utf8");
 const SQL = `${SQL_025}\n${SQL_026}`;
+/** 051 widened intake_initiatives.repeat_frequency; its CHECK is the live contract. */
+const SQL_051 = readFileSync(join(MIGRATIONS, "051_frequencies_and_workbook_kinds.sql"), "utf8");
+const SQL_051_INTAKE = SQL_051.slice(SQL_051.indexOf("ADD CONSTRAINT intake_initiatives_repeat_frequency_check"));
 
 /** Pull the quoted values out of `CHECK (col IN ('a', 'b'))` for one column. */
 function allowedValues(column: string): string[] {
   // Tolerates the newline-wrapped multi-line form used in both migrations.
   const pattern = new RegExp(`${column}\\s+IN\\s*\\(([^)]*)\\)`, "i");
-  const match = SQL.match(pattern);
+  const match = (column === "repeat_frequency" ? SQL_051_INTAKE : SQL).match(pattern);
   if (!match) throw new Error(`no CHECK ... IN constraint found for "${column}"`);
   return [...match[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
 }

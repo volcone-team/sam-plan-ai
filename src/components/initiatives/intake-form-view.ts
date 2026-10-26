@@ -11,6 +11,7 @@ import { formatMoney } from '@/lib/format-money';
 import {
   ASK_UNDECIDED,
   INITIATIVE_FORMATS,
+  RECURRENCE_FREQUENCY_LABELS,
   offersAskUndecided,
   type AskUndecided,
   type CategoryId,
@@ -66,11 +67,7 @@ export const FORMAT_LABELS: Readonly<Record<InitiativeFormat, string>> = Object.
   hybrid: 'Hybrid',
 });
 
-export const FREQUENCY_LABELS: Readonly<Record<RecurrenceFrequency, string>> = Object.freeze({
-  weekly: 'Weekly',
-  monthly: 'Monthly',
-  quarterly: 'Quarterly',
-});
+export const FREQUENCY_LABELS: Readonly<Record<RecurrenceFrequency, string>> = RECURRENCE_FREQUENCY_LABELS;
 
 /** The word for a kind; `ongoing` uses the record's own word (layout.ongoingLabel). */
 export function kindLabel(kind: InitiativeKind, ongoingLabel: string): string {

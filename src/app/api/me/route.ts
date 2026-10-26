@@ -4,6 +4,8 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { cancelSubscriptionsForCompany } from "@/lib/billing/cancel-on-delete";
 import { enqueueFirstLoginEvent } from "@/lib/ghl/producers/first-login";
+import { enqueueRegisteredEvent } from "@/lib/ghl/producers/registration";
+import { loadGhlConfig } from "@/lib/ghl/config";
 import {
   IMPERSONATION_MARKER_COOKIE,
   IMPERSONATION_RETURN_COOKIE,
@@ -208,13 +210,39 @@ export async function GET() {
      * of awaiting is paid once per person.
      */
     try {
+      /*
+       * THE REGISTRATION TAG rides on the same one-shot: it is attempted only
+       * while `ghl_first_login_at` is still null, i.e. on the first page loads
+       * before the first-login stamp lands, so after that its cost here is the
+       * same null check. It covers the email-confirmation signup (which never
+       * passes through POST /api/auth/signup) and any failure of that route's
+       * own attempt; the per-company dedupe key makes the two safe together.
+       * The producer reads the profile itself, so this SELECT is unchanged.
+       * Config is loaded once and shared by both producers.
+       */
+      const firstLoginPending =
+        profile.ghl_first_login_at === null || profile.ghl_first_login_at === undefined;
+      const isImpersonating = impersonation !== null;
+      const ghlConfig =
+        firstLoginPending && !isImpersonating ? await loadGhlConfig(adminClient) : undefined;
+
+      if (firstLoginPending && !isImpersonating) {
+        await enqueueRegisteredEvent(adminClient, {
+          userId,
+          isImpersonating,
+          source: "api_me",
+          config: ghlConfig,
+        });
+      }
+
       await enqueueFirstLoginEvent(adminClient, {
         userId,
         companyId: profile.company_id,
         role: profile.role,
         firstLoginAt: profile.ghl_first_login_at ?? null,
-        isImpersonating: impersonation !== null,
+        isImpersonating,
         source: "api_me",
+        config: ghlConfig,
       });
     } catch (err: unknown) {
       console.error(

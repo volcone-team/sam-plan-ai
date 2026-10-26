@@ -263,6 +263,7 @@ describe("enqueueGhlEvent — dedupe and failure", () => {
       ok: false,
       outcome: "failed",
       message: "permission denied for table ghl_events",
+      code: "42501",
     });
   });
 

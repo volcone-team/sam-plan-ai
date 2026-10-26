@@ -40,6 +40,8 @@ export class ProductService {
    * Get a specific product
    */
   async getProduct(id: string): Promise<Product> {
+    // No query with a blank id: it can only fail (22P02 on the uuid column).
+    if (!id) throw new Error("No product id given.");
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();

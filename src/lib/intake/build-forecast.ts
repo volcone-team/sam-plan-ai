@@ -21,6 +21,7 @@
 
 import {
   forecastForInitiative,
+  isRepeatFrequency,
   type InitiativeCadence,
   type FunnelStage,
   type RepeatFrequency,
@@ -96,14 +97,7 @@ export function initiativeKindForCadence(value: unknown): InitiativeKind {
 
 /** `intake_initiatives.repeat_frequency` -> the forecast model's frequency. */
 export function toFrequency(value: unknown): RepeatFrequency | null {
-  switch (value) {
-    case "weekly":
-    case "monthly":
-    case "quarterly":
-      return value;
-    default:
-      return null;
-  }
+  return isRepeatFrequency(value) ? value : null;
 }
 
 /**

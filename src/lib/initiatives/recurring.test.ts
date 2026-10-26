@@ -52,6 +52,39 @@ describe('instanceDates', () => {
     ]);
   });
 
+  it('bi-weekly runs every 14 days across the year boundary and both DST changes', () => {
+    const d = instanceDates({ frequency: 'bi-weekly', firstEventDate: '2025-12-23' }, 2026);
+    expect(d[0]).toBe('2026-01-06'); // Dec 23 + 14
+    expect(d).toContain('2026-03-03');
+    expect(d).toContain('2026-03-17'); // across the March DST change
+    expect(d).toContain('2026-10-27');
+    expect(d).toContain('2026-11-10'); // across the November one
+    expect(d.at(-1)).toBe('2026-12-22');
+    expect(d).toHaveLength(26);
+    for (let i = 1; i < d.length; i++) expect(dayNum(d[i]) - dayNum(d[i - 1])).toBe(14);
+    expect(instanceDates({ frequency: 'bi-weekly', firstEventDate: '2025-12-23' }, 2025)).toEqual(['2025-12-23']);
+  });
+
+  it('bi-monthly steps two months from Jan 31, month-end safe', () => {
+    expect(instanceDates({ frequency: 'bi-monthly', firstEventDate: '2026-01-31' }, 2026)).toEqual([
+      '2026-01-31', '2026-03-31', '2026-05-31', '2026-07-31', '2026-09-30', '2026-11-30',
+    ]);
+  });
+
+  it('semi-annual from Aug 31 clamps to Feb 28 and returns to the 31st', () => {
+    expect(instanceDates({ frequency: 'semi-annually', firstEventDate: '2026-08-31' }, 2026)).toEqual(['2026-08-31']);
+    expect(instanceDates({ frequency: 'semi-annually', firstEventDate: '2026-08-31' }, 2027)).toEqual(['2027-02-28', '2027-08-31']);
+    expect(instanceDates({ frequency: 'semi-annually', firstEventDate: '2026-08-31' }, 2028)).toEqual(['2028-02-29', '2028-08-31']);
+  });
+
+  it('annual from Feb 29 lands on Feb 28 in common years and Feb 29 in leap years', () => {
+    expect(instanceDates({ frequency: 'annually', firstEventDate: '2024-02-29' }, 2024)).toEqual(['2024-02-29']);
+    expect(instanceDates({ frequency: 'annually', firstEventDate: '2024-02-29' }, 2025)).toEqual(['2025-02-28']);
+    expect(instanceDates({ frequency: 'annually', firstEventDate: '2024-02-29' }, 2026)).toEqual(['2026-02-28']);
+    expect(instanceDates({ frequency: 'annually', firstEventDate: '2024-02-29' }, 2028)).toEqual(['2028-02-29']);
+    expect(instanceDates({ frequency: 'annually', firstEventDate: '2024-02-29' }, 2023)).toEqual([]);
+  });
+
   it('a first event in an earlier year carries the series forward', () => {
     const d = instanceDates({ frequency: 'weekly', firstEventDate: '2025-12-30' }, 2026);
     expect(d[0]).toBe('2026-01-06');
@@ -81,9 +114,13 @@ describe('instanceDates', () => {
 
   it('property: ascending, inside the year, on cadence, matching the brute-force series', () => {
     const r = rng(46);
-    const freqs = ['weekly', 'monthly', 'quarterly'] as const;
-    for (let n = 0; n < 300; n++) {
-      const frequency = freqs[Math.floor(r() * 3)];
+    const freqs = ['weekly', 'bi-weekly', 'monthly', 'bi-monthly', 'quarterly', 'semi-annually', 'annually'] as const;
+    const days: Partial<Record<(typeof freqs)[number], number>> = { weekly: 7, 'bi-weekly': 14 };
+    const months: Partial<Record<(typeof freqs)[number], number>> = {
+      monthly: 1, 'bi-monthly': 2, quarterly: 3, 'semi-annually': 6, annually: 12,
+    };
+    for (let n = 0; n < 500; n++) {
+      const frequency = freqs[Math.floor(r() * freqs.length)];
       const y0 = 2024 + Math.floor(r() * 3);
       const m0 = 1 + Math.floor(r() * 12);
       const d0 = 1 + Math.floor(r() * new Date(Date.UTC(y0, m0, 0)).getUTCDate());
@@ -96,9 +133,10 @@ describe('instanceDates', () => {
       const want: string[] = [];
       for (let k = 0; k < 400; k++) {
         let e: number;
-        if (frequency === 'weekly') e = dayNum(first) + 7 * k + offset;
+        const dayStep = days[frequency];
+        if (dayStep) e = dayNum(first) + dayStep * k + offset;
         else {
-          const total = m0 - 1 + k * (frequency === 'monthly' ? 1 : 3);
+          const total = m0 - 1 + k * months[frequency]!;
           const y = y0 + Math.floor(total / 12);
           const m = (total % 12) + 1;
           const dim = new Date(Date.UTC(y, m, 0)).getUTCDate();
@@ -297,31 +335,51 @@ describe('correctionOptions', () => {
       "That usually means the plan is wrong, not that you're behind. It's still carrying $24,000 for the rest of the year. Pick what's true and the plan will catch up."
     );
     expect(p.options.map(o => [o.label, o.detail])).toEqual([
-      ['Change the frequency', 'Monthly instead of weekly. Plan goes to $6,000'],
+      ['Change the frequency', 'Every 2 weeks instead of weekly. Plan goes to $12,000'],
       ['Pause it', 'Comes off the calendar until you turn it back on. Plan drops $24,000'],
       ['Retire it for this year', 'Off the plan. Plan drops $24,000'],
       ['Keep it as planned', "Nothing changes. We'll ask again after four more"],
     ]);
     expect(p.options.map(o => [o.action, o.planRevenueAfter, o.delta])).toEqual([
-      ['change-frequency', 6000, -18000],
+      ['change-frequency', 12000, -12000],
       ['pause', 0, -24000],
       ['retire', 0, -24000],
       ['keep', 24000, 0],
     ]);
-    expect(p.options[0].newFrequency).toBe('monthly');
+    expect(p.options[0].newFrequency).toBe('bi-weekly');
     expect(p.dismissLabel).toBe('Not now');
   });
 
-  it('monthly goes to quarterly; an exact lower-frequency count wins over scaling', () => {
+  it('monthly goes to every 2 months; an exact lower-frequency count wins over scaling', () => {
     const p = correctionOptions({ ...base, frequency: 'monthly', remainingInstances: 6, lowerFrequencyRemainingInstances: 3, remainingRevenue: 6000 });
-    expect(p.options[0].detail).toBe('Quarterly instead of monthly. Plan goes to $3,000');
+    expect(p.options[0].detail).toBe('Every 2 months instead of monthly. Plan goes to $3,000');
+    expect(p.options[0].newFrequency).toBe('bi-monthly');
     expect(p.options[0].delta).toBe(-3000);
   });
 
-  it('omits the frequency option for quarterly and for no frequency', () => {
-    expect(correctionOptions({ ...base, frequency: 'quarterly' }).options.map(o => o.action)).toEqual(['pause', 'retire', 'keep']);
+  it('scales by runs per year without an exact count: semi-annual to yearly', () => {
+    const p = correctionOptions({ ...base, frequency: 'semi-annually', remainingInstances: 2, remainingRevenue: 2000 });
+    expect(p.options[0].detail).toBe('Yearly instead of every 6 months. Plan goes to $1,000');
+    expect(p.options[0].newFrequency).toBe('annually');
+  });
+
+  it('omits the frequency option for annually and for no frequency', () => {
+    expect(correctionOptions({ ...base, frequency: 'annually' }).options.map(o => o.action)).toEqual(['pause', 'retire', 'keep']);
     expect(correctionOptions({ ...base, frequency: null }).options.map(o => o.action)).toEqual(['pause', 'retire', 'keep']);
-    expect(lowerFrequency('quarterly')).toBeNull();
+    expect(lowerFrequency('annually')).toBeNull();
+  });
+
+  it('lowerFrequency steps down the canonical order', () => {
+    const chain: (string | null)[] = [];
+    let f: Parameters<typeof lowerFrequency>[0] = 'weekly';
+    while (f) {
+      chain.push(f);
+      f = lowerFrequency(f);
+    }
+    expect(chain).toEqual(['weekly', 'bi-weekly', 'monthly', 'bi-monthly', 'quarterly', 'semi-annually', 'annually']);
+    expect(lowerFrequency(null)).toBeNull();
+    expect(lowerFrequency(undefined)).toBeNull();
+    expect(lowerFrequency('daily' as never)).toBeNull();
   });
 
   it('ongoing variant heading', () => {

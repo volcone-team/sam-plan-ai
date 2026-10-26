@@ -3,12 +3,14 @@ import {
   summariseGhlOutbox,
   describeGhlRowStatus,
   describeGhlEventType,
+  describeGhlFixedTags,
   isGhlDryRunRow,
   ghlRowErrorText,
   ghlSettingsPayload,
   GHL_OUTBOX_STATUSES,
 } from "./admin-view";
 import { GHL_DRY_RUN_MARKER } from "./drain";
+import { FIXED_TAGS, TAG_OPTED_DND, TAG_REGISTERED_NOT_PAID } from "./tags";
 import { GHL_ENV_LOCATION_ID, GHL_ENV_PRIVATE_TOKEN, type GhlConfig } from "./config";
 
 /**
@@ -135,6 +137,7 @@ describe("describeGhlEventType", () => {
     expect(describeGhlEventType("plan_generated")).toBe("Plan generated");
     expect(describeGhlEventType("first_login")).toBe("First login");
     expect(describeGhlEventType("founder")).toBe("Founding member");
+    expect(describeGhlEventType("registered")).toBe("Registered");
   });
 
   it("leaves the dropped login trigger unprettified", () => {
@@ -210,5 +213,22 @@ describe("ghlSettingsPayload", () => {
     };
     expect(ghlSettingsPayload(unavailable).available).toBe(false);
     expect(ghlSettingsPayload(unavailable).description).toMatch(/044/);
+  });
+});
+
+describe("describeGhlFixedTags", () => {
+  it("lists every fixed tag, in contract order, each with a one-line description", () => {
+    const rows = describeGhlFixedTags();
+    expect(rows.map((r) => r.tag)).toEqual([...FIXED_TAGS]);
+    for (const row of rows) {
+      expect(row.description.trim()).not.toBe("");
+      expect(row.description).not.toContain("\n");
+    }
+  });
+
+  it("includes the two registration tags", () => {
+    const tags = describeGhlFixedTags().map((r) => r.tag);
+    expect(tags).toContain(TAG_REGISTERED_NOT_PAID);
+    expect(tags).toContain(TAG_OPTED_DND);
   });
 });

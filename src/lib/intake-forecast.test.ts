@@ -12,6 +12,10 @@ import {
   forecastPerRun,
   runsInPeriod,
   forecastForInitiative,
+  REPEAT_FREQUENCIES,
+  REPEAT_FREQUENCY_LABELS,
+  REPEAT_RUNS_PER_YEAR,
+  isRepeatFrequency,
   goalGap,
   type InitiativeFunnel,
 } from "./intake-forecast";
@@ -209,6 +213,30 @@ describe("runsInPeriod", () => {
   it("scales to a shorter horizon", () => {
     expect(runsInPeriod("repeat", "monthly", 6)).toBe(6);
     expect(runsInPeriod("repeat", "quarterly", 6)).toBe(2);
+    expect(runsInPeriod("repeat", "bi-weekly", 6)).toBe(13);
+    expect(runsInPeriod("repeat", "semi-annually", 6)).toBe(1);
+    expect(runsInPeriod("repeat", "annually", 6)).toBe(0);
+  });
+
+  it("counts every frequency at its runs per year over 12 months", () => {
+    expect(REPEAT_FREQUENCIES.map((f) => runsInPeriod("repeat", f, 12))).toEqual([52, 26, 12, 6, 4, 2, 1]);
+    expect(REPEAT_FREQUENCIES.map((f) => REPEAT_RUNS_PER_YEAR[f])).toEqual([52, 26, 12, 6, 4, 2, 1]);
+  });
+
+  it("matches the previous weekly arithmetic on every horizon", () => {
+    for (const months of [3, 6, 12, 18]) {
+      expect(runsInPeriod("repeat", "weekly", months)).toBe(Math.floor((52 / 12) * months));
+    }
+  });
+
+  it("lists the seven frequencies in canonical order with customer labels", () => {
+    expect(REPEAT_FREQUENCIES).toEqual(["weekly", "bi-weekly", "monthly", "bi-monthly", "quarterly", "semi-annually", "annually"]);
+    expect(REPEAT_FREQUENCIES.map((f) => REPEAT_FREQUENCY_LABELS[f])).toEqual([
+      "Weekly", "Every 2 weeks", "Monthly", "Every 2 months", "Quarterly", "Every 6 months", "Yearly",
+    ]);
+    expect(isRepeatFrequency("bi-weekly")).toBe(true);
+    expect(isRepeatFrequency("yearly")).toBe(false);
+    expect(isRepeatFrequency(null)).toBe(false);
   });
 });
 

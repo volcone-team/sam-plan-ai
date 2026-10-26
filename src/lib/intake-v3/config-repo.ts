@@ -66,6 +66,7 @@ import {
   type DeriveWarning,
   type DerivedConfig,
 } from "./derive-config";
+import { isMissingColumnError } from "../supabase/missing-column";
 
 /* ------------------------------------------------------------------ *
  * Shapes
@@ -97,7 +98,41 @@ const CONFIG_COLUMNS =
   "audience_source, format_override, ongoing_label, partner_host, partner_booking, " +
   "revenue_lines, field_extras, updated_at, updated_by";
 
-const LIBRARY_COLUMNS = "initiative_key, workbook_id, name, category, own_or_ops, cta_options";
+const LIBRARY_COLUMNS_BASE = "initiative_key, workbook_id, name, category, own_or_ops, cta_options";
+
+/** The raw workbook Frequency / Allowed Frequencies cells. Exist only once 051 is applied. */
+const LIBRARY_COLUMNS_051 = "allowed_kinds_raw, allowed_frequencies_raw";
+
+const LIBRARY_COLUMNS = `${LIBRARY_COLUMNS_BASE}, ${LIBRARY_COLUMNS_051}`;
+
+type SelectResult = { data: unknown; error: { code?: string | null; message?: string | null } | null };
+
+let warned051 = false;
+
+/**
+ * Run a wb_initiative_library select with the 051 columns, and again without
+ * them if the database does not have them yet. Migrations are applied by hand,
+ * so the admin page and the intake picker must keep working before 051: the
+ * record then simply derives no kinds / frequencies (the raw cells read as
+ * blank). Any other error is returned as is.
+ */
+function selectLibrary(run: (columns: string) => PromiseLike<SelectResult>): Promise<SelectResult> {
+  // NOT async: the first `run` must throw synchronously, as the bare query
+  // did, so a throwing client inside Promise.all is caught by the caller's
+  // try/catch instead of becoming an unhandled rejection.
+  const first = run(LIBRARY_COLUMNS);
+  return Promise.resolve(first).then((res) => {
+    if (!res.error || !isMissingColumnError(res.error)) return res;
+    if (!warned051) {
+      warned051 = true;
+      console.warn(
+        "[intake-v3/config-repo] migration 051 columns missing on wb_initiative_library; " +
+        "kinds and frequencies are not derived from the workbook until it is applied."
+      );
+    }
+    return run(LIBRARY_COLUMNS_BASE);
+  });
+}
 
 /** The config as stored, camelCase. Same shape as DerivedConfig: every field optional. */
 export type StoredConfig = DerivedConfig;
@@ -592,6 +627,9 @@ interface LibraryRow {
   category: string | null;
   own_or_ops: string | null;
   cta_options: string[] | null;
+  /** Migration 051; absent when the select fell back to the pre-051 columns. */
+  allowed_kinds_raw?: string | null;
+  allowed_frequencies_raw?: string | null;
 }
 
 interface SettingsRow {
@@ -610,6 +648,8 @@ function deriveFor(row: LibraryRow) {
     category: row.category,
     own_or_ops: row.own_or_ops,
     cta_options: row.cta_options,
+    allowed_kinds_raw: row.allowed_kinds_raw ?? null,
+    allowed_frequencies_raw: row.allowed_frequencies_raw ?? null,
   });
 }
 
@@ -653,7 +693,9 @@ export function buildRecord(
 export async function loadLibraryConfigs(db: SupabaseClient): Promise<LoadResult> {
   try {
     const [lib, cfg, set] = await Promise.all([
-      db.from("wb_initiative_library").select(LIBRARY_COLUMNS).order("display_order", { ascending: true }),
+      selectLibrary((cols) =>
+        db.from("wb_initiative_library").select(cols).order("display_order", { ascending: true })
+      ),
       db.from(CONFIG_TABLE).select(CONFIG_COLUMNS),
       db.from("initiative_settings").select("initiative_key, is_active, max_per_plan"),
     ]);
@@ -745,7 +787,9 @@ export async function saveLibraryConfig(
 
   try {
     const [lib, cfg] = await Promise.all([
-      db.from("wb_initiative_library").select(LIBRARY_COLUMNS).eq("initiative_key", key).maybeSingle(),
+      selectLibrary((cols) =>
+        db.from("wb_initiative_library").select(cols).eq("initiative_key", key).maybeSingle()
+      ),
       db.from(CONFIG_TABLE).select(CONFIG_COLUMNS).eq("initiative_key", key).maybeSingle(),
     ]);
     if (lib.error) return { ok: false, reason: "db_error", message: errText(lib.error) };
@@ -822,7 +866,7 @@ export async function seedLibraryConfigs(
 ): Promise<SeedResult> {
   try {
     const [lib, cfg] = await Promise.all([
-      db.from("wb_initiative_library").select(LIBRARY_COLUMNS),
+      selectLibrary((cols) => db.from("wb_initiative_library").select(cols)),
       db.from(CONFIG_TABLE).select("initiative_key"),
     ]);
     if (lib.error) return { ok: false, error: `wb_initiative_library: ${errText(lib.error)}` };

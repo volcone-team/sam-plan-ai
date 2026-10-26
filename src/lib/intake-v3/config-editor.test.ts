@@ -288,7 +288,7 @@ describe("labels", () => {
 
   it("summarises needs-human counts, dropping zeros", () => {
     expect(needsHumanLines({ allowedKinds: 87, categoryId: 0, revenueLines: 3 })).toEqual([
-      { field: "allowedKinds", count: 87, text: "87 still need allowed kinds" },
+      { field: "allowedKinds", count: 87, text: "87 still need a frequency" },
       { field: "revenueLines", count: 3, text: "3 still need revenue lines" },
     ]);
   });

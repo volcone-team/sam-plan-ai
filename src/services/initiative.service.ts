@@ -17,6 +17,7 @@ import { toDateOnly, parseDateOnly } from '@/lib/plan-dates';
 import { readMetricSet } from '@/lib/metrics/metric-set';
 import { overlapsPeriod } from '@/lib/initiatives/schedule';
 import { LEAD_HANDOFF_ATTR, handoffCleanup } from '@/lib/initiatives/lead-handoff';
+import { buildInitiativeUpdate } from '@/lib/initiatives/build-update';
 
 export class InitiativeService {
   /**
@@ -295,24 +296,8 @@ export class InitiativeService {
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();
-        const d = dto as any; const updateData: Record<string, unknown> = {};
-        if (d.name !== undefined) updateData.name = d.name;
-        if (d.description !== undefined) updateData.description = d.description;
-        if (d.status !== undefined) updateData.status = d.status;
-        if (d.kind !== undefined) updateData.kind = d.kind;
-        if (d.initiativeTypeId !== undefined) updateData.initiative_type_id = d.initiativeTypeId;
-        if (d.productId !== undefined) updateData.product_id = d.productId;
-        if (d.activationDate !== undefined) updateData.activation_date = toDateOnly(d.activationDate);
-        if (d.eventDate !== undefined) updateData.event_date = toDateOnly(d.eventDate);
-        if (d.trafficInput !== undefined) updateData.traffic_input = d.trafficInput;
-        if (d.plannedBudget !== undefined) updateData.planned_budget = d.plannedBudget;
-        if (d.actualSpend !== undefined) updateData.actual_spend = d.actualSpend;
-        if (d.revenueScenarios !== undefined) {
-          updateData.revenue_good = d.revenueScenarios.good;
-          updateData.revenue_better = d.revenueScenarios.better;
-          updateData.revenue_best = d.revenueScenarios.best;
-        }
-        if (d.displayOrder !== undefined) updateData.display_order = d.displayOrder;
+        // Never "" into a uuid/date column; see build-update.ts.
+        const updateData = buildInitiativeUpdate(dto);
 
         const { data, error } = await supabase
           .from('initiatives')

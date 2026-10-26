@@ -52,6 +52,7 @@ import { sequenceEventDates } from "@/lib/plan-schedule";
 import { toDateOnly } from "@/lib/plan-dates";
 import { snapshotProducts } from "@/lib/snapshot-products";
 import { enqueueMilestoneEvent } from "@/lib/ghl/producers/milestone";
+import { initiativeFrequencyFallback, withFrequencyFallback } from "@/lib/initiatives/frequency-fallback";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -327,7 +328,7 @@ export async function POST(request: NextRequest) {
        * running something every month.
        */
       kind: InitiativeKind;
-      /** weekly / monthly / quarterly, or null when it does not repeat. */
+      /** One of the seven RepeatFrequency values, or null when it does not repeat. */
       repeatFrequency: RepeatFrequency | null;
     }[] = [];
 
@@ -1043,7 +1044,7 @@ async function insertInitiative(
     tasks: readonly MaterialisedTask[];
     /** one-time / recurring / evergreen, from the user's cadence answer. */
     kind: InitiativeKind;
-    /** weekly / monthly / quarterly, or null when it does not repeat. */
+    /** One of the seven RepeatFrequency values, or null when it does not repeat. */
     repeatFrequency: RepeatFrequency | null;
     /** Library fields for a type that has to be created; null if not in the library. */
     typeSource: TypeSource | null;
@@ -1133,7 +1134,14 @@ async function insertInitiative(
         display_order: args.displayOrder * 10 + index,
       },
       args.libraryKey === SOMETHING_ELSE_KEY ? null : args.libraryKey,
-      (row) => db.from("initiatives").insert(row).select("id").single(),
+      // A frequency the pre-051 CHECK rejects moves to attrs instead.
+      (row) =>
+        withFrequencyFallback(
+          row,
+          (r) => db.from("initiatives").insert(r).select("id").single(),
+          (r) => initiativeFrequencyFallback(r),
+          "[intake/build]"
+        ),
       args.metricSet
     );
 

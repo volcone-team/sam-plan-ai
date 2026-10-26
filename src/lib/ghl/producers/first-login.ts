@@ -443,6 +443,7 @@ export async function enqueueFirstLoginEvent(
         firstName: owner.contact.firstName,
         lastName: owner.contact.lastName,
         companyName: owner.contact.companyName,
+        phone: owner.contact.phone,
       },
       /*
        * ALWAYS A KEY. The stamp already decided we are the only request that

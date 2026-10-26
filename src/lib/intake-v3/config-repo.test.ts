@@ -435,6 +435,60 @@ describe("loadLibraryConfigs", () => {
     expect(r.summary).toMatchObject({ valid: 2, active: 2, offeredInPicker: 1 });
   });
 
+  it("derives kinds/frequencies from the raw workbook cells under a saved row that leaves them NULL", async () => {
+    Object.assign(tables.wb_initiative_library[1], {
+      allowed_kinds_raw: "Once, Recurring",
+      allowed_frequencies_raw: "Monthly, Quarterly",
+    });
+    // A seeded row as all 87 are today: kinds and frequencies never set.
+    tables.initiative_library_config.push({
+      ...fullRow({
+        initiative_key: "webinar", category_id: "webinars", audience_source: "own",
+        allowed_paths: ["offer"], allowed_kinds: null, allowed_frequencies: null, revenue_lines: [],
+      }),
+    });
+    const r = await loadLibraryConfigs(makeDb());
+    if (!r.ok) throw new Error(r.error);
+    const webinar = r.records.find((x) => x.initiativeKey === "webinar")!;
+    expect(webinar.effective.allowedKinds).toEqual(["one-time", "recurring"]);
+    expect(webinar.effective.allowedFrequencies).toEqual(["monthly", "quarterly"]);
+    expect(webinar.sources.allowedKinds).toBe("derived");
+    expect(webinar.sources.allowedFrequencies).toBe("derived");
+    expect(webinar.needsHuman).not.toContain("allowedKinds");
+    expect(webinar.validation).toEqual({ status: "valid" });
+  });
+
+  it("before migration 051: re-selects without the raw columns and still loads", async () => {
+    const base = makeDb();
+    const selects: string[] = [];
+    const db = {
+      from(table: string) {
+        const t = base.from(table);
+        if (table !== "wb_initiative_library") return t;
+        return {
+          ...t,
+          select(cols: string) {
+            selects.push(cols);
+            if (cols.includes("allowed_kinds_raw")) {
+              const failed = Promise.resolve({ data: null, error: { code: "42703", message: "column wb_initiative_library.allowed_kinds_raw does not exist" } });
+              const b = { order: () => b, eq: () => b, maybeSingle: () => failed, then: failed.then.bind(failed) };
+              return b;
+            }
+            return t.select(cols);
+          },
+        };
+      },
+    } as unknown as SupabaseClient;
+
+    const r = await loadLibraryConfigs(db);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.records).toHaveLength(3);
+    expect(selects).toHaveLength(2);
+    expect(selects[1]).not.toContain("allowed_kinds_raw");
+    expect(r.records.every((x) => x.effective.allowedKinds === undefined)).toBe(true);
+  });
+
   it("reports a read error instead of throwing", async () => {
     readErrors.initiative_library_config = { message: "relation does not exist" };
     const r = await loadLibraryConfigs(makeDb());

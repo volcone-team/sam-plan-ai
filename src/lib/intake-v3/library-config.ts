@@ -34,6 +34,7 @@
  */
 
 import { normalizeKey } from "../workbook/parse";
+import { REPEAT_FREQUENCIES, type RepeatFrequency } from "../intake-forecast";
 
 /* ------------------------------------------------------------------ *
  * Vocabularies
@@ -150,16 +151,19 @@ export type CategoryFormatBehaviour =
  * Recurrence frequencies.
  *
  * ADOPTED, NOT INVENTED: these are exactly `RepeatFrequency` from
- * src/lib/intake-forecast.ts, which the forecast already understands. A fourth
- * value here would forecast as null revenue.
+ * src/lib/intake-forecast.ts, which the forecast already understands, and are
+ * defined there (that module has no imports, so every consumer can use it).
+ * Canonical order, most often first: weekly, bi-weekly, monthly, bi-monthly,
+ * quarterly, semi-annually, annually.
  */
-export type RecurrenceFrequency = "weekly" | "monthly" | "quarterly";
+export type RecurrenceFrequency = RepeatFrequency;
 
-export const RECURRENCE_FREQUENCIES: readonly RecurrenceFrequency[] = Object.freeze([
-  "weekly",
-  "monthly",
-  "quarterly",
-]);
+export {
+  REPEAT_FREQUENCIES as RECURRENCE_FREQUENCIES,
+  REPEAT_FREQUENCY_LABELS as RECURRENCE_FREQUENCY_LABELS,
+  REPEAT_RUNS_PER_YEAR as RECURRENCE_RUNS_PER_YEAR,
+  isRepeatFrequency as isRecurrenceFrequency,
+} from "../intake-forecast";
 
 /**
  * Where a revenue line gets its price.
@@ -1937,11 +1941,11 @@ export function validateLibraryConfig(
     );
   }
   for (const frequency of config.allowedFrequencies) {
-    if (!RECURRENCE_FREQUENCIES.includes(frequency)) {
+    if (!REPEAT_FREQUENCIES.includes(frequency)) {
       add(
         "frequencies_without_recurring",
         "allowedFrequencies",
-        `"${frequency}" is not one of ${RECURRENCE_FREQUENCIES.join(", ")}.`
+        `"${frequency}" is not one of ${REPEAT_FREQUENCIES.join(", ")}.`
       );
     }
   }

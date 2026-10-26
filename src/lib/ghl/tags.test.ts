@@ -12,6 +12,8 @@ import {
   TAG_PLAN_GENERATED,
   TAG_FINISHED_INTAKE,
   TAG_CANCELLATION,
+  TAG_REGISTERED_NOT_PAID,
+  TAG_OPTED_DND,
   FIXED_TAGS,
   MARKETING_SUPPRESSION_TAG,
   MARKETING_SUPPRESSION_TAG_AS_WRITTEN,
@@ -165,7 +167,7 @@ describe("the inactivity tags' exact code points", () => {
  * ------------------------------------------------------------------ */
 
 describe("FIXED_TAGS", () => {
-  it("lists all twelve tags in the client's order", () => {
+  it("lists all fourteen tags in the client's order", () => {
     expect(FIXED_TAGS).toEqual([
       "sam plan ai app - founder",
       "sam plan ai onboarding - pete booked",
@@ -179,8 +181,10 @@ describe("FIXED_TAGS", () => {
       "sam plan ai app - plan generated",
       "sam plan ai app - finished intake",
       "sam plan ai app - cancellation",
+      "sam plan ai app - registered - not - paid",
+      "sam plan ai app - buyer - opted - dnd",
     ]);
-    expect(FIXED_TAGS).toHaveLength(12);
+    expect(FIXED_TAGS).toHaveLength(14);
   });
 
   it("contains no duplicates, even after normalising", () => {
@@ -202,7 +206,7 @@ describe("FIXED_TAGS", () => {
     expect(() => {
       (FIXED_TAGS as string[])[0] = "clobbered";
     }).toThrow(TypeError);
-    expect(FIXED_TAGS).toHaveLength(12);
+    expect(FIXED_TAGS).toHaveLength(14);
     expect(FIXED_TAGS[0]).toBe(TAG_FOUNDER);
   });
 
@@ -927,6 +931,47 @@ describe("MARKETING_SUPPRESSION_TAG", () => {
     expect(MARKETING_SUPPRESSION_TAG.startsWith("sam plan ai")).toBe(false);
     for (const tag of FIXED_TAGS) {
       expect(tagsEqual(tag, MARKETING_SUPPRESSION_TAG)).toBe(false);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Registration tags
+ * ------------------------------------------------------------------ */
+
+describe("registration tags", () => {
+  it("pins the exact strings", () => {
+    expect(TAG_REGISTERED_NOT_PAID).toBe("sam plan ai app - registered - not - paid");
+    expect(TAG_OPTED_DND).toBe("sam plan ai app - buyer - opted - dnd");
+  });
+
+  it("are both ours", () => {
+    expect(isAppOriginTag(TAG_REGISTERED_NOT_PAID)).toBe(true);
+    expect(isAppOriginTag(TAG_OPTED_DND)).toBe(true);
+  });
+
+  it("TAG_OPTED_DND shares the buyer prefix but is not a buyer tag, in any casing", () => {
+    expect(TAG_OPTED_DND.startsWith(BUYER_TAG_PREFIX)).toBe(true);
+    expect(isBuyerTag(TAG_OPTED_DND)).toBe(false);
+    expect(isBuyerTag("SAM Plan AI App - Buyer - Opted - DND")).toBe(false);
+    expect(isBuyerTag("  sam plan ai app -  buyer - opted - dnd ")).toBe(false);
+    expect(isBuyerTag(TAG_REGISTERED_NOT_PAID)).toBe(false);
+  });
+
+  it("buyerTagsFor and buyerTagTransition never list TAG_OPTED_DND", () => {
+    const awkward = ["Pro", "opted", "dnd", "opted - dnd", "Opted DND", "- opted -"];
+    const { tags } = buyerTagsFor(awkward);
+    expect(tags.some((t) => tagsEqual(t, TAG_OPTED_DND))).toBe(false);
+    for (const state of BUYER_STATES) {
+      for (const cycle of TAG_CYCLES) {
+        for (const planName of awkward) {
+          const r = buyerTagTransition({ planName, cycle, state, knownPlanNames: awkward });
+          if (!r.ok) continue;
+          expect(tagsEqual(r.add, TAG_OPTED_DND)).toBe(false);
+          expect(r.remove.some((t) => tagsEqual(t, TAG_OPTED_DND))).toBe(false);
+          expect(r.remove.some((t) => tagsEqual(t, TAG_REGISTERED_NOT_PAID))).toBe(false);
+        }
+      }
     }
   });
 });

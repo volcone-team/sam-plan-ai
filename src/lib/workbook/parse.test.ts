@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseWorkbook, normalizeKey, canonicalKey, parseNumeric, parseDependsOn,
-  templateInitiativeName, contentRows, resolveLibraryColumns, type RawSheet,
+  templateInitiativeName, contentRows, resolveLibraryColumns, resolveLibraryExtraColumns, type RawSheet,
 } from '@/lib/workbook/parse';
 
 /**
@@ -335,6 +335,54 @@ describe('resolveLibraryColumns', () => {
       const indices = Object.values(resolveLibraryColumns(headers));
       expect(new Set(indices).size).toBe(indices.length);
     }
+  });
+});
+
+describe('library Frequency / Allowed Frequencies columns', () => {
+  const HEADERS = ['ID', 'Initiative Name', 'Category', 'Allowed Frequencies', 'Frequency', 'Call to Action Options'];
+
+  it('finds both by header, and "Frequency" never matches "Allowed Frequencies"', () => {
+    const extra = resolveLibraryExtraColumns(HEADERS);
+    expect(extra.allowedFrequencies).toBe(3);
+    expect(extra.frequency).toBe(4);
+    // Only the allowed column present: Frequency stays absent rather than claiming it.
+    const only = resolveLibraryExtraColumns(['ID', 'Initiative Name', 'Allowed Frequencies']);
+    expect(only).toMatchObject({ allowedFrequencies: 2, frequency: -1 });
+  });
+
+  it('accepts the singular and tolerates case, newlines and parentheticals', () => {
+    const extra = resolveLibraryExtraColumns(['Name', 'Allowed frequency', 'FREQUENCY\n(Once / Recurring)']);
+    expect(extra).toMatchObject({ allowedFrequencies: 1, frequency: 2 });
+  });
+
+  it('keeps the other library fields off those columns', () => {
+    const cols = resolveLibraryColumns(HEADERS);
+    expect(Object.values(cols)).not.toContain(3);
+    expect(Object.values(cols)).not.toContain(4);
+  });
+
+  it('stores the trimmed raw cells on the row, null when blank', () => {
+    const p = parseWorkbook([{
+      name: '1. Initiative Library', headers: HEADERS,
+      rows: [
+        ['IN01', 'Live Webinar', 'Webinars', ' Monthly, Quarterly ', 'Once,Recurring, Evergreen', 'Offer'],
+        ['IN02', 'Email Campaign', 'Email', '', '  ', 'Offer'],
+      ],
+    }]);
+    expect(p.library.map((r) => [r.allowedKindsRaw, r.allowedFrequenciesRaw])).toEqual([
+      ['Once,Recurring, Evergreen', 'Monthly, Quarterly'],
+      [null, null],
+    ]);
+  });
+
+  it('a workbook without the columns parses as before, with both null', () => {
+    const extra = resolveLibraryExtraColumns(REAL_LIBRARY_HEADERS);
+    expect(extra).toMatchObject({ frequency: -1, allowedFrequencies: -1 });
+    const p = parseWorkbook([{
+      name: '1. Initiative Library', headers: LEGACY_LIBRARY_HEADERS,
+      rows: [['Webinars', 'IN01', 'Live Webinar', '2', 'Fast', 'x', 'y', 'NO', 'Mid', 'OWN']],
+    }]);
+    expect(p.library[0]).toMatchObject({ name: 'Live Webinar', allowedKindsRaw: null, allowedFrequenciesRaw: null });
   });
 });
 

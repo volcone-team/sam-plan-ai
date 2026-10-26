@@ -114,8 +114,90 @@ describe("deriveConfig: allowedPaths", () => {
   });
 });
 
+describe("deriveConfig: kinds and frequencies from the workbook's Frequency columns", () => {
+  const wb = (kinds: string | null, freqs: string | null = null) =>
+    deriveConfig(row({ allowed_kinds_raw: kinds, allowed_frequencies_raw: freqs }));
+
+  it("derives kinds and, for a recurring record, its frequencies", () => {
+    const r = wb("Once, Recurring", "Monthly, Quarterly");
+    expect(r.config.allowedKinds).toEqual(["one-time", "recurring"]);
+    expect(r.config.allowedFrequencies).toEqual(["monthly", "quarterly"]);
+    expect(r.derived).toEqual(expect.arrayContaining(["allowedKinds", "allowedFrequencies"]));
+    expect(r.needsHuman).not.toContain("allowedKinds");
+    expect(r.needsHuman).not.toContain("allowedFrequencies");
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("a record that cannot recur gets [] frequencies, whatever the frequency cell", () => {
+    expect(wb("Once", "n/a").config.allowedFrequencies).toEqual([]);
+    expect(wb("Evergreen", null).config.allowedFrequencies).toEqual([]);
+    const r = wb("Once", "Monthly");
+    expect(r.config.allowedFrequencies).toEqual([]);
+    expect(codes(r)).toEqual(["frequencies_ignored_not_recurring"]);
+    expect(r.needsHuman).not.toContain("allowedFrequencies");
+  });
+
+  it("recurring with no usable interval leaves frequencies unset for a human", () => {
+    for (const freqs of ["n/a", null, "Seasonal"]) {
+      const r = wb("Once, Recurring", freqs);
+      expect(r.config.allowedKinds).toEqual(["one-time", "recurring"]);
+      expect(r.config).not.toHaveProperty("allowedFrequencies");
+      expect(r.needsHuman).toContain("allowedFrequencies");
+      expect(codes(r)).toContain("recurring_frequencies_missing");
+    }
+    expect(codes(wb("Recurring", "Seasonal"))).toEqual(["seasonal_ignored", "recurring_frequencies_missing"]);
+  });
+
+  it("labels ongoing 'Evergreen' when the cell says Evergreen", () => {
+    const r = wb("Once,Recurring, Evergreen", "Monthly");
+    expect(r.config.allowedKinds).toEqual(["one-time", "recurring", "ongoing"]);
+    expect(r.config.ongoingLabel).toBe("Evergreen");
+    expect(wb("Once, Recurring", "Monthly").config).not.toHaveProperty("ongoingLabel");
+  });
+
+  it("reports limited series and unknown tokens with stable codes", () => {
+    const r = wb("Limited series, Recurring", "Bi-weekly, Monthly");
+    expect(r.config.allowedKinds).toEqual(["recurring"]);
+    expect(r.config.allowedFrequencies).toEqual(["bi-weekly", "monthly"]);
+    expect(codes(r)).toEqual(["limited_series_as_recurring"]);
+    expect(r.warnings[0].field).toBe("allowedKinds");
+    expect(codes(wb("Once, Sometimes"))).toEqual(["kind_unknown_token"]);
+    expect(codes(wb("Recurring", "Monthly, Daily"))).toEqual(["frequency_unknown_token"]);
+  });
+
+  it("a blank Frequency cell leaves both unset, even with frequencies present", () => {
+    const r = wb(null, "Monthly");
+    expect(r.config).not.toHaveProperty("allowedKinds");
+    expect(r.config).not.toHaveProperty("allowedFrequencies");
+    expect(r.needsHuman).toEqual(expect.arrayContaining(["allowedKinds", "allowedFrequencies"]));
+  });
+
+  it("produces a config the validator accepts once paths and revenue lines are set", async () => {
+    const { validateLibraryConfig, resolveCategory } = await import("./library-config");
+    const r = wb("Once, Recurring, Evergreen", "Weekly, Semi-annually");
+    const match = resolveCategory("Webinars");
+    if (!match.ok) throw new Error("category");
+    const result = validateLibraryConfig(
+      {
+        initiativeKey: "webinar",
+        isLaunch: false,
+        allowedKinds: r.config.allowedKinds!,
+        allowedPaths: r.config.allowedPaths!,
+        audienceSource: r.config.audienceSource!,
+        allowedFrequencies: r.config.allowedFrequencies!,
+        revenueLines: [],
+        fieldExtras: [],
+        ongoingLabel: r.config.ongoingLabel,
+        partnerBlock: r.config.partnerBlock,
+      },
+      match.category
+    );
+    expect(result).toEqual({ ok: true });
+  });
+});
+
 describe("deriveConfig: fields never derived", () => {
-  it("never invents allowedKinds, whatever the row", () => {
+  it("never invents allowedKinds without a Frequency cell, whatever the row", () => {
     const rows = [
       row(),
       row({ name: "Hybrid Events", category: "Other People's Stages - Virtual Events" }),

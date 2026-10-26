@@ -6,6 +6,7 @@ import { RECURRING_DISABLED, isRecurringMigrationMissing } from "@/lib/initiativ
 import { isInitiativeId, parseCorrectionRequest } from "@/lib/initiatives/recurring-request";
 import { correctionUpdate, recurringScope } from "@/lib/initiatives/recurring-state";
 import { loadRecurringInitiative } from "@/lib/initiatives/recurring-load";
+import { initiativeFrequencyFallback, withFrequencyFallback } from "@/lib/initiatives/frequency-fallback";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,11 +54,13 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
     const decision = correctionUpdate(action, recurringScope(row), row, new Date().toISOString());
     if (!decision.ok) return NextResponse.json({ error: decision.error }, { status: decision.status });
 
-    const { error } = await db
-      .from("initiatives")
-      .update(decision.value)
-      .eq("id", id)
-      .eq("company_id", check.companyId);
+    // A lower frequency the pre-051 CHECK rejects moves to attrs instead.
+    const { error } = await withFrequencyFallback(
+      decision.value,
+      (update) => db.from("initiatives").update(update).eq("id", id).eq("company_id", check.companyId),
+      (update) => initiativeFrequencyFallback(update, row.attrs),
+      "[initiatives/correction]"
+    );
     if (error) {
       if (isRecurringMigrationMissing(error)) return NextResponse.json(RECURRING_DISABLED);
       console.error("[initiatives/correction] update failed:", error.message);

@@ -360,6 +360,7 @@ export async function enqueueCancellationEvent(
         firstName: owner.contact.firstName,
         lastName: owner.contact.lastName,
         companyName: owner.contact.companyName,
+        phone: owner.contact.phone,
       },
       /*
        * A key only when a Stripe event is behind the call. The two user-driven

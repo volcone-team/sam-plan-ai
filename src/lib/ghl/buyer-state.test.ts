@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { buyerPresenceForStatus, decideBuyerStateTags } from "./buyer-state";
-import { BUYER_TAG_PREFIX, isBuyerTag, tagsEqual } from "./tags";
+import {
+  BUYER_TAG_PREFIX,
+  isBuyerTag,
+  tagsEqual,
+  TAG_OPTED_DND,
+  TAG_REGISTERED_NOT_PAID,
+} from "./tags";
 
 const PLANS = ["Starter", "Pro", "Legacy"];
 
@@ -144,7 +150,10 @@ describe("decideBuyerStateTags", () => {
         if (!result.ok || result.outcome !== "tags") throw new Error("expected tags");
 
         expect(result.remove.some((t) => tagsEqual(t, result.add))).toBe(false);
-        expect(result.remove.every(isBuyerTag)).toBe(true);
+        // Buyer tags only, plus "registered - not paid" when entering active.
+        expect(
+          result.remove.every((t) => isBuyerTag(t) || t === TAG_REGISTERED_NOT_PAID)
+        ).toBe(true);
       }
     }
   });
@@ -219,5 +228,61 @@ describe("decideBuyerStateTags", () => {
         expect(result).toMatchObject({ ok: false, error: "cycle" });
       }
     });
+  });
+});
+
+describe("decideBuyerStateTags — registered - not paid", () => {
+  const PLANS_LOCAL = ["Starter", "Pro"];
+
+  it("removes TAG_REGISTERED_NOT_PAID when entering the active state", () => {
+    for (const status of ["active", "past_due"]) {
+      const result = decideBuyerStateTags({
+        status,
+        planName: "Pro",
+        cycle: "monthly",
+        knownPlanNames: PLANS_LOCAL,
+      });
+      if (!result.ok || result.outcome !== "tags") throw new Error("expected tags");
+      expect(result.state).toBe("active");
+      expect(result.remove).toContain(TAG_REGISTERED_NOT_PAID);
+      expect(result.remove.filter((t) => t === TAG_REGISTERED_NOT_PAID)).toHaveLength(1);
+    }
+  });
+
+  it("does not touch it when entering the inactive state", () => {
+    for (const status of ["cancelled", "unpaid", "paused"]) {
+      const result = decideBuyerStateTags({
+        status,
+        planName: "Pro",
+        cycle: "annual",
+        knownPlanNames: PLANS_LOCAL,
+      });
+      if (!result.ok || result.outcome !== "tags") throw new Error("expected tags");
+      expect(result.state).toBe("inactive");
+      expect(result.remove).not.toContain(TAG_REGISTERED_NOT_PAID);
+    }
+  });
+
+  it("never removes TAG_OPTED_DND, in either state", () => {
+    for (const status of ["active", "cancelled"]) {
+      const result = decideBuyerStateTags({
+        status,
+        planName: "Pro",
+        cycle: "monthly",
+        knownPlanNames: [...PLANS_LOCAL, "opted", "dnd", "opted - dnd"],
+      });
+      if (!result.ok || result.outcome !== "tags") throw new Error("expected tags");
+      expect(result.remove.some((t) => tagsEqual(t, TAG_OPTED_DND))).toBe(false);
+    }
+  });
+
+  it("adds nothing for a trial", () => {
+    const result = decideBuyerStateTags({
+      status: "trialing",
+      planName: "Pro",
+      cycle: "monthly",
+      knownPlanNames: PLANS_LOCAL,
+    });
+    expect(result).toMatchObject({ ok: true, outcome: "none" });
   });
 });

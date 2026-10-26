@@ -28,6 +28,7 @@ import {
   type RecurrenceTemplate,
   type RecurringInstance,
 } from './recurring';
+import { RECURRENCE_FREQUENCIES } from '@/lib/intake-v3/library-config';
 import {
   horizonSpan,
   isNewIntake,
@@ -41,7 +42,7 @@ import {
 
 type DateLike = Date | string | null | undefined;
 
-const FREQUENCIES: readonly RecurrenceFrequency[] = ['weekly', 'monthly', 'quarterly'];
+const FREQUENCIES: readonly RecurrenceFrequency[] = RECURRENCE_FREQUENCIES;
 
 /**
  * Statuses that take an initiative off the calendar (or finish it). Its runs
@@ -303,8 +304,10 @@ export function instanceWriteDecision(
 /**
  * The `initiatives` update for a correction choice.
  *
- *   change-frequency — repeat_frequency one step lower (weekly → monthly →
- *                      quarterly). attrs.repeat_frequency is rewritten too
+ *   change-frequency — repeat_frequency one step lower in the canonical
+ *                      order (weekly → bi-weekly → monthly → bi-monthly →
+ *                      quarterly → semi-annually → annually).
+ *                      attrs.repeat_frequency is rewritten too
  *                      when it is set, so the two never disagree.
  *   pause            — status 'paused' (allowed by 001's CHECK).
  *   retire           — status 'retired' (likewise).

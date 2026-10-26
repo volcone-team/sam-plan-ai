@@ -80,6 +80,8 @@ export class InitiativeTypeService {
    * Get a specific initiative type
    */
   async getInitiativeType(id: string): Promise<InitiativeType> {
+    // No query with a blank id: it can only fail (22P02 on the uuid column).
+    if (!id) throw new Error("No initiative type id given.");
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabase();

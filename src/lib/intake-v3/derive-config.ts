@@ -15,18 +15,30 @@
  *      record offers no paths", which is a decision; an unset field reads as
  *      "nobody has decided", which is the truth. Every array field here is
  *      either derived from real data or left unset.
- *   2. `allowedKinds` IS NEVER DERIVED. Nothing in the workbook says whether
- *      an initiative is one-time, recurring or ongoing, and a single default
- *      kind would silently SUPPRESS the Kind question on every record (see
- *      resolveFormLayout). That is precisely the failure the contract warns
- *      about.
+ *   2. `allowedKinds` COMES ONLY FROM THE WORKBOOK, NEVER FROM A DEFAULT.
+ *      The workbook's "Frequency" column (stored raw as allowed_kinds_raw,
+ *      migration 051) says which kinds an initiative allows: Once ->
+ *      one-time, Recurring -> recurring, Evergreen -> ongoing, "Limited
+ *      series" -> recurring (warned). A blank or unreadable cell leaves
+ *      allowedKinds UNSET for a human; there is still no fallback kind,
+ *      because a single default kind would silently SUPPRESS the Frequency
+ *      question on every record (see resolveFormLayout).
+ *
+ *      `allowedFrequencies` follows the kinds, as in the editor: [] when the
+ *      kinds exclude recurring (the validator refuses frequencies there), the
+ *      "Allowed Frequencies" column (allowed_frequencies_raw) when recurring
+ *      is allowed, and UNSET (with a warning) when a recurring record's cell
+ *      gives no interval — a recurring record with [] would be invalid, so
+ *      that one needs a human. With kinds unset, frequencies stay unset too.
+ *
+ *      ongoingLabel is "Evergreen" when the Frequency cell says Evergreen.
  *
  * `isLaunch` IS NOT DERIVED EITHER: picker visibility is now
  * initiative_settings.is_active, so this module has no opinion on it.
  *
  * PURE. No database, no network, no React. Imports only the contract module,
- * the (pure) type-extras table and `normalizeKey` from the (pure) workbook
- * parser, which the contract uses too.
+ * the (pure) type-extras table, the (pure) workbook frequency parsers and
+ * `normalizeKey` from the (pure) workbook parser, which the contract uses too.
  */
 
 import {
@@ -40,6 +52,7 @@ import {
 } from "./library-config";
 import { normalizeKey } from "../workbook/parse";
 import { typeExtrasFor } from "./type-extras";
+import { mentionsEvergreen, parseWorkbookFrequencies, parseWorkbookKinds } from "./workbook-kinds";
 
 /* ------------------------------------------------------------------ *
  * Shapes
@@ -52,6 +65,12 @@ export interface LibraryRowInput {
   category: string | null;
   own_or_ops: string | null;
   cta_options: readonly string[] | null;
+  /**
+   * The raw "Frequency" / "Allowed Frequencies" cells (migration 051).
+   * Optional: absent on a database without 051, which reads as blank.
+   */
+  allowed_kinds_raw?: string | null;
+  allowed_frequencies_raw?: string | null;
 }
 
 /**
@@ -110,7 +129,19 @@ export type DeriveWarningCode =
   /** CTA tokens present but none mapped. allowedPaths left unset rather than []. */
   | "cta_no_known_paths"
   /** partnerBlock.booking set false because the NAME contains "networking". */
-  | "booking_name_matched";
+  | "booking_name_matched"
+  /** Frequency cell said "Limited series"; read as recurring. */
+  | "limited_series_as_recurring"
+  /** A Frequency token that is not Once / Recurring / Evergreen. Ignored. */
+  | "kind_unknown_token"
+  /** An Allowed Frequencies token that is not a known interval. Ignored. */
+  | "frequency_unknown_token"
+  /** Allowed Frequencies said "Seasonal", which is not an interval. Ignored. */
+  | "seasonal_ignored"
+  /** Recurring is allowed but Allowed Frequencies gives no interval. allowedFrequencies left unset. */
+  | "recurring_frequencies_missing"
+  /** Allowed Frequencies lists intervals but the kinds exclude recurring. Saved as none. */
+  | "frequencies_ignored_not_recurring";
 
 export interface DeriveWarning {
   code: DeriveWarningCode;
@@ -152,13 +183,14 @@ const HYBRID_EVENTS_KEY = normalizeKey("Hybrid Events");
 const NETWORKING_WORD = /\bnetworking\b/i;
 
 /**
- * Fields no workbook column can answer. Always reported as needing a human
- * (unless derived, which for these never happens).
+ * Fields reported as needing a human whenever they are not derived.
  *
- * `allowedFrequencies` belongs here because it is only meaningful once a human
- * has allowed `recurring`. `ongoingLabel`, `fieldExtras` and `formatOverride`
- * are NOT here: each is optional with a sound absent state (default label, no
- * extras, category decides format).
+ * `allowedKinds` and `allowedFrequencies` are derived from the workbook's
+ * Frequency / Allowed Frequencies columns when those say enough (see
+ * deriveKindsAndFrequencies); otherwise they land here. `revenueLines` no
+ * column answers. `ongoingLabel`, `fieldExtras` and `formatOverride` are NOT
+ * here: each is optional with a sound absent state (default label, no extras,
+ * category decides format).
  */
 const ALWAYS_HUMAN: ReadonlySet<ConfigField> = new Set<ConfigField>([
   "allowedKinds",
@@ -205,6 +237,71 @@ function derivePaths(
   }
   // Contract order, not workbook order, so two rows with the same CTAs compare equal.
   return CONVERSION_PATHS.filter((p) => found.has(p));
+}
+
+/**
+ * allowedKinds / allowedFrequencies / ongoingLabel from the raw workbook cells.
+ * Mutates `config`; every unused token is a warning.
+ */
+function deriveKindsAndFrequencies(
+  row: LibraryRowInput,
+  config: DerivedConfig,
+  initiativeKey: string,
+  warn: (w: Omit<DeriveWarning, "initiativeKey">) => void
+): void {
+  const kindsRaw = row.allowed_kinds_raw ?? null;
+  const freqRaw = row.allowed_frequencies_raw ?? null;
+  const k = parseWorkbookKinds(kindsRaw);
+  for (const w of k.warnings) {
+    warn({
+      code: w.code === "limited_series_as_recurring" ? "limited_series_as_recurring" : "kind_unknown_token",
+      field: "allowedKinds",
+      value: w.value,
+      message: `${initiativeKey}: ${w.message}`,
+    });
+  }
+  if (!k.kinds) return; // Nobody has said: kinds AND frequencies stay unset.
+  config.allowedKinds = k.kinds;
+
+  const f = parseWorkbookFrequencies(freqRaw);
+  const recurring = k.kinds.includes("recurring");
+  if (recurring) {
+    for (const w of f.warnings) {
+      warn({
+        code: w.code === "seasonal_ignored" ? "seasonal_ignored" : "frequency_unknown_token",
+        field: "allowedFrequencies",
+        value: w.value,
+        message: `${initiativeKey}: ${w.message}`,
+      });
+    }
+    if (f.frequencies && f.frequencies.length > 0) {
+      config.allowedFrequencies = f.frequencies;
+    } else {
+      warn({
+        code: "recurring_frequencies_missing",
+        field: "allowedFrequencies",
+        value: freqRaw ?? undefined,
+        message:
+          `${initiativeKey} allows Recurring but its Allowed Frequencies cell is ` +
+          `${freqRaw ? `"${freqRaw}"` : "blank"}, which gives no interval. Choose at least one.`,
+      });
+    }
+  } else {
+    // Frequencies only matter for recurring; the validator refuses any here.
+    config.allowedFrequencies = [];
+    if (f.frequencies && f.frequencies.length > 0) {
+      warn({
+        code: "frequencies_ignored_not_recurring",
+        field: "allowedFrequencies",
+        value: freqRaw ?? undefined,
+        message: `${initiativeKey} does not allow Recurring, so its Allowed Frequencies "${freqRaw}" were not used.`,
+      });
+    }
+  }
+
+  if (config.ongoingLabel === undefined && k.kinds.includes("ongoing") && mentionsEvergreen(kindsRaw)) {
+    config.ongoingLabel = "Evergreen";
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -282,6 +379,9 @@ export function deriveConfig(row: LibraryRowInput): DeriveResult {
   // left unset — not [] — for every other record, per rule 1 above.
   const extras = typeExtrasFor(name);
   if (extras) config.fieldExtras = extras;
+
+  // Kinds and frequencies, from the workbook's Frequency columns.
+  deriveKindsAndFrequencies(row, config, initiativeKey, warn);
 
   const derived = CONFIG_FIELDS.filter((f) => config[f] !== undefined);
   const needsHuman = CONFIG_FIELDS.filter(

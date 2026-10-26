@@ -62,10 +62,10 @@ describe("toCadence", () => {
 });
 
 describe("toFrequency", () => {
-  it("passes through the three real frequencies", () => {
-    expect(toFrequency("weekly")).toBe("weekly");
-    expect(toFrequency("monthly")).toBe("monthly");
-    expect(toFrequency("quarterly")).toBe("quarterly");
+  it("passes through the seven real frequencies", () => {
+    for (const f of ["weekly", "bi-weekly", "monthly", "bi-monthly", "quarterly", "semi-annually", "annually"]) {
+      expect(toFrequency(f)).toBe(f);
+    }
   });
 
   it("is null when absent, which Once and Always on both are", () => {

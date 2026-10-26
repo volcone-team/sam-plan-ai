@@ -5,6 +5,23 @@ import {
   GHL_ENV_PRIVATE_TOKEN,
   type GhlConfig,
 } from "@/lib/ghl/config";
+import {
+  FIXED_TAGS,
+  TAG_CANCELLATION,
+  TAG_FINISHED_INTAKE,
+  TAG_FIRST_LOGIN,
+  TAG_FOUNDER,
+  TAG_INACTIVE_30,
+  TAG_INACTIVE_60,
+  TAG_INACTIVE_90,
+  TAG_LOGIN_TRIGGER,
+  TAG_ONBOARDING_CALL_BOOKED,
+  TAG_ONBOARDING_PETE_BOOKED,
+  TAG_ONBOARDING_RACHEL_BOOKED,
+  TAG_OPTED_DND,
+  TAG_PLAN_GENERATED,
+  TAG_REGISTERED_NOT_PAID,
+} from "@/lib/ghl/tags";
 
 /**
  * Presentation logic for the GoHighLevel admin panel.
@@ -229,6 +246,8 @@ export function describeGhlEventType(eventType: string | null): string {
       return "First login";
     case "marketing_suppression":
       return "Marketing suppression";
+    case "registered":
+      return "Registered";
     default:
       // `login_trigger` lands here by design: the client dropped that tag, so
       // nothing enqueues one any more, but 044's CHECK still accepts it and an
@@ -236,4 +255,41 @@ export function describeGhlEventType(eventType: string | null): string {
       // that would imply it is still a thing.
       return eventType ?? "—";
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * The fixed tags, for the panel's reference list
+ * ------------------------------------------------------------------ */
+
+/** One line per fixed tag: what it means in the client's CRM. */
+const FIXED_TAG_DESCRIPTIONS: Readonly<Record<string, string>> = Object.freeze({
+  [TAG_FOUNDER]: "Founding-member cohort. Added once, never removed by the app.",
+  [TAG_ONBOARDING_PETE_BOOKED]: "Onboarding call booked with Pete.",
+  [TAG_ONBOARDING_RACHEL_BOOKED]: "Onboarding call booked with Rachel.",
+  [TAG_ONBOARDING_CALL_BOOKED]: "Onboarding call booked with any coach.",
+  [TAG_LOGIN_TRIGGER]: "Login workflow trigger. Dropped by the client; nothing sends it now.",
+  [TAG_INACTIVE_90]: "Has not logged in for 90 days or more.",
+  [TAG_INACTIVE_60]: "Has not logged in for 60 days.",
+  [TAG_INACTIVE_30]: "Has not logged in for 30 days.",
+  [TAG_FIRST_LOGIN]: "First time the owner was seen signed in.",
+  [TAG_PLAN_GENERATED]: "The company generated its first plan.",
+  [TAG_FINISHED_INTAKE]: "The company finished the intake.",
+  [TAG_CANCELLATION]: "The subscription was cancelled.",
+  [TAG_REGISTERED_NOT_PAID]:
+    "Owner signed up through the public signup and has not paid (trials included). Removed when they become an active buyer.",
+  [TAG_OPTED_DND]:
+    "Owner left the promotional consent box unticked at signup. Added once, never removed by the app.",
+});
+
+export interface GhlFixedTagRow {
+  tag: string;
+  description: string;
+}
+
+/** Every fixed tag, in contract order, with its one-line description. */
+export function describeGhlFixedTags(): GhlFixedTagRow[] {
+  return FIXED_TAGS.map((tag) => ({
+    tag,
+    description: FIXED_TAG_DESCRIPTIONS[tag] ?? "",
+  }));
 }

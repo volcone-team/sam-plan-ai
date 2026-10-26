@@ -7,7 +7,6 @@ import {
   serialiseAnswers,
   serialiseProduct,
   serialiseInitiative,
-  restoreDraft,
   statusUpdate,
   timestampColumnFor,
   type ProductDraft,
@@ -15,6 +14,8 @@ import {
 } from "@/lib/intake/draft";
 import { resolveResumeScreen, type ScreenId } from "@/lib/intake/flow";
 import type { IntakeAnswers } from "@/lib/intake/validation";
+import { currentIntakeInput, loadIntakeDraft } from "@/lib/intake/load-draft";
+import { intakeFrequencyFallback, withFrequencyFallback } from "@/lib/initiatives/frequency-fallback";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -105,24 +106,8 @@ async function resolveCaller() {
   return { user, db, companyId };
 }
 
-/**
- * The company's current v2 intake row.
- *
- * Most recent first so a company with history resumes the latest attempt
- * rather than an abandoned older one.
- */
-async function currentInput(db: SupabaseClient, companyId: string) {
-  const { data } = await db
-    .from("planning_inputs")
-    .select("*")
-    .eq("company_id", companyId)
-    .eq("intake_version", 2)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  return (data as Record<string, unknown> | null) ?? null;
-}
+/** Shared with Settings → "Intake answers"; see lib/intake/load-draft.ts. */
+const currentInput = currentIntakeInput;
 
 export async function GET() {
   try {
@@ -130,33 +115,7 @@ export async function GET() {
     if ("error" in caller) return caller.error;
     const { db, companyId } = caller;
 
-    const input = await currentInput(db, companyId);
-
-    if (!input) {
-      const empty = restoreDraft(null);
-      return NextResponse.json({ ...empty, planningInputId: null });
-    }
-
-    const planningInputId = input.id as string;
-
-    const [{ data: products }, { data: initiatives }] = await Promise.all([
-      db
-        .from("intake_products")
-        .select("*")
-        .eq("planning_input_id", planningInputId)
-        .order("display_order", { ascending: true }),
-      db
-        .from("intake_initiatives")
-        .select("*")
-        .eq("planning_input_id", planningInputId)
-        .order("display_order", { ascending: true }),
-    ]);
-
-    const restored = restoreDraft(
-      input,
-      (products ?? []) as Record<string, unknown>[],
-      (initiatives ?? []) as Record<string, unknown>[]
-    );
+    const { restored, planningInputId } = await loadIntakeDraft(db, companyId);
 
     return NextResponse.json({ ...restored, planningInputId });
   } catch (err: unknown) {
@@ -334,7 +293,13 @@ async function saveChildren(
       .filter((row) => row.initiative_key !== "");
 
     if (rows.length > 0) {
-      const { error } = await db.from("intake_initiatives").insert(rows);
+      // A frequency the pre-051 CHECK rejects is dropped rather than failing the save.
+      const { error } = await withFrequencyFallback(
+        rows,
+        (r) => db.from("intake_initiatives").insert(r),
+        intakeFrequencyFallback,
+        "[intake/draft]"
+      );
       if (error) return error.message;
     }
   }

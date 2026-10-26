@@ -20,6 +20,11 @@
  */
 
 import type { ScreenId } from "@/lib/intake/flow";
+import {
+  REPEAT_FREQUENCIES,
+  REPEAT_FREQUENCY_LABELS,
+  type RepeatFrequency,
+} from "@/lib/intake-forecast";
 
 /* ------------------------------------------------------------------ *
  * Option primitive
@@ -310,13 +315,8 @@ export const CADENCE_OPTIONS: readonly Option<"once" | "repeat" | "always_on">[]
 ];
 
 /** Revealed by "On repeat". Matches `intake_initiatives.repeat_frequency`. */
-export const REPEAT_FREQUENCY_OPTIONS: readonly Option<
-  "weekly" | "monthly" | "quarterly"
->[] = [
-  { value: "weekly", label: "Weekly" },
-  { value: "monthly", label: "Monthly" },
-  { value: "quarterly", label: "Quarterly" },
-];
+export const REPEAT_FREQUENCY_OPTIONS: readonly Option<RepeatFrequency>[] =
+  REPEAT_FREQUENCIES.map((value) => ({ value, label: REPEAT_FREQUENCY_LABELS[value] }));
 
 export const CADENCE_REPEAT = "repeat";
 

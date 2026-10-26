@@ -17,7 +17,12 @@
  * arithmetic runs on UTC day numbers, so no timezone or DST can move a day.
  */
 import { formatMoney } from '@/lib/format-money';
-import type { RecurrenceFrequency } from '@/lib/intake-v3/library-config';
+import {
+  RECURRENCE_FREQUENCIES,
+  RECURRENCE_FREQUENCY_LABELS,
+  RECURRENCE_RUNS_PER_YEAR,
+  type RecurrenceFrequency,
+} from '@/lib/intake-v3/library-config';
 import type { DateOnly } from '@/lib/plan-dates';
 
 export type { RecurrenceFrequency };
@@ -26,7 +31,22 @@ export type InstanceState = 'placeholder' | 'real';
 
 type DateLike = Date | string | null | undefined;
 
-const FREQUENCIES: readonly RecurrenceFrequency[] = ['weekly', 'monthly', 'quarterly'];
+const FREQUENCIES: readonly RecurrenceFrequency[] = RECURRENCE_FREQUENCIES;
+
+/** Day-stepped frequencies: days between runs. */
+const DAY_STEP: Readonly<Partial<Record<RecurrenceFrequency, number>>> = Object.freeze({
+  weekly: 7,
+  'bi-weekly': 14,
+});
+
+/** Month-stepped frequencies: calendar months between runs. */
+const MONTH_STEP: Readonly<Partial<Record<RecurrenceFrequency, number>>> = Object.freeze({
+  monthly: 1,
+  'bi-monthly': 2,
+  quarterly: 3,
+  'semi-annually': 6,
+  annually: 12,
+});
 const OUTCOMES: readonly InstanceOutcome[] = ['ran', 'skipped', 'not-yet'];
 
 /* ------------------------------------------------------------------ *
@@ -97,7 +117,11 @@ export interface RecurrenceTemplate {
  * Every event date the template produces inside `planYear` (Jan 1 – Dec 31),
  * ascending.
  *
- * MONTH-END SAFE. Monthly and quarterly runs keep the first run's day of month
+ * Weekly and bi-weekly runs step 7 and 14 calendar days (UTC day numbers, so
+ * DST never shifts a run). Monthly, bi-monthly, quarterly, semi-annual and
+ * annual runs step 1, 2, 3, 6 and 12 calendar months.
+ *
+ * MONTH-END SAFE. Month-stepped runs keep the first run's day of month
  * and clamp it into short months without carrying the clamp forward:
  * Jan 31 → Feb 28 (29 in a leap year) → Mar 31 → Apr 30 → May 31. Each run is
  * computed from the first, never from the previous run, so one short month
@@ -118,14 +142,16 @@ export function instanceDates(template: RecurrenceTemplate, planYear: number): D
   const yEnd = epochDay(planYear, 12, 31);
   const out: DateOnly[] = [];
 
-  if (frequency === 'weekly') {
+  const days = DAY_STEP[frequency];
+  if (days) {
     const base = epochDay(first.y, first.m, first.d) + offset;
-    const k0 = Math.max(0, Math.ceil((yStart - base) / 7));
-    for (let k = k0; base + 7 * k <= yEnd; k++) out.push(fromEpochDay(base + 7 * k));
+    const k0 = Math.max(0, Math.ceil((yStart - base) / days));
+    for (let k = k0; base + days * k <= yEnd; k++) out.push(fromEpochDay(base + days * k));
     return out;
   }
 
-  const step = frequency === 'monthly' ? 1 : 3;
+  const step = MONTH_STEP[frequency];
+  if (!step) return [];
   // Start a little before the year (the offset can pull a later run back into
   // it) instead of walking every month since the first run.
   const marginMonths = Math.ceil(Math.abs(offset) / 28) + 1;
@@ -370,28 +396,21 @@ export interface CorrectionInput {
   lowerFrequencyRemainingInstances?: number;
 }
 
-const LOWER_FREQUENCY: Readonly<Partial<Record<RecurrenceFrequency, RecurrenceFrequency>>> = Object.freeze({
-  weekly: 'monthly',
-  monthly: 'quarterly',
-});
-
-const RUNS_PER_YEAR: Readonly<Record<RecurrenceFrequency, number>> = Object.freeze({
-  weekly: 52,
-  monthly: 12,
-  quarterly: 4,
-});
+const RUNS_PER_YEAR: Readonly<Record<RecurrenceFrequency, number>> = RECURRENCE_RUNS_PER_YEAR;
 
 function money(n: number): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-function capitalise(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-/** The next lower frequency, or null for quarterly / none. */
+/**
+ * The next lower frequency in the canonical order (weekly → bi-weekly →
+ * monthly → bi-monthly → quarterly → semi-annually → annually), or null for
+ * annually / none / an unknown value.
+ */
 export function lowerFrequency(f: RecurrenceFrequency | null | undefined): RecurrenceFrequency | null {
-  return (f && LOWER_FREQUENCY[f]) || null;
+  if (!f) return null;
+  const i = FREQUENCIES.indexOf(f);
+  return i >= 0 && i < FREQUENCIES.length - 1 ? FREQUENCIES[i + 1] : null;
 }
 
 export function correctionOptions(input: CorrectionInput): CorrectionPrompt {
@@ -419,7 +438,7 @@ export function correctionOptions(input: CorrectionInput): CorrectionPrompt {
     options.push({
       action: 'change-frequency',
       label: 'Change the frequency',
-      detail: `${capitalise(lower)} instead of ${current}. Plan goes to ${formatMoney(after)}`,
+      detail: `${RECURRENCE_FREQUENCY_LABELS[lower]} instead of ${RECURRENCE_FREQUENCY_LABELS[current].toLowerCase()}. Plan goes to ${formatMoney(after)}`,
       newFrequency: lower,
       planRevenueAfter: after,
       delta: after - remaining,

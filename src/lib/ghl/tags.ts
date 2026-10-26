@@ -70,6 +70,25 @@ export const TAG_FINISHED_INTAKE = "sam plan ai app - finished intake";
 export const TAG_CANCELLATION = "sam plan ai app - cancellation";
 
 /**
+ * Registration (the `registered` event, producers/registration.ts).
+ *
+ * TAG_REGISTERED_NOT_PAID is added once when a company owner signs up through
+ * the public signup, and removed by the buyer-state producer when they enter
+ * the ACTIVE buyer state. Trial users carry it: a trial is not a payment.
+ *
+ * TAG_OPTED_DND is added alongside it when the owner left the promotional
+ * consent box unticked (profiles.promotional_consent = false). Add only; the
+ * app never removes it.
+ *
+ * TAG_OPTED_DND STARTS WITH BUYER_TAG_PREFIX AND IS NOT A BUYER TAG. The
+ * client chose the string. `isBuyerTag` excludes it explicitly, so the buyer
+ * state cleanup (which removes every buyer tag it can name or match) can never
+ * strip a do-not-disturb preference off a contact.
+ */
+export const TAG_REGISTERED_NOT_PAID = "sam plan ai app - registered - not - paid";
+export const TAG_OPTED_DND = "sam plan ai app - buyer - opted - dnd";
+
+/**
  * Every fixed tag, in the order the client listed them.
  *
  * Frozen because it is module-level shared state that the admin screen and the
@@ -89,6 +108,8 @@ export const FIXED_TAGS: readonly string[] = Object.freeze([
   TAG_PLAN_GENERATED,
   TAG_FINISHED_INTAKE,
   TAG_CANCELLATION,
+  TAG_REGISTERED_NOT_PAID,
+  TAG_OPTED_DND,
 ]);
 
 /**
@@ -165,9 +186,22 @@ export function isAppOriginTag(raw: unknown): boolean {
   return FIXED_TAG_SET.has(tag) || isBuyerTag(tag);
 }
 
-/** Is this a buyer tag, for any plan including one we no longer know about? */
+/**
+ * Tags inside the buyer namespace that are NOT buyer-state tags. Compared in
+ * normalised form. See TAG_OPTED_DND.
+ */
+const NON_BUYER_STATE_TAGS = new Set([normaliseTagForCompare(TAG_OPTED_DND)]);
+
+/**
+ * Is this a buyer tag, for any plan including one we no longer know about?
+ *
+ * FALSE FOR TAG_OPTED_DND, which shares the prefix but records a consent
+ * choice. Treating it as a buyer tag would let the buyer-state cleanup remove
+ * it.
+ */
 export function isBuyerTag(raw: unknown): boolean {
   const tag = normaliseTagForCompare(raw);
+  if (NON_BUYER_STATE_TAGS.has(tag)) return false;
   return tag.startsWith(BUYER_TAG_PREFIX) && tag.length > BUYER_TAG_PREFIX.length;
 }
 
@@ -371,7 +405,9 @@ export function buyerTagsFor(planNames: Iterable<unknown>): {
   for (const plan of plans) {
     for (const state of BUYER_STATES) {
       for (const cycle of TAG_CYCLES) {
-        tags.push(`${BUYER_TAG_PREFIX}${state} - ${plan} ${cycle}`);
+        const tag = `${BUYER_TAG_PREFIX}${state} - ${plan} ${cycle}`;
+        // Never lists a non-buyer-state tag such as TAG_OPTED_DND.
+        if (isBuyerTag(tag)) tags.push(tag);
       }
     }
   }
@@ -452,7 +488,10 @@ export function buyerTagTransition(
     // The one invariant worth stating in code: the add is never in the remove
     // list. Compared on the normalised form, since both sides are generated
     // here and are already normalised, but cheap insurance if that changes.
-    remove: tags.filter((tag) => !tagsEqual(tag, target.tag)),
+    // `isBuyerTag` as well: the generated shape cannot spell TAG_OPTED_DND
+    // (the state always comes first), but the remove list must never be able
+    // to carry it even if the shape changes.
+    remove: tags.filter((tag) => !tagsEqual(tag, target.tag) && isBuyerTag(tag)),
     plan: target.plan,
     cycle: target.cycle,
     state: target.state,

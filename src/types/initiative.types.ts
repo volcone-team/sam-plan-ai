@@ -117,9 +117,12 @@ export interface UpdateInitiativeDTO {
   description?: string;
   status?: InitiativeStatus;
   initiativeTypeId?: string;
-  productId?: string;
-  activationDate?: Date;
+  productId?: string | null; // null (or "") clears the product; nullable since migration 045
+  activationDate?: Date | null; // null clears it; nullable since migration 045
   eventDate?: Date | null; // null explicitly clears the event date
+  /** Written only when given; omit to keep the stored precision. */
+  activationDatePrecision?: 'day' | 'month';
+  eventDatePrecision?: 'day' | 'month';
   trafficInput?: number;
   revenueScenarios?: Partial<RevenueScenarios>;
   plannedBudget?: number;

@@ -339,6 +339,7 @@ export async function enqueueMilestoneEvent(
         firstName: owner.contact.firstName,
         lastName: owner.contact.lastName,
         companyName: owner.contact.companyName,
+        phone: owner.contact.phone,
       },
       /*
        * ALWAYS A KEY, unlike both siblings — where a key is optional because a

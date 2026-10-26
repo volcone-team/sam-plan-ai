@@ -16,6 +16,7 @@ import { LoadingPanel } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import {
   describeGhlEventType,
+  describeGhlFixedTags,
   describeGhlRowStatus,
   type GhlOutboxCounts,
   type GhlOutboxSummary,
@@ -547,6 +548,23 @@ export function GhlSettings() {
             </ul>
           </div>
         </div>
+      </div>
+
+      {/* ---------------- Tags ---------------- */}
+      <div className="rounded-[var(--radius-lg)] border border-border bg-card p-6">
+        <h3 className="text-sm font-semibold">Tags this app writes</h3>
+        <p className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">
+          Exact strings. A GoHighLevel workflow must match them character for
+          character. Buyer tags (one per plan, state and cycle) are not listed.
+        </p>
+        <ul className="mt-3 space-y-2">
+          {describeGhlFixedTags().map((row) => (
+            <li key={row.tag} className="text-xs">
+              <code className="font-mono text-[hsl(var(--foreground))]">{row.tag}</code>
+              <p className="text-[hsl(var(--foreground-muted))]">{row.description}</p>
+            </li>
+          ))}
+        </ul>
       </div>
 
       {/* ---------------- Outbox ---------------- */}

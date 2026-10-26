@@ -88,9 +88,13 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
          * product name costs a label, not the page — so they are settled
          * individually and never blank the screen.
          */
+        // A new-intake row may have no product (product_id NULL, migration
+        // 045). No id means "none", not a lookup that can only fail.
+        const typeId = initiativeData.initiativeTypeId;
+        const productId = initiativeData.productId;
         const [typeData, productData, allTypes, allProducts, allInitiatives] = await Promise.allSettled([
-          initiativeTypeService.getInitiativeType(initiativeData.initiativeTypeId),
-          productService.getProduct(initiativeData.productId),
+          typeId ? initiativeTypeService.getInitiativeType(typeId) : Promise.resolve(null),
+          productId ? productService.getProduct(productId) : Promise.resolve(null),
           initiativeTypeService.getAllInitiativeTypes(),
           productService.getProductsByCompany(initiativeData.companyId),
           initiativeService.getInitiativesByCompany(initiativeData.companyId),
@@ -101,7 +105,7 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
         if (typeData.status === "fulfilled") setInitiativeType(typeData.value);
         else console.error("[initiative-detail] initiative type unavailable:", typeData.reason);
 
-        if (productData.status === "fulfilled") setProductName(productData.value.name);
+        if (productData.status === "fulfilled") setProductName(productData.value?.name ?? '');
         else console.error("[initiative-detail] product unavailable:", productData.reason);
 
         if (allTypes.status === "fulfilled") setInitiativeTypes(allTypes.value);
@@ -128,10 +132,12 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
   const handleSaved = (updated: Initiative) => {
     setInitiative(updated);
 
-    const matchedType = initiativeTypes.find(t => t.id === updated.initiativeTypeId);
+    const matchedType = updated.initiativeTypeId
+      ? initiativeTypes.find(t => t.id === updated.initiativeTypeId)
+      : undefined;
     if (matchedType) setInitiativeType(matchedType);
 
-    const matchedProduct = products.find(p => p.id === updated.productId);
+    const matchedProduct = updated.productId ? products.find(p => p.id === updated.productId) : undefined;
     setProductName(matchedProduct ? matchedProduct.name : '');
   };
 

@@ -596,6 +596,9 @@ export async function deliverGhlRow(params: {
       firstName: payloadString(row.payload, "firstName"),
       lastName: payloadString(row.payload, "lastName"),
       companyName: payloadString(row.payload, "companyName"),
+      // `profiles.phone`, already checked as E.164 by `contact.ts`. A blank
+      // or absent value comes back null and the client leaves it out.
+      phone: payloadString(row.payload, "phone"),
     });
     if (!upserted.ok) return { kind: "failed", failure: upserted };
     contactId = upserted.data.contactId;

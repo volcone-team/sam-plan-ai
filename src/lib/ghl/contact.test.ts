@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { resolveGhlOwnerContact } from "./contact";
+import { ghlPhoneOrNull, resolveGhlOwnerContact } from "./contact";
 
 /* ── Mocked Supabase ─────────────────────────────────────────────────────────
  * Records the filters as well as the rows, because "only the owner" is a
@@ -112,6 +112,8 @@ describe("resolveGhlOwnerContact — the owner, and only the owner", () => {
         lastName: "Owner",
         companyName: "Volcone Ltd",
         userId: "owner-1",
+        // The fixture owner has no phone.
+        phone: null,
       },
     });
   });
@@ -226,5 +228,75 @@ describe("resolveGhlOwnerContact — data gaps", () => {
       reason: "read_failed",
       message: "boom",
     });
+  });
+});
+
+describe("resolveGhlOwnerContact — phone", () => {
+  it("returns the owner's E.164 phone", async () => {
+    tables.profiles.rows = team().map((r) =>
+      r.role === "owner" ? { ...r, phone: " +447700900123 " } : { ...r, phone: "+15550000000" }
+    );
+    const result = await resolveGhlOwnerContact(makeDb(), COMPANY);
+    expect(result).toMatchObject({ ok: true, contact: { phone: "+447700900123" } });
+  });
+
+  it("drops a phone that is not E.164 rather than sending it", async () => {
+    tables.profiles.rows = team().map((r) =>
+      r.role === "owner" ? { ...r, phone: "07700 900123" } : r
+    );
+    const result = await resolveGhlOwnerContact(makeDb(), COMPANY);
+    expect(result).toMatchObject({ ok: true, contact: { phone: null } });
+  });
+
+  it("still resolves the owner when profiles.phone does not exist (035 unapplied)", async () => {
+    const selects: string[] = [];
+    const db = {
+      from(table: string) {
+        let columns = "";
+        const builder = {
+          select(cols: string) {
+            columns = cols;
+            if (table === "profiles") selects.push(cols);
+            return builder;
+          },
+          eq: () => builder,
+          maybeSingle() {
+            if (table === "companies") return Promise.resolve({ data: { name: "Volcone Ltd" }, error: null });
+            if (columns.includes("phone")) {
+              return Promise.resolve({
+                data: null,
+                error: { code: "42703", message: "column profiles.phone does not exist" },
+              });
+            }
+            return Promise.resolve({
+              data: { id: "owner-1", email: "owner@example.com", first_name: "Olive", last_name: "Owner" },
+              error: null,
+            });
+          },
+        };
+        return builder;
+      },
+    } as unknown as SupabaseClient;
+
+    const result = await resolveGhlOwnerContact(db, COMPANY);
+    expect(result).toMatchObject({
+      ok: true,
+      contact: { email: "owner@example.com", userId: "owner-1", phone: null },
+    });
+    expect(selects).toHaveLength(2);
+    expect(selects[1]).not.toContain("phone");
+  });
+});
+
+describe("ghlPhoneOrNull", () => {
+  it("accepts E.164 and trims it", () => {
+    expect(ghlPhoneOrNull("+15551234567")).toBe("+15551234567");
+    expect(ghlPhoneOrNull("  +447700900123 ")).toBe("+447700900123");
+  });
+
+  it("returns null for blank, malformed or non-string values", () => {
+    for (const value of [null, undefined, "", "   ", "5551234567", "+0123456789", "+1 555 123 4567", "+12", 15551234567]) {
+      expect(ghlPhoneOrNull(value)).toBeNull();
+    }
   });
 });

@@ -145,9 +145,10 @@ describe('buildRecurringState — recurring', () => {
     // Runs from 04-07 to 12-29: 39 of them at $1,000.
     expect(s.correction!.body).toContain('$39,000');
     const change = s.correction!.options.find((o) => o.action === 'change-frequency')!;
-    expect(change.newFrequency).toBe('monthly');
-    // Monthly from 03-03, from 04-03 to 12-03: 9 runs.
-    expect(change.planRevenueAfter).toBe(9000);
+    expect(change.newFrequency).toBe('bi-weekly');
+    // Every 2 weeks from 03-03, from 04-14 to 12-22: 19 runs.
+    expect(change.planRevenueAfter).toBe(19000);
+    expect(change.detail).toBe('Every 2 weeks instead of weekly. Plan goes to $19,000');
     expect(s.correction!.options.map((o) => o.action)).toEqual(['change-frequency', 'pause', 'retire', 'keep']);
   });
 
@@ -177,7 +178,7 @@ describe('buildRecurringState — recurring', () => {
     }
   });
 
-  it('a quarterly initiative offers no frequency change', () => {
+  it('a quarterly initiative offers every 6 months, counted from the real dates', () => {
     const s = buildRecurringState({
       row: weekly({ attrs: { repeat_frequency: 'quarterly' } }),
       planYear: 2026,
@@ -185,7 +186,11 @@ describe('buildRecurringState — recurring', () => {
       lastActualDate: null,
       today: '2026-12-20',
     });
-    expect(s.correction!.options.map((o) => o.action)).toEqual(['pause', 'retire', 'keep']);
+    expect(s.correction!.options.map((o) => o.action)).toEqual(['change-frequency', 'pause', 'retire', 'keep']);
+    const change = s.correction!.options[0];
+    expect(change.newFrequency).toBe('semi-annually');
+    // Every 6 months from 03-03 is 03-03 and 09-03: none left after 12-20.
+    expect(change.planRevenueAfter).toBe(0);
   });
 
   it('property: due prompts are always untouched placeholders already past their due Friday', () => {
@@ -289,17 +294,22 @@ describe('correctionUpdate', () => {
     const row = weekly({ attrs: { repeat_frequency: 'weekly', format: 'digital' } });
     expect(correctionUpdate('change-frequency', recurringScope(row), row, now)).toEqual({
       ok: true,
-      value: { repeat_frequency: 'monthly', attrs: { repeat_frequency: 'monthly', format: 'digital' } },
+      value: { repeat_frequency: 'bi-weekly', attrs: { repeat_frequency: 'bi-weekly', format: 'digital' } },
     });
     const colOnly = weekly({ repeatFrequency: 'monthly', attrs: {} });
     expect(correctionUpdate('change-frequency', recurringScope(colOnly), colOnly, now)).toEqual({
       ok: true,
-      value: { repeat_frequency: 'quarterly' },
+      value: { repeat_frequency: 'bi-monthly' },
+    });
+    const q = weekly({ repeatFrequency: 'quarterly', attrs: {} });
+    expect(correctionUpdate('change-frequency', recurringScope(q), q, now)).toEqual({
+      ok: true,
+      value: { repeat_frequency: 'semi-annually' },
     });
   });
 
-  it('change-frequency is refused for quarterly and for ongoing', () => {
-    const q = weekly({ attrs: { repeat_frequency: 'quarterly' } });
+  it('change-frequency is refused for annually and for ongoing', () => {
+    const q = weekly({ attrs: { repeat_frequency: 'annually' } });
     expect(correctionUpdate('change-frequency', recurringScope(q), q, now)).toMatchObject({ ok: false, status: 409 });
     const o = ongoing();
     expect(correctionUpdate('change-frequency', recurringScope(o), o, now)).toMatchObject({ ok: false, status: 409 });

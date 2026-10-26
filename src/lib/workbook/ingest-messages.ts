@@ -15,6 +15,12 @@ export const MIGRATION_040_WARNING =
   "Difficulty and speed were still derived from the scores and stored. Apply " +
   "supabase/migrations/040_library_scores_metrics.sql, then upload the workbook again.";
 
+export const MIGRATION_051_WARNING =
+  "Migration 051 is not applied, so the library was stored WITHOUT its Frequency and " +
+  "Allowed Frequencies cells, and the intake config cannot derive kinds or frequencies " +
+  "from them. Everything else ingested. Apply " +
+  "supabase/migrations/051_frequencies_and_workbook_kinds.sql, then upload the workbook again.";
+
 /**
  * One warning per initiative whose Metrics cell has tokens the dictionary
  * does not know, so the admin can fix the spelling or ask for a synonym.

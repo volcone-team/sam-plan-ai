@@ -1,6 +1,7 @@
 'use client';
 import { formatDate } from "@/lib/format-date";
 import { formatScheduleDate } from "@/lib/initiatives/schedule";
+import { toDateOnly, parseDateOnly } from "@/lib/plan-dates";
 
 import { useEffect, useState } from 'react';
 import { Calendar, Package, Tag, Clock, Zap, Pencil, Loader2 } from 'lucide-react';
@@ -45,12 +46,13 @@ const labelClass = 'text-sm font-medium text-[hsl(var(--foreground))]';
 const helperClass = 'text-xs text-[hsl(var(--foreground-muted))]';
 const fieldErrorClass = 'text-xs text-red-600 dark:text-red-400';
 
-/** Date → yyyy-mm-dd for <input type="date">, matching the stored (UTC) date value. */
+/**
+ * Date → yyyy-mm-dd for <input type="date">. Local calendar day, matching
+ * parseDateOnly on read; toISOString shifted it a day for users ahead of UTC.
+ */
 function toDateInputValue(date: Date | string | undefined | null): string {
   if (!date) return '';
-  const d = date instanceof Date ? date : new Date(date);
-  if (isNaN(d.getTime())) return '';
-  return d.toISOString().split('T')[0];
+  return toDateOnly(date);
 }
 
 function numberToInputValue(value: number | undefined | null): string {
@@ -137,7 +139,9 @@ export function InitiativeOverview({
     // Client-side validation
     const errors: { name?: string; activationDate?: string } = {};
     if (!name.trim()) errors.name = 'Name is required.';
-    if (!activationDate) errors.activationDate = 'Activation date is required.';
+    // Required once set. A new-intake row may be unscheduled (migration 045)
+    // and stays so until the user picks a date.
+    if (!activationDate && initiative.activationDate) errors.activationDate = 'Activation date is required.';
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
       setSaveError(null);
@@ -149,14 +153,33 @@ export function InitiativeOverview({
       return isNaN(parsed) ? 0 : parsed;
     };
 
+    /**
+     * Dates are sent only when edited. This input is day-precision, so an
+     * edited date is stored as 'day'; an untouched month-precision date is
+     * left alone rather than silently becoming the 1st of the month.
+     */
+    const activationChanged = activationDate !== toDateInputValue(initiative.activationDate);
+    const eventChanged = eventDate !== toDateInputValue(initiative.eventDate);
+
     const dto: UpdateInitiativeDTO = {
       name: name.trim(),
       description: description.trim(),
       status: statusValue,
-      initiativeTypeId,
-      productId,
-      activationDate: new Date(activationDate),
-      eventDate: eventDate ? new Date(eventDate) : null,
+      // "" = "Select a type..." / "Select a product...": no type change, no product.
+      ...(initiativeTypeId ? { initiativeTypeId } : {}),
+      productId: productId || null,
+      ...(activationChanged
+        ? {
+            activationDate: activationDate ? parseDateOnly(activationDate) : null,
+            ...(activationDate ? { activationDatePrecision: 'day' as const } : {}),
+          }
+        : {}),
+      ...(eventChanged
+        ? {
+            eventDate: eventDate ? parseDateOnly(eventDate) : null,
+            ...(eventDate ? { eventDatePrecision: 'day' as const } : {}),
+          }
+        : {}),
       trafficInput: trafficInput === '' ? undefined : toNumber(trafficInput),
       plannedBudget: toNumber(plannedBudget),
       revenueScenarios: {
@@ -293,7 +316,7 @@ export function InitiativeOverview({
                 onChange={e => setProductId(e.target.value)}
                 className={inputClass}
               >
-                <option value="">Select a product...</option>
+                <option value="">No product</option>
                 {products.map(product => (
                   <option key={product.id} value={product.id}>
                     {product.name}
@@ -456,7 +479,7 @@ export function InitiativeOverview({
                 Type
               </span>
               <span className="text-sm font-medium text-[hsl(var(--foreground))]">
-                {initiativeType?.name || 'Unknown'}
+                {initiativeType?.name || (initiative.initiativeTypeId ? 'Unknown' : 'None')}
               </span>
             </div>
 
@@ -478,7 +501,7 @@ export function InitiativeOverview({
                 Product
               </span>
               <span className="text-sm font-medium text-[hsl(var(--foreground))]">
-                {productName}
+                {productName || 'None'}
               </span>
             </div>
 

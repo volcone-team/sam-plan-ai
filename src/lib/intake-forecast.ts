@@ -253,7 +253,57 @@ export function forecastPerRun(funnel: InitiativeFunnel): number | null {
  * ------------------------------------------------------------------ */
 
 export type InitiativeCadence = "once" | "repeat" | "always-on";
-export type RepeatFrequency = "weekly" | "monthly" | "quarterly";
+/**
+ * How often a repeating initiative runs. Stored slugs, in canonical order
+ * (most often first). `lowerFrequency` in src/lib/initiatives/recurring.ts
+ * steps down this order. Re-exported by src/lib/intake-v3/library-config.ts
+ * as `RecurrenceFrequency`.
+ */
+export type RepeatFrequency =
+  | "weekly"
+  | "bi-weekly"
+  | "monthly"
+  | "bi-monthly"
+  | "quarterly"
+  | "semi-annually"
+  | "annually";
+
+export const REPEAT_FREQUENCIES: readonly RepeatFrequency[] = Object.freeze([
+  "weekly",
+  "bi-weekly",
+  "monthly",
+  "bi-monthly",
+  "quarterly",
+  "semi-annually",
+  "annually",
+]);
+
+/** Customer-facing labels, one per stored slug. */
+export const REPEAT_FREQUENCY_LABELS: Readonly<Record<RepeatFrequency, string>> = Object.freeze({
+  weekly: "Weekly",
+  "bi-weekly": "Every 2 weeks",
+  monthly: "Monthly",
+  "bi-monthly": "Every 2 months",
+  quarterly: "Quarterly",
+  "semi-annually": "Every 6 months",
+  annually: "Yearly",
+});
+
+/** Runs per year for each frequency. Forecast and correction math. */
+export const REPEAT_RUNS_PER_YEAR: Readonly<Record<RepeatFrequency, number>> = Object.freeze({
+  weekly: 52,
+  "bi-weekly": 26,
+  monthly: 12,
+  "bi-monthly": 6,
+  quarterly: 4,
+  "semi-annually": 2,
+  annually: 1,
+});
+
+/** True for one of the seven stored slugs. */
+export function isRepeatFrequency(v: unknown): v is RepeatFrequency {
+  return typeof v === "string" && (REPEAT_FREQUENCIES as readonly string[]).includes(v);
+}
 
 /**
  * How many times an initiative runs across the plan.
@@ -276,17 +326,13 @@ export function runsInPeriod(
     case "always-on":
       return months;
     case "repeat":
-      switch (frequency) {
-        case "weekly":
-          // 52 weeks over 12 months, scaled to the horizon and rounded down:
-          // a partial run produces no revenue.
-          return Math.floor((52 / 12) * months);
-        case "quarterly":
-          return Math.floor(months / 3);
-        case "monthly":
-        default:
-          return months;
+      // Runs per year scaled to the horizon and rounded down: a partial run
+      // produces no revenue. Integer arithmetic, so 4 × 12 / 12 is exactly 4.
+      // An unknown or missing frequency counts as monthly, as before.
+      if (frequency && isRepeatFrequency(frequency)) {
+        return Math.floor((REPEAT_RUNS_PER_YEAR[frequency] * months) / 12);
       }
+      return months;
   }
 }
 

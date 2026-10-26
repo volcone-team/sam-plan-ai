@@ -47,6 +47,17 @@ export interface LibraryRow {
    * Absent / null on a base listing.
    */
   baseKey?: string | null;
+  /**
+   * The "Frequency" cell verbatim (trimmed), e.g. "Once, Recurring". Which
+   * KINDS the initiative allows; parsed by parseWorkbookKinds
+   * (src/lib/intake-v3/workbook-kinds.ts). Null when the column or cell is blank.
+   */
+  allowedKindsRaw?: string | null;
+  /**
+   * The "Allowed Frequencies" cell verbatim (trimmed), e.g. "Monthly, Quarterly"
+   * or "n/a". Parsed by parseWorkbookFrequencies. Null when blank or absent.
+   */
+  allowedFrequenciesRaw?: string | null;
 }
 
 /**
@@ -256,7 +267,24 @@ export interface LibraryExtraColumns {
   easeScore: number;
   /** The sheet's own SCORE total — used only to cross-check the computed sum. */
   sheetScoreTotal: number;
+  /**
+   * "Frequency": which kinds (Once / Recurring / Evergreen) the initiative
+   * allows. Matched by FREQUENCY_HEADER, never by "Allowed Frequencies".
+   */
+  frequency: number;
+  /** "Allowed Frequencies" / "Allowed frequency": the repeat intervals. */
+  allowedFrequencies: number;
 }
+
+/**
+ * The two frequency headers, on the NORMALISED header. Anchored at the start
+ * so "Frequency" can never claim "Allowed Frequencies" (a plain substring or
+ * prefix match of "frequenc" would), and both accept singular and plural.
+ * Resolved BEFORE anything else, so the looser synonyms of the other fields
+ * cannot take these columns either.
+ */
+const ALLOWED_FREQUENCIES_HEADER = /^allowed frequenc(y|ies)\b/;
+const FREQUENCY_HEADER = /^frequenc(y|ies)\b/;
 
 export type ScoreField = 'speedScore' | 'costScore' | 'oddsScore' | 'revenueScore' | 'easeScore';
 export const SCORE_FIELDS: readonly ScoreField[] =
@@ -277,7 +305,10 @@ const SCORE_HEADER_PATTERNS: Record<ScoreField, RegExp> = {
   easeScore: /^\s*ease\s*\(\s*e\s*\)/i,
 };
 
-const LIBRARY_EXTRA_HEADERS: Record<Exclude<keyof LibraryExtraColumns, ScoreField>, readonly string[]> = {
+const LIBRARY_EXTRA_HEADERS: Record<
+  Exclude<keyof LibraryExtraColumns, ScoreField | 'frequency' | 'allowedFrequencies'>,
+  readonly string[]
+> = {
   training: ['training'],
   metrics: ['metrics'],
   idealIndustries: ['ideal industries'],
@@ -292,8 +323,13 @@ export function resolveLibraryExtraColumns(headers?: readonly string[]): Library
   const out: LibraryExtraColumns = {
     training: -1, metrics: -1, idealIndustries: -1, ctaOptions: -1,
     speedScore: -1, costScore: -1, oddsScore: -1, revenueScore: -1, easeScore: -1,
-    sheetScoreTotal: -1,
+    sheetScoreTotal: -1, frequency: -1, allowedFrequencies: -1,
   };
+  // Optional columns: a workbook without them leaves both at -1 (read as blank).
+  const allowed = normalized.findIndex((h) => ALLOWED_FREQUENCIES_HEADER.test(h));
+  if (allowed >= 0) { out.allowedFrequencies = allowed; taken.add(allowed); }
+  const kinds = normalized.findIndex((h, i) => !taken.has(i) && FREQUENCY_HEADER.test(h));
+  if (kinds >= 0) { out.frequency = kinds; taken.add(kinds); }
   for (const field of SCORE_FIELDS) {
     const found = raw.findIndex((h, i) => !taken.has(i) && SCORE_HEADER_PATTERNS[field].test(h));
     if (found >= 0) { out[field] = found; taken.add(found); }
@@ -322,6 +358,10 @@ export function resolveLibraryExtraColumns(headers?: readonly string[]): Library
  * Difficulty and Speed-to-results no longer exist, and their historical
  * positions (3, 4) now hold Training and Metrics; those fields resolve to -1
  * (read as blank) instead of reading the wrong column.
+ *
+ * The optional "Frequency" and "Allowed Frequencies" columns are located the
+ * same way, by header only, in resolveLibraryExtraColumns; they are reserved
+ * here like the other new-layout columns, so no older field can claim them.
  */
 export function resolveLibraryColumns(headers?: readonly string[]): LibraryColumns {
   const normalized = (headers ?? []).map(normalizeHeader);
@@ -761,6 +801,10 @@ function parseLibrarySheet(
         training: splitList(raw(row, extra.training)),
         // Verbatim: structuring the metrics is a separate step.
         metricsRaw: metrics.trim() === '' ? null : metrics,
+        // Verbatim but trimmed (newlines kept: they may separate items).
+        // Parsed later by src/lib/intake-v3/workbook-kinds.ts.
+        allowedKindsRaw: orNull(raw(row, extra.frequency).trim()),
+        allowedFrequenciesRaw: orNull(raw(row, extra.allowedFrequencies).trim()),
       },
     });
   }
@@ -778,7 +822,23 @@ function parseLibrarySheet(
     const baseKey = row.initiativeKey;
     const sig = `${baseKey}\u0000${rowSignature(row)}`;
     const existing = bySignature.get(sig);
-    if (existing !== undefined) { dupes++; keptIndexOf.push(existing); continue; }
+    if (existing !== undefined) {
+      dupes++;
+      keptIndexOf.push(existing);
+      // The frequency cells are deliberately NOT in the signature (adding them
+      // could split a collapsed pair into a new variant key). Say so when the
+      // dropped listing disagrees, rather than losing its value silently.
+      const first = kept[existing].row;
+      if ((first.allowedKindsRaw ?? null) !== (row.allowedKindsRaw ?? null) ||
+          (first.allowedFrequenciesRaw ?? null) !== (row.allowedFrequenciesRaw ?? null)) {
+        warnings.push(
+          `Initiative Library: "${row.name}" is listed twice with different Frequency / Allowed ` +
+          `Frequencies cells; the first listing's ("${first.allowedKindsRaw ?? ''}" / ` +
+          `"${first.allowedFrequenciesRaw ?? ''}") is kept.`
+        );
+      }
+      continue;
+    }
     bySignature.set(sig, kept.length);
     keptIndexOf.push(kept.length);
     kept.push({ row, baseKey });

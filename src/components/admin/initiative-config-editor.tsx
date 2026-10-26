@@ -871,10 +871,10 @@ function EditPanel({
         {messages('audienceSource')}
       </div>
 
-      {/* Allowed kinds */}
+      {/* Frequency (allowedKinds) */}
       <fieldset className="space-y-1.5">
         <legend className="flex w-full flex-wrap items-center justify-between gap-2 text-sm font-medium">
-          <span>Allowed kinds</span>
+          <span>Frequency</span>
           {meta('allowedKinds')}
         </legend>
         <div className="flex flex-wrap gap-x-5 gap-y-2">
@@ -940,10 +940,10 @@ function EditPanel({
         {messages('allowedPaths')}
       </fieldset>
 
-      {/* Allowed frequencies */}
+      {/* Allowed frequency (allowedFrequencies) */}
       <fieldset className="space-y-1.5" disabled={!canRecur}>
         <legend className="flex w-full flex-wrap items-center justify-between gap-2 text-sm font-medium">
-          <span>Allowed frequencies</span>
+          <span>Allowed frequency</span>
           {meta('allowedFrequencies')}
         </legend>
         <div className={cn('flex flex-wrap gap-x-5 gap-y-2', !canRecur && 'opacity-50')}>
@@ -962,9 +962,9 @@ function EditPanel({
         </div>
         <p className="text-xs text-[hsl(var(--foreground-muted))]">
           {!kindsDecided
-            ? 'Decide the allowed kinds first. Frequencies only apply to a recurring initiative.'
+            ? 'Decide the Frequency first. Allowed frequency only applies to a recurring initiative.'
             : !canRecur
-              ? 'This initiative cannot recur, so it is saved with no frequencies automatically.'
+              ? 'This initiative cannot recur, so it is saved with no allowed frequency automatically.'
               : 'Which repeat intervals the customer may choose.'}
         </p>
         {canRecur && (
@@ -995,8 +995,8 @@ function EditPanel({
         />
         <p id={`${id}-ongoing-hint`} className="text-xs text-[hsl(var(--foreground-muted))]">
           {canOngoing
-            ? `The word customers see for the ongoing kind, e.g. "Evergreen". Leave blank for "${DEFAULT_ONGOING_LABEL}". At most 60 characters.`
-            : 'Only used when Ongoing is an allowed kind.'}
+            ? `The word customers see for the Ongoing option, e.g. "Evergreen". Leave blank for "${DEFAULT_ONGOING_LABEL}". At most 60 characters.`
+            : 'Only used when Ongoing is ticked under Frequency.'}
         </p>
         {messages('ongoingLabel')}
       </div>

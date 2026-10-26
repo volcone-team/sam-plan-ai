@@ -477,6 +477,7 @@ export async function enqueueFounderEvent(
         firstName: owner.contact.firstName,
         lastName: owner.contact.lastName,
         companyName: owner.contact.companyName,
+        phone: owner.contact.phone,
       },
       /*
        * ALWAYS A KEY, AND NEVER THE STRIPE EVENT ID. The two Stripe producers

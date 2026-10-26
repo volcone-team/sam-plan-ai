@@ -108,7 +108,7 @@ export function InitiativeResults({ initiativeId }: InitiativeResultsProps) {
       try {
         const initiative = await initiativeService.getInitiative(initiativeId);
         let legacyKeys: string[] = [];
-        if (!initiative.metricSet) {
+        if (!initiative.metricSet && initiative.initiativeTypeId) {
           try {
             const initType = await initiativeTypeService.getInitiativeType(initiative.initiativeTypeId);
             legacyKeys = Object.keys(initType.benchmarks);

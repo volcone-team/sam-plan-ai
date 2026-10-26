@@ -1,6 +1,7 @@
 import type { SubscriptionStatus } from "@/lib/billing/entitlement";
 import {
   buyerTagTransition,
+  TAG_REGISTERED_NOT_PAID,
   type BuyerState,
   type BuyerTagError,
   type TagCycle,
@@ -268,10 +269,26 @@ export function decideBuyerStateTags(
     ok: true,
     outcome: "tags",
     add: transition.add,
-    remove: transition.remove,
+    remove: buyerStateRemovals(transition.state, transition.remove),
     state: transition.state,
     plan: transition.plan,
     cycle: transition.cycle,
     status: presence.status,
   };
+}
+
+/**
+ * The buyer-tag removals plus any non-buyer tag that a state transition ends.
+ *
+ * ENTERING ACTIVE ENDS "registered - not paid": the owner is now paying, so
+ * TAG_REGISTERED_NOT_PAID goes into the remove list. Entering INACTIVE does
+ * not touch it: a lapsed buyer has paid before, and the tag was already
+ * removed when they first became active.
+ *
+ * `past_due` maps to active (see buyerPresenceForStatus), so a customer in
+ * dunning also has it removed. They have paid at least once.
+ */
+export function buyerStateRemovals(state: BuyerState, buyerRemovals: string[]): string[] {
+  if (state !== "active") return buyerRemovals;
+  return [...buyerRemovals, TAG_REGISTERED_NOT_PAID];
 }

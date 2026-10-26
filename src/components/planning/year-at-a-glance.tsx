@@ -46,6 +46,9 @@ const CURRENT_YEAR = new Date().getFullYear();
 /** localStorage key for dismissing the page explainer. */
 const EXPLAINER_KEY = 'sam-yag-explainer-dismissed';
 
+/** Hidden at the client's request; set true to bring the button back. */
+const SHOW_CSV_EXPORT = false;
+
 interface MonthlyData {
   month: number;
   good: number;
@@ -655,13 +658,15 @@ export function YearAtAGlance() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={exportCsv}
-            className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--background-muted))] transition-colors"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Export CSV
-          </button>
+          {SHOW_CSV_EXPORT && (
+            <button
+              onClick={exportCsv}
+              className="inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm font-medium hover:bg-[hsl(var(--background-muted))] transition-colors"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Export CSV
+            </button>
+          )}
           <button
             onClick={() => { console.log("[YearAtAGlance] Enhance Plan clicked"); router.push("/enhance-plan"); }}
             /* Brand yellow #ffd748. Dark text, since white is unreadable on
