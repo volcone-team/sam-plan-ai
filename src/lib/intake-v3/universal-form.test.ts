@@ -788,6 +788,98 @@ describe("ongoing close date defaults to the plan-year end", () => {
   });
 });
 
+describe("workbook date flags: which of start / event date the form asks", () => {
+  const blank = { value: null, precision: "day" as const };
+  const day = (value: string) => ({ value, precision: "day" as const });
+  /** A filled one-time webinar draft (offer path, cart attached) for this config. */
+  const draftFor = (cfg: LibraryRecordConfig, dates: Partial<IntakeDraft["dates"]> = {}) => {
+    const d = filled(initialDraft(item("webinars"), cfg));
+    return { ...d, dates: { ...d.dates, ...dates } };
+  };
+  const roundTrips = (req: ReturnType<typeof buildCreateRequest>) => {
+    const parsed = parseCreateInitiativeRequest(JSON.parse(JSON.stringify(req)));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value).toEqual(req);
+  };
+
+  it("start No / event Yes: no start-date error, activation sent null, event still required", () => {
+    const cfg = config({ askStartDate: false, askEventDate: true });
+    const d = draftFor(cfg, { activation: blank });
+    expect(layoutFor(d, cfg).activationDate.state).toBe("absent");
+    expect(draftErrors(d, cfg)).toEqual({});
+    expect(draftErrors({ ...d, dates: { ...d.dates, event: blank } }, cfg)).toEqual({
+      "dates.event": "Enter the event date.",
+    });
+    const req = buildCreateRequest(d, cfg, PLAN);
+    expect(req).toMatchObject({
+      activationDate: null, activationDatePrecision: "day", eventDate: "2026-03-20", categoryId: "webinars",
+    });
+    roundTrips(req);
+  });
+
+  it("start hidden: a stale start date is neither checked against nor written", () => {
+    const cfg = config({ askStartDate: false, askEventDate: true });
+    // Typed while the field was visible: later than the event, the close and cart opens.
+    const d = draftFor(cfg, { activation: { value: "2026-05", precision: "month" } });
+    expect(draftErrors(d, cfg)).toEqual({});
+    const req = buildCreateRequest(d, cfg, PLAN);
+    expect(req.activationDate).toBeNull();
+    expect(req.activationDatePrecision).toBe("day");
+    roundTrips(req);
+  });
+
+  it("start Yes / event No: a one-time draft no longer needs an event date, and none is written", () => {
+    const cfg = config({ askStartDate: true, askEventDate: false });
+    const d = draftFor(cfg, { event: blank });
+    expect(layoutFor(d, cfg).eventDate.state).toBe("absent");
+    expect(draftErrors(d, cfg)).toEqual({});
+    const stale = draftFor(cfg, { event: day("2025-01-01") });
+    expect(draftErrors(stale, cfg)).toEqual({});
+    const req = buildCreateRequest(stale, cfg, PLAN);
+    expect(req).toMatchObject({ activationDate: "2026-03-01", eventDate: null, eventDatePrecision: "day" });
+    roundTrips(req);
+  });
+
+  it("start Yes / event Yes (and unset): unchanged, both required on a one-time draft", () => {
+    for (const cfg of [config({ askStartDate: true, askEventDate: true }), config()]) {
+      const d = draftFor(cfg, { activation: blank, event: blank });
+      expect(draftErrors(d, cfg)).toEqual({
+        "dates.activation": "Enter a start date.",
+        "dates.event": "Enter the event date.",
+      });
+      expect(buildCreateRequest(draftFor(cfg), cfg, PLAN)).toMatchObject({
+        activationDate: "2026-03-01", eventDate: "2026-03-20",
+      });
+    }
+  });
+
+  it("ongoing with no event date and start No: the start date is shown and required", () => {
+    const cfg = config({ ...WEBINAR, allowedKinds: ["ongoing"], askStartDate: false, askEventDate: false });
+    const d = draftFor(cfg, { activation: blank, event: blank });
+    const layout = layoutFor(d, cfg);
+    expect([layout.activationDate.state, layout.eventDate.state]).toEqual(["rendered", "absent"]);
+    expect(draftErrors(d, cfg)["dates.activation"]).toBe("Enter a start date.");
+    const ok = draftFor(cfg, { event: blank });
+    expect(draftErrors(ok, cfg)).toEqual({});
+    expect(buildCreateRequest(ok, cfg, PLAN)).toMatchObject({ activationDate: "2026-03-01", eventDate: null });
+  });
+
+  it("the ongoing close default still reads the (shown) start year, else the plan year", () => {
+    const cfg = config({ ...WEBINAR, allowedKinds: ["ongoing"], askStartDate: false });
+    const d = { ...initialDraft(item("webinars"), cfg), dates: { activation: day("2028-04-01"), event: blank, close: blank } };
+    expect(withOngoingCloseDefault(d, cfg, null).dates.close.value).toBe("2028-12-31");
+    expect(withOngoingCloseDefault(d, cfg, 2027).dates.close.value).toBe("2027-12-31");
+  });
+
+  it("start hidden skips cart-opens' start-date check, but not its close-date check", () => {
+    const cfg = config({ askStartDate: false });
+    const d = draftFor(cfg, { activation: day("2026-03-15") });
+    expect(draftErrors(d, cfg)).toEqual({});
+    const late = { ...d, cart: { opens: day("2026-04-15") } };
+    expect(draftErrors(late, cfg)).toEqual({ "cart.opens": "The cart can't open after it closes." });
+  });
+});
+
 describe("no-promotion marker", () => {
   it("stores attrs.no_promotion when the warning held, and not otherwise", () => {
     const d = filled(initialDraft(item("webinars"), config()));

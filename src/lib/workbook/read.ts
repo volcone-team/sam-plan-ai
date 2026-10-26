@@ -410,16 +410,11 @@ async function fetchBenchmarks(
   return out;
 }
 
-/** Selection guidance. Currently sparse in the workbook - only some rows are authored. */
-export async function loadAiContext(db: SupabaseClient): Promise<ContextEntry[]> {
-  const { data, error } = await db
-    .from("wb_ai_context")
-    .select("initiative_key, when_to_use, best_fit, min_budget, min_assets, why_it_works, what_to_avoid, sequencing_notes");
-  if (error) {
-    console.error("[workbook/read] loadAiContext failed:", error.message);
-    return [];
-  }
-  return (data || []).map((r) => ({
+const AI_CONTEXT_COLUMNS =
+  "initiative_key, when_to_use, best_fit, min_budget, min_assets, why_it_works, what_to_avoid, sequencing_notes";
+
+function toContextEntry(r: Record<string, unknown>): ContextEntry {
+  return {
     initiativeKey: r.initiative_key as string,
     whenToUse: (r.when_to_use as string) ?? null,
     bestFit: (r.best_fit as string) ?? null,
@@ -428,7 +423,72 @@ export async function loadAiContext(db: SupabaseClient): Promise<ContextEntry[]>
     whyItWorks: (r.why_it_works as string) ?? null,
     whatToAvoid: (r.what_to_avoid as string) ?? null,
     sequencingNotes: (r.sequencing_notes as string) ?? null,
-  }));
+  };
+}
+
+/** Selection guidance. Currently sparse in the workbook - only some rows are authored. */
+export async function loadAiContext(db: SupabaseClient): Promise<ContextEntry[]> {
+  const { data, error } = await db.from("wb_ai_context").select(AI_CONTEXT_COLUMNS);
+  if (error) {
+    console.error("[workbook/read] loadAiContext failed:", error.message);
+    return [];
+  }
+  return (data || []).map(toContextEntry);
+}
+
+/**
+ * The AI Context row for one library key, or null when none is authored.
+ * THROWS on a read error (unlike loadAiContext), so a caller can tell
+ * "nothing written for this initiative" from "the lookup failed".
+ */
+export async function loadAiContextForKey(db: SupabaseClient, initiativeKey: string): Promise<ContextEntry | null> {
+  const { data, error } = await db
+    .from("wb_ai_context")
+    .select(AI_CONTEXT_COLUMNS)
+    .eq("initiative_key", initiativeKey)
+    .maybeSingle();
+  if (error) throw new Error(`wb_ai_context lookup failed: ${error.message}`);
+  return data ? toContextEntry(data as Record<string, unknown>) : null;
+}
+
+/** The five S/C/O/R/E scores of one library row, as read (not validated). */
+export type LibraryScores = Pick<
+  LibraryEntry,
+  "speedScore" | "costScore" | "oddsScore" | "revenueScore" | "easeScore" | "scoreTotal"
+>;
+
+/**
+ * The SCORE columns of the wb_initiative_library row for one key, or null when
+ * there is no such row. A database without migration 040 has no score columns:
+ * that reads as null too (nothing to show), not as an error.
+ * THROWS on any other read error.
+ *
+ * Deliberately NOT filtered by initiative_settings: an initiative already in a
+ * plan keeps showing its scores even if an admin has since switched it off.
+ */
+export async function loadLibraryScoresForKey(
+  db: SupabaseClient,
+  initiativeKey: string
+): Promise<LibraryScores | null> {
+  const { data, error } = await db
+    .from("wb_initiative_library")
+    .select("speed_score, cost_score, odds_score, revenue_score, ease_score, score_total")
+    .eq("initiative_key", initiativeKey)
+    .maybeSingle();
+  if (error) {
+    if (isMissingColumnError(error)) return null;
+    throw new Error(`wb_initiative_library score lookup failed: ${error.message}`);
+  }
+  if (!data) return null;
+  const r = data as Record<string, unknown>;
+  return {
+    speedScore: numOrNull(r.speed_score),
+    costScore: numOrNull(r.cost_score),
+    oddsScore: numOrNull(r.odds_score),
+    revenueScore: numOrNull(r.revenue_score),
+    easeScore: numOrNull(r.ease_score),
+    scoreTotal: numOrNull(r.score_total),
+  };
 }
 
 /**

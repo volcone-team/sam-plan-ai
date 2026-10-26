@@ -4,6 +4,8 @@ import {
   MIGRATION_040_WARNING,
   MIGRATION_051_COLUMNS,
   MIGRATION_051_WARNING,
+  MIGRATION_054_COLUMNS,
+  MIGRATION_054_WARNING,
   nextLibraryColumnSet,
   shapeLibraryRow,
 } from "@/lib/workbook/ingest";
@@ -93,8 +95,8 @@ describe("ingestWorkbook — without migration 040", () => {
     for (const r of rows) expect(Object.keys(r).every((k) => PRE_040.includes(k))).toBe(true);
     // Derived before the fallback, so still stored.
     expect(rows.find((r) => r.initiative_key === "webinar")).toMatchObject({ difficulty: 2, speed_to_results: "Fast" });
-    // Rejected with 051, rejected again without it, then lands without 040 too.
-    expect(libraryInserts(db.calls)).toHaveLength(3);
+    // Rejected with 054, then without it (051), then without 051, then lands without 040 too.
+    expect(libraryInserts(db.calls)).toHaveLength(4);
     // The rest of the workbook still lands.
     expect(db.tables.wb_task_templates).toHaveLength(1);
     expect(db.tables.wb_benchmarks).toHaveLength(1);
@@ -162,7 +164,8 @@ describe("ingestWorkbook — migration 051", () => {
       expect(r).not.toHaveProperty("allowed_frequencies_raw");
     }
     expect(rows.find((r) => r.initiative_key === "webinar")).toMatchObject({ speed_score: 5 });
-    expect(libraryInserts(db.calls)).toHaveLength(2);
+    // Refused with 054, refused again with 051, then lands.
+    expect(libraryInserts(db.calls)).toHaveLength(3);
   });
 
   it("does not warn about 051 when the workbook has no frequency cells", async () => {
@@ -173,27 +176,99 @@ describe("ingestWorkbook — migration 051", () => {
   });
 });
 
+/* ── Migration 054: raw Start Date / Event Date cells ───────────────────── */
+
+const HEADERS_054 = [...HEADERS_051, "Start Date", "Event Date"];
+const SHEETS_054: RawSheet[] = [
+  {
+    ...SHEETS[0],
+    headers: HEADERS_054,
+    rows: [
+      [...libRow("IN01", "Live Webinar", "OPS", "5", "4"), "Once", "n/a", "No", "Yes"],
+      [...libRow("IN01", "Live Webinar", "OWN", "2", "1"), "Evergreen", "n/a", " Yes ", "No"],
+    ],
+  },
+  ...SHEETS.slice(1),
+];
+
+/** A database with 040 and 051 applied but not 054. */
+const PRE_054 = [...PRE_051, "allowed_kinds_raw", "allowed_frequencies_raw"];
+
+describe("ingestWorkbook — migration 054", () => {
+  it("writes the raw Start Date / Event Date cells when the columns exist", async () => {
+    const db = fakeSupabase();
+    const result = await ingestWorkbook(SHEETS_054, db.client);
+    expect(result.ok).toBe(true);
+    expect(result.warnings).not.toContain(MIGRATION_054_WARNING);
+    const rows = db.tables.wb_initiative_library;
+    expect(rows.find((r) => r.initiative_key === "webinar")).toMatchObject({
+      start_date_raw: "No", event_date_raw: "Yes",
+    });
+    expect(rows.find((r) => r.initiative_key === "webinar-own")).toMatchObject({
+      start_date_raw: "Yes", event_date_raw: "No",
+    });
+    expect(libraryInserts(db.calls)).toHaveLength(1);
+  });
+
+  it("before 054: retries without the two columns, keeps 051 and 040, and still succeeds", async () => {
+    const db = fakeSupabase({ schema: { wb_initiative_library: PRE_054 } });
+    const result = await ingestWorkbook(SHEETS_054, db.client);
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toContain(MIGRATION_054_WARNING);
+    expect(result.warnings).not.toContain(MIGRATION_051_WARNING);
+    expect(result.warnings).not.toContain(MIGRATION_040_WARNING);
+    const rows = db.tables.wb_initiative_library;
+    expect(rows).toHaveLength(2);
+    for (const r of rows) {
+      expect(r).not.toHaveProperty("start_date_raw");
+      expect(r).not.toHaveProperty("event_date_raw");
+    }
+    expect(rows.find((r) => r.initiative_key === "webinar")).toMatchObject({
+      speed_score: 5, allowed_kinds_raw: "Once",
+    });
+    expect(libraryInserts(db.calls)).toHaveLength(2);
+  });
+
+  it("does not warn about 054 when the workbook has no date cells", async () => {
+    const db = fakeSupabase({ schema: { wb_initiative_library: PRE_054 } });
+    const result = await ingestWorkbook(SHEETS_051, db.client);
+    expect(result.ok).toBe(true);
+    expect(result.warnings).not.toContain(MIGRATION_054_WARNING);
+  });
+});
+
 describe("nextLibraryColumnSet — the retry decision", () => {
   const missing = { code: "PGRST204", message: "Could not find the 'allowed_kinds_raw' column" };
   const undefinedColumn = { code: "42703", message: "column does not exist" };
+  const ALL = { m040: true, m051: true, m054: true };
 
-  it("drops 051 first, then 040, then gives up", () => {
-    expect(nextLibraryColumnSet({ m040: true, m051: true }, missing)).toEqual({ m040: true, m051: false });
-    expect(nextLibraryColumnSet({ m040: true, m051: false }, undefinedColumn)).toEqual({ m040: false, m051: false });
-    expect(nextLibraryColumnSet({ m040: false, m051: false }, missing)).toBeNull();
+  it("drops 054 first, then 051, then 040, then gives up", () => {
+    expect(nextLibraryColumnSet(ALL, missing)).toEqual({ m040: true, m051: true, m054: false });
+    expect(nextLibraryColumnSet({ m040: true, m051: true, m054: false }, missing))
+      .toEqual({ m040: true, m051: false, m054: false });
+    expect(nextLibraryColumnSet({ m040: true, m051: false, m054: false }, undefinedColumn))
+      .toEqual({ m040: false, m051: false, m054: false });
+    expect(nextLibraryColumnSet({ m040: false, m051: false, m054: false }, missing)).toBeNull();
   });
 
   it("never retries an error that is not a missing column", () => {
-    expect(nextLibraryColumnSet({ m040: true, m051: true }, { code: "23505", message: "duplicate key" })).toBeNull();
-    expect(nextLibraryColumnSet({ m040: true, m051: true }, null)).toBeNull();
+    expect(nextLibraryColumnSet(ALL, { code: "23505", message: "duplicate key" })).toBeNull();
+    expect(nextLibraryColumnSet(ALL, null)).toBeNull();
   });
 
   it("shapeLibraryRow strips exactly the dropped groups", () => {
-    const row = { initiative_key: "k", speed_score: 3, metrics: {}, allowed_kinds_raw: "Once", allowed_frequencies_raw: null };
-    expect(shapeLibraryRow(row, { m040: true, m051: true })).toEqual(row);
-    expect(Object.keys(shapeLibraryRow(row, { m040: true, m051: false }))).toEqual(["initiative_key", "speed_score", "metrics"]);
-    expect(Object.keys(shapeLibraryRow(row, { m040: false, m051: false }))).toEqual(["initiative_key"]);
+    const row = {
+      initiative_key: "k", speed_score: 3, metrics: {}, allowed_kinds_raw: "Once", allowed_frequencies_raw: null,
+      start_date_raw: "No", event_date_raw: "Yes",
+    };
+    expect(shapeLibraryRow(row, ALL)).toEqual(row);
+    expect(Object.keys(shapeLibraryRow(row, { m040: true, m051: true, m054: false })))
+      .toEqual(["initiative_key", "speed_score", "metrics", "allowed_kinds_raw", "allowed_frequencies_raw"]);
+    expect(Object.keys(shapeLibraryRow(row, { m040: true, m051: false, m054: false })))
+      .toEqual(["initiative_key", "speed_score", "metrics"]);
+    expect(Object.keys(shapeLibraryRow(row, { m040: false, m051: false, m054: false }))).toEqual(["initiative_key"]);
     expect(MIGRATION_051_COLUMNS).toEqual(["allowed_kinds_raw", "allowed_frequencies_raw"]);
+    expect(MIGRATION_054_COLUMNS).toEqual(["start_date_raw", "event_date_raw"]);
   });
 });
 

@@ -58,6 +58,14 @@ export interface LibraryRow {
    * or "n/a". Parsed by parseWorkbookFrequencies. Null when blank or absent.
    */
   allowedFrequenciesRaw?: string | null;
+  /**
+   * The "Start Date" cell verbatim (trimmed), "Yes" / "No": whether the New
+   * Initiative form asks for a start date. Parsed by parseWorkbookYesNo
+   * (src/lib/intake-v3/workbook-kinds.ts). Null when the column or cell is blank.
+   */
+  startDateRaw?: string | null;
+  /** The "Event Date" cell verbatim (trimmed), "Yes" / "No". Same rules as startDateRaw. */
+  eventDateRaw?: string | null;
 }
 
 /**
@@ -274,7 +282,20 @@ export interface LibraryExtraColumns {
   frequency: number;
   /** "Allowed Frequencies" / "Allowed frequency": the repeat intervals. */
   allowedFrequencies: number;
+  /** "Start Date" (Yes / No): whether the form asks for a start date. Exact header only. */
+  startDate: number;
+  /** "Event Date" (Yes / No): whether the form asks for an event date. Exact header only. */
+  eventDate: number;
 }
+
+/**
+ * The two date-flag headers, compared EXACTLY against the normalised header
+ * ("Start Date" -> "start date"). No prefix or substring matching, so no other
+ * column ("Start Date Notes", "Event Date Range") can be claimed, and resolved
+ * before the looser synonyms so nothing else can claim these.
+ */
+const START_DATE_HEADER = 'start date';
+const EVENT_DATE_HEADER = 'event date';
 
 /**
  * The two frequency headers, on the NORMALISED header. Anchored at the start
@@ -306,7 +327,7 @@ const SCORE_HEADER_PATTERNS: Record<ScoreField, RegExp> = {
 };
 
 const LIBRARY_EXTRA_HEADERS: Record<
-  Exclude<keyof LibraryExtraColumns, ScoreField | 'frequency' | 'allowedFrequencies'>,
+  Exclude<keyof LibraryExtraColumns, ScoreField | 'frequency' | 'allowedFrequencies' | 'startDate' | 'eventDate'>,
   readonly string[]
 > = {
   training: ['training'],
@@ -324,8 +345,13 @@ export function resolveLibraryExtraColumns(headers?: readonly string[]): Library
     training: -1, metrics: -1, idealIndustries: -1, ctaOptions: -1,
     speedScore: -1, costScore: -1, oddsScore: -1, revenueScore: -1, easeScore: -1,
     sheetScoreTotal: -1, frequency: -1, allowedFrequencies: -1,
+    startDate: -1, eventDate: -1,
   };
-  // Optional columns: a workbook without them leaves both at -1 (read as blank).
+  // Optional columns: a workbook without them leaves them at -1 (read as blank).
+  const start = normalized.indexOf(START_DATE_HEADER);
+  if (start >= 0) { out.startDate = start; taken.add(start); }
+  const event = normalized.indexOf(EVENT_DATE_HEADER);
+  if (event >= 0) { out.eventDate = event; taken.add(event); }
   const allowed = normalized.findIndex((h) => ALLOWED_FREQUENCIES_HEADER.test(h));
   if (allowed >= 0) { out.allowedFrequencies = allowed; taken.add(allowed); }
   const kinds = normalized.findIndex((h, i) => !taken.has(i) && FREQUENCY_HEADER.test(h));
@@ -805,6 +831,9 @@ function parseLibrarySheet(
         // Parsed later by src/lib/intake-v3/workbook-kinds.ts.
         allowedKindsRaw: orNull(raw(row, extra.frequency).trim()),
         allowedFrequenciesRaw: orNull(raw(row, extra.allowedFrequencies).trim()),
+        // Yes / No, parsed later by parseWorkbookYesNo.
+        startDateRaw: orNull(raw(row, extra.startDate).trim()),
+        eventDateRaw: orNull(raw(row, extra.eventDate).trim()),
       },
     });
   }
@@ -835,6 +864,14 @@ function parseLibrarySheet(
           `Initiative Library: "${row.name}" is listed twice with different Frequency / Allowed ` +
           `Frequencies cells; the first listing's ("${first.allowedKindsRaw ?? ''}" / ` +
           `"${first.allowedFrequenciesRaw ?? ''}") is kept.`
+        );
+      }
+      if ((first.startDateRaw ?? null) !== (row.startDateRaw ?? null) ||
+          (first.eventDateRaw ?? null) !== (row.eventDateRaw ?? null)) {
+        warnings.push(
+          `Initiative Library: "${row.name}" is listed twice with different Start Date / Event ` +
+          `Date cells; the first listing's ("${first.startDateRaw ?? ''}" / ` +
+          `"${first.eventDateRaw ?? ''}") is kept.`
         );
       }
       continue;

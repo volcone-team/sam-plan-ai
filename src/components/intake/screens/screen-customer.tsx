@@ -1,10 +1,13 @@
 "use client";
 
 import { DictationTextarea } from "@/components/ui/dictation-textarea";
+import { Input } from "@/components/ui/input";
 import {
+  CUSTOMER_INDUSTRIES_OTHER_MAX_LENGTH,
   CUSTOMER_INDUSTRY_OPTIONS,
   CUSTOMER_TYPE_OPTIONS,
   FIELD_COPY,
+  includesIndustryOther,
   showsCustomerIndustries,
 } from "@/lib/intake/schema";
 import type { FieldErrors, IntakeAnswers } from "@/lib/intake/validation";
@@ -64,10 +67,38 @@ export function ScreenCustomer({
             name="customer_industries"
             options={CUSTOMER_INDUSTRY_OPTIONS}
             value={toStringArray(answers.customer_industries)}
-            onChange={(value) => setAnswer("customer_industries", value)}
+            onChange={(value) => {
+              setAnswer("customer_industries", value);
+              // Deselecting Other drops its text, so no stale answer is saved.
+              if (!includesIndustryOther(value)) {
+                setAnswer("customer_industries_other", null);
+              }
+            }}
           />
         </Field>
       )}
+
+      {/*
+        Revealed by "Other". Optional and stored for data only; the
+        recommendations do not read it.
+      */}
+      {showsCustomerIndustries(sellsTo) &&
+        includesIndustryOther(answers.customer_industries) && (
+          <Field
+            htmlFor="customer_industries_other"
+            label={FIELD_COPY.customer_industries_other.label}
+            error={errors.customer_industries_other}
+          >
+            <Input
+              id="customer_industries_other"
+              value={asString(answers.customer_industries_other) ?? ""}
+              onChange={(e) => setAnswer("customer_industries_other", e.target.value)}
+              placeholder={FIELD_COPY.customer_industries_other.placeholder}
+              maxLength={CUSTOMER_INDUSTRIES_OTHER_MAX_LENGTH}
+              error={Boolean(errors.customer_industries_other)}
+            />
+          </Field>
+        )}
 
       <Field
         htmlFor="ideal_customer_description"

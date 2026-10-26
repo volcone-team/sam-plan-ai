@@ -525,16 +525,19 @@ export function IntakeForm({
         <h3 id={`${base}-dates`} className={SECTION_HEADING_CLASS}>
           Dates
         </h3>
-        <DateField
-          id={fieldDomId(base, 'dates.activation')}
-          label="Start date"
-          hint="When it starts producing."
-          date={draft.dates.activation}
-          onChange={d => setDate('activation', d)}
-          errorId={errorDomId(base, 'dates.activation')}
-          error={shown['dates.activation']}
-          required
-        />
+        {/* The workbook's Start Date / Event Date columns decide these two (resolveFormLayout). */}
+        {layout.activationDate.state === 'rendered' && (
+          <DateField
+            id={fieldDomId(base, 'dates.activation')}
+            label="Start date"
+            hint="When it starts producing."
+            date={draft.dates.activation}
+            onChange={d => setDate('activation', d)}
+            errorId={errorDomId(base, 'dates.activation')}
+            error={shown['dates.activation']}
+            required
+          />
+        )}
         {layout.eventDate.state === 'rendered' && (
           <DateField
             id={fieldDomId(base, 'dates.event')}

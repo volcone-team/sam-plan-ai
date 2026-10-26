@@ -1,5 +1,7 @@
 /**
- * Parsers for the workbook's two frequency cells on "1. Initiative Library".
+ * Parsers for the workbook's two frequency cells on "1. Initiative Library",
+ * and its two Yes / No date cells ("Start Date", "Event Date", migration 054;
+ * see parseWorkbookYesNo at the end).
  *
  *   "Frequency"           -> which KINDS an initiative allows
  *                            ("Once, Recurring", "Evergreen", "Limited series, Recurring")
@@ -154,4 +156,47 @@ export function parseWorkbookFrequencies(raw: string | null | undefined): Workbo
 /** Whether the raw Frequency cell mentions "evergreen" (for the ongoing label). */
 export function mentionsEvergreen(raw: string | null | undefined): boolean {
   return /evergreen/i.test(String(raw ?? ""));
+}
+
+/* ------------------------------------------------------------------ *
+ * "Start Date" / "Event Date": Yes / No
+ * ------------------------------------------------------------------ */
+
+export type WorkbookYesNoWarningCode =
+  /** A non-blank cell that is not yes / no. Read as unset (= ask). */
+  "unknown_yes_no";
+
+export interface WorkbookYesNoResult {
+  /** true = yes, false = no, null = blank or unreadable (nobody has said). */
+  value: boolean | null;
+  warnings: WorkbookParseWarning<WorkbookYesNoWarningCode>[];
+}
+
+const YES_TOKENS: ReadonlySet<string> = new Set(["yes", "y", "true", "1"]);
+const NO_TOKENS: ReadonlySet<string> = new Set(["no", "n", "false", "0"]);
+
+/**
+ * A Yes / No workbook cell. Case and surrounding space ignored.
+ *
+ *   yes / y / true / 1  -> true
+ *   no / n / false / 0  -> false
+ *   blank               -> null, no warning (the column may simply be absent)
+ *   anything else       -> null, with an `unknown_yes_no` warning
+ */
+export function parseWorkbookYesNo(raw: string | null | undefined): WorkbookYesNoResult {
+  const token = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (token === "") return { value: null, warnings: [] };
+  const key = token.toLowerCase();
+  if (YES_TOKENS.has(key)) return { value: true, warnings: [] };
+  if (NO_TOKENS.has(key)) return { value: false, warnings: [] };
+  return {
+    value: null,
+    warnings: [
+      {
+        code: "unknown_yes_no",
+        value: token,
+        message: `"${token}" is not Yes or No, so it was ignored (the date is asked).`,
+      },
+    ],
+  };
 }

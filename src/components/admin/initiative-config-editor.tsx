@@ -32,6 +32,7 @@ import {
   draftErrors,
   draftFromConfig,
   fieldLabel,
+  workbookFlagLine,
   filterRecords,
   groupProblems,
   needsHumanLines,
@@ -1072,6 +1073,19 @@ function EditPanel({
         meta={meta('fieldExtras')}
         messages={messages('fieldExtras')}
       />
+
+      {/* Read-only: the workbook's Start Date / Event Date columns decide these. */}
+      <div className="space-y-1">
+        <p className="text-sm font-medium">Dates the form asks for</p>
+        <ul className="space-y-0.5 text-sm">
+          <li>{workbookFlagLine('askStartDate', record.effective.askStartDate)}</li>
+          <li>{workbookFlagLine('askEventDate', record.effective.askEventDate)}</li>
+        </ul>
+        <p className="text-xs text-[hsl(var(--foreground-muted))]">
+          Set by the workbook&apos;s Start Date and Event Date columns. Change them there and
+          re-upload. An ongoing initiative with no event date always asks for a start date.
+        </p>
+      </div>
 
       {record.warnings.length > 0 && (
         <div className="rounded-[var(--radius-md)] border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/20 dark:text-amber-200">

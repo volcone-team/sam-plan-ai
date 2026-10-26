@@ -217,6 +217,13 @@ describe("option lists are well formed", () => {
     expect(MAX_OBSTACLES).toBe(3);
   });
 
+  // Display label renamed; the stored value must not change, or saved answers
+  // and the recommendation logic would stop matching.
+  it("labels speaking_stages as Speaking on Stages", () => {
+    const speaking = OTHER_AUDIENCE_OPTIONS.find((o) => o.value === "speaking_stages");
+    expect(speaking?.label).toBe("Speaking on Stages");
+  });
+
   it("offers five audience numbers", () => {
     expect(AUDIENCE_FIELDS).toHaveLength(5);
   });

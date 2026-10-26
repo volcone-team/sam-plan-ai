@@ -242,6 +242,20 @@ describe("mergeEffective", () => {
     expect(effective.formatOverride).toBeUndefined();
     expect(sources.formatOverride).toBe("saved");
   });
+
+  it("the workbook date flags always come from derived, saved row or not, and have no source entry", () => {
+    const flagged: StoredConfig = { ...derived, askStartDate: false, askEventDate: true };
+    for (const saved of [null, { initiativeKey: "k" }, { initiativeKey: "k", askStartDate: true } as StoredConfig]) {
+      const { effective, sources } = mergeEffective("k", saved, flagged);
+      expect(effective.askStartDate).toBe(false);
+      expect(effective.askEventDate).toBe(true);
+      expect(sources).not.toHaveProperty("askStartDate");
+    }
+    // Unset in derived stays unset (= ask).
+    const { effective } = mergeEffective("k", { initiativeKey: "k", askEventDate: false } as StoredConfig, derived);
+    expect(effective).not.toHaveProperty("askStartDate");
+    expect(effective).not.toHaveProperty("askEventDate");
+  });
 });
 
 describe("configStatus", () => {
@@ -273,6 +287,16 @@ describe("parseConfigPatch / applyPatch", () => {
     expect(parseConfigPatch({ allowedKinds: ["forever"] }).ok).toBe(false);
     expect(parseConfigPatch({ categoryId: "nope" }).ok).toBe(false);
     expect(parseConfigPatch({ revenueLines: [{ id: "x" }] }).ok).toBe(false);
+  });
+
+  it("refuses the workbook-only date flags: no admin input for them", () => {
+    expect(parseConfigPatch({ askStartDate: false })).toEqual({ ok: false, errors: ['Unknown field "askStartDate".'] });
+    expect(parseConfigPatch({ askEventDate: true }).ok).toBe(false);
+  });
+
+  it("configToRow never writes the date flags", () => {
+    const row = configToRow({ ...rowToConfig(fullRow()), askStartDate: false, askEventDate: false });
+    expect(Object.keys(row).some((k) => /date/i.test(k))).toBe(false);
   });
 
   it("keeps an extra's type, hint, binds and derives, and refuses bad ones", () => {
@@ -368,6 +392,18 @@ describe("toRecordConfig / pickerConfigs", () => {
 
   it("is null for an incomplete config", () => {
     expect(toRecordConfig(rowToConfig(fullRow({ allowed_kinds: null })))).toBeNull();
+  });
+
+  it("carries the date flags when set, and omits them when unset", () => {
+    const base = rowToConfig(fullRow());
+    expect(toRecordConfig({ ...base, askStartDate: false, askEventDate: true })).toMatchObject({
+      askStartDate: false, askEventDate: true,
+    });
+    const plain = toRecordConfig(base)!;
+    expect(plain).not.toHaveProperty("askStartDate");
+    expect(plain).not.toHaveProperty("askEventDate");
+    const out = pickerConfigs([{ initiativeKey: "speaking-gig", effective: { ...base, askEventDate: false } }], ["speaking-gig"]);
+    expect(out["speaking-gig"].askEventDate).toBe(false);
   });
 
   it("returns configs only for the offered keys", () => {
@@ -484,9 +520,62 @@ describe("loadLibraryConfigs", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.records).toHaveLength(3);
-    expect(selects).toHaveLength(2);
-    expect(selects[1]).not.toContain("allowed_kinds_raw");
+    // Everything, then without 054 (still has 051, refused again), then base.
+    expect(selects).toHaveLength(3);
+    expect(selects[1]).toContain("allowed_kinds_raw");
+    expect(selects[1]).not.toContain("start_date_raw");
+    expect(selects[2]).not.toContain("allowed_kinds_raw");
     expect(r.records.every((x) => x.effective.allowedKinds === undefined)).toBe(true);
+  });
+
+  it("before migration 054: re-selects without the date columns, keeps 051, and asks both dates", async () => {
+    Object.assign(tables.wb_initiative_library[1], { allowed_kinds_raw: "Once", allowed_frequencies_raw: "n/a" });
+    const base = makeDb();
+    const selects: string[] = [];
+    const db = {
+      from(table: string) {
+        const t = base.from(table);
+        if (table !== "wb_initiative_library") return t;
+        return {
+          ...t,
+          select(cols: string) {
+            selects.push(cols);
+            if (cols.includes("start_date_raw")) {
+              const failed = Promise.resolve({ data: null, error: { code: "PGRST204", message: "Could not find the 'start_date_raw' column" } });
+              const b = { order: () => b, eq: () => b, maybeSingle: () => failed, then: failed.then.bind(failed) };
+              return b;
+            }
+            return t.select(cols);
+          },
+        };
+      },
+    } as unknown as SupabaseClient;
+
+    const r = await loadLibraryConfigs(db);
+    if (!r.ok) throw new Error(r.error);
+    expect(selects).toHaveLength(2);
+    expect(selects[1]).toContain("allowed_kinds_raw");
+    expect(selects[1]).not.toContain("start_date_raw");
+    const webinar = r.records.find((x) => x.initiativeKey === "webinar")!;
+    expect(webinar.effective.allowedKinds).toEqual(["one-time"]);
+    expect(r.records.every((x) => x.effective.askStartDate === undefined && x.effective.askEventDate === undefined)).toBe(true);
+  });
+
+  it("carries the workbook date flags onto the effective config even under a saved row", async () => {
+    Object.assign(tables.wb_initiative_library[1], { start_date_raw: "No", event_date_raw: "Yes" });
+    tables.initiative_library_config.push({
+      ...fullRow({ initiative_key: "webinar", category_id: "webinars", audience_source: "own", allowed_paths: ["offer"], revenue_lines: [] }),
+    });
+    const r = await loadLibraryConfigs(makeDb());
+    if (!r.ok) throw new Error(r.error);
+    const webinar = r.records.find((x) => x.initiativeKey === "webinar")!;
+    expect(webinar.saved).not.toBeNull();
+    expect(webinar.saved).not.toHaveProperty("askStartDate");
+    expect(webinar.effective).toMatchObject({ askStartDate: false, askEventDate: true });
+    expect(webinar.validation).toEqual({ status: "valid" });
+    // And through to what the picker sends the form.
+    const configs = pickerConfigs(r.records, ["webinar"]);
+    expect(configs.webinar).toMatchObject({ askStartDate: false, askEventDate: true });
   });
 
   it("reports a read error instead of throwing", async () => {

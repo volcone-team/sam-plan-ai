@@ -12,6 +12,7 @@ import {
   DEFAULT_PLANNING_PERIOD,
   FIELD_COPY,
   PLANNING_PERIODS,
+  isPlanningPeriod,
   PRODUCTS_TOTAL_LABEL,
   SINGLE_TIER_COACHING_LINE,
 } from "@/lib/intake/schema";
@@ -47,7 +48,11 @@ export function ScreenProducts({
   rowErrors: Record<number, FieldErrors>;
   formError: string | null;
 }) {
-  const periodMonths = asNumber(answers.horizon_months) ?? DEFAULT_PLANNING_PERIOD;
+  // Mirrors `productScreenDefaults`: the shell stores 12 when no valid period
+  // is saved, so what is shown here and what is validated always agree.
+  const periodMonths = isPlanningPeriod(answers.horizon_months)
+    ? Number(answers.horizon_months)
+    : DEFAULT_PLANNING_PERIOD;
 
   const total = productsTotal(
     products.map((p) => ({

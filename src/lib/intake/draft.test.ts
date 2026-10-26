@@ -213,6 +213,51 @@ describe("serialiseAnswers", () => {
     );
     expect(row.industry_other).toBe("Marine logistics");
   });
+
+  it("keeps the customer-industry Other text only while Other is picked", () => {
+    const kept = serialiseAnswers(
+      draft({
+        answers: {
+          customer_industries: ["SaaS & Tech", "Other"],
+          customer_industries_other: "  Veterinary clinics ",
+        },
+      })
+    );
+    expect(kept.customer_industries_other).toBe("Veterinary clinics");
+
+    const stale = serialiseAnswers(
+      draft({
+        answers: {
+          customer_industries: ["SaaS & Tech"],
+          customer_industries_other: "Veterinary clinics",
+        },
+      })
+    );
+    expect(stale.customer_industries_other).toBeNull();
+  });
+
+  it("writes customer_industries_other on every save, as null when unset", () => {
+    const row = serialiseAnswers(draft());
+    expect(row).toHaveProperty("customer_industries_other", null);
+  });
+
+  it("caps the customer-industry Other text at 200 characters", () => {
+    const row = serialiseAnswers(
+      draft({ answers: { customer_industries: ["Other"], customer_industries_other: "x".repeat(250) } })
+    );
+    expect(row.customer_industries_other).toBe("x".repeat(200));
+  });
+
+  it("round-trips the customer-industry Other text", () => {
+    const row = serialiseAnswers(
+      draft({ answers: { customer_industries: ["Other"], customer_industries_other: "Vets" } })
+    );
+    expect(restoreDraft(row).answers.customer_industries_other).toBe("Vets");
+    // A row from before migration 053 has no such column at all.
+    const { customer_industries_other: _omit, ...pre053 } = row;
+    void _omit;
+    expect(restoreDraft(pre053).answers.customer_industries_other).toBeNull();
+  });
 });
 
 describe("audience figures and Not sure", () => {

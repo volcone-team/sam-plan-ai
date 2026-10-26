@@ -37,7 +37,8 @@ const tabs: TabConfig[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'revenue', label: 'Revenue & Financials' },
   { id: 'metrics', label: 'Conversion Metrics' },
-  { id: 'plan', label: 'Project Plan' },
+  // 'plan' (Project Plan) is hidden: its progress summary now sits at the top
+  // of the Tasks tab. To restore it, add back { id: 'plan', label: 'Project Plan' }.
   { id: 'tasks', label: 'Tasks' },
   { id: 'results', label: 'Results' },
 ];
@@ -241,7 +242,11 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
               products={products}
               onSaved={handleSaved}
             />
-            <InitiativeWhy initiativeType={initiativeType} />
+            <InitiativeWhy
+              initiativeId={initiative.id}
+              libraryKey={initiative.libraryKey}
+              initiativeType={initiativeType}
+            />
           </div>
         )}
 

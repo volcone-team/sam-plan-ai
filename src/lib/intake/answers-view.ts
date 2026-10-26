@@ -15,7 +15,7 @@
  * UNANSWERED VERSUS NOT SHOWN. A field the user was shown but left blank comes
  * back with `value: null`, which the UI renders as "Not answered", so the user
  * sees the whole questionnaire. A field their answers never revealed (the
- * "Other" industry text, customer industries for consumer-only sellers, the
+ * "Other" industry texts, customer industries for consumer-only sellers, the
  * repeat frequency on a one-off, the funnel when they have not run it before,
  * the billing interval on a non-recurring product) is left out, mirroring the
  * screens' own conditions.
@@ -55,10 +55,17 @@ import {
   SCREEN_COPY,
   SOMETHING_ELSE_KEY,
   WHO_CLOSES_OPTIONS,
+  includesIndustryOther,
   showsCustomerIndustries,
   unitsGoalLabel,
   type Option,
 } from "@/lib/intake/schema";
+
+/**
+ * The screen asks "Which industry?" right under the pills; read on its own in
+ * this view that would be ambiguous, so it is named in full here.
+ */
+export const OTHER_CUSTOMER_INDUSTRY_LABEL = "Other customer industry";
 
 /* ------------------------------------------------------------------ *
  * Output shape
@@ -274,6 +281,10 @@ const BUILDERS: Record<ScreenId, (ctx: Context) => AnswerItem[]> = {
           options(CUSTOMER_INDUSTRY_OPTIONS, answers.customer_industries)
         )
       );
+      // Revealed by "Other" among the customer industries only.
+      if (includesIndustryOther(answers.customer_industries)) {
+        items.push(field(OTHER_CUSTOMER_INDUSTRY_LABEL, text(answers.customer_industries_other)));
+      }
     }
     items.push(
       // Stored as `ideal_customer_description`; the copy is keyed `ideal_customer`.

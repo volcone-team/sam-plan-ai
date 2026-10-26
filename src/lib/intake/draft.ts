@@ -28,7 +28,12 @@
 import type { ScreenId, PlanPath } from "@/lib/intake/flow";
 import { resolveResumeScreen } from "@/lib/intake/flow";
 import { toNumberOrNull, toTextOrNull, type IntakeAnswers } from "@/lib/intake/validation";
-import { AUDIENCE_FIELDS, INDUSTRY_OTHER } from "@/lib/intake/schema";
+import {
+  AUDIENCE_FIELDS,
+  CUSTOMER_INDUSTRIES_OTHER_MAX_LENGTH,
+  INDUSTRY_OTHER,
+  includesIndustryOther,
+} from "@/lib/intake/schema";
 
 /** The intake version this module writes. Lets the generator read v2 answers. */
 export const INTAKE_VERSION = 2;
@@ -103,6 +108,9 @@ const TEXT_COLUMNS = [
   "what_worked_notes",
   "what_failed_notes",
   "sells_to",
+  // Migration 053. Until it is applied the draft route retries without it
+  // (see draft-columns.ts).
+  "customer_industries_other",
   "problem_solved",
   "ideal_customer_description",
   "challenge_notes",
@@ -193,6 +201,17 @@ export function serialiseAnswers(draft: IntakeDraft): PlanningInputRow {
   // that the generator might read.
   if (row.industry !== INDUSTRY_OTHER) {
     row.industry_other = null;
+  }
+
+  // Same rule for the customer industries: the text only means something
+  // while "Other" is among the picks. Capped server-side as well as in the
+  // input, since the body is untrusted.
+  if (!includesIndustryOther(row.customer_industries)) {
+    row.customer_industries_other = null;
+  } else if (typeof row.customer_industries_other === "string") {
+    row.customer_industries_other = row.customer_industries_other
+      .slice(0, CUSTOMER_INDUSTRIES_OTHER_MAX_LENGTH)
+      .trim();
   }
 
   // Audience figures with their "Not sure" flags.

@@ -13,6 +13,7 @@ import {
   type IntakeAnswers,
   type ProductRow,
   type InitiativeRow,
+  DEFAULTED_REQUIRED_FIELDS,
 } from "./validation";
 import { screensFor } from "./flow";
 import { REQUIRED_FIELDS, MAX_OBSTACLES, SOMETHING_ELSE_KEY } from "./schema";
@@ -142,7 +143,10 @@ describe("only required fields block", () => {
   for (const screen of screensFor("know_most")) {
     it(`${screen}: an empty screen errors on exactly its required fields`, () => {
       const res = validateScreen({ screen, answers: {} });
-      const required = [...REQUIRED_FIELDS[screen]].sort();
+      // Fields with a shown default (screen 3's period) never block when empty.
+      const required = REQUIRED_FIELDS[screen]
+        .filter((field) => !DEFAULTED_REQUIRED_FIELDS.includes(field))
+        .sort();
       const errored = Object.keys(res.errors).sort();
       expect(errored).toEqual(required);
     });
@@ -281,6 +285,21 @@ describe("products screen", () => {
   it("rejects a horizon the column would reject too", () => {
     const res = validateProducts({ ...periods, horizon_months: 24 }, [product], today);
     expect(res.errors.horizon_months).toBeDefined();
+  });
+
+  // The pills show 12 as selected when nothing is saved, so a missing period
+  // is the default, not a skipped required answer.
+  it("does not block on a missing horizon", () => {
+    for (const horizon of [undefined, null, ""]) {
+      const res = validateProducts({ ...periods, horizon_months: horizon }, [product], today);
+      expect(res.errors.horizon_months).toBeUndefined();
+      expect(res.valid).toBe(true);
+    }
+  });
+
+  it("still blocks on a missing start month", () => {
+    const res = validateProducts({ horizon_months: 12 }, [product], today);
+    expect(res.errors.plan_start_month).toBeDefined();
   });
 
   /**
@@ -620,6 +639,28 @@ describe("customer screen", () => {
    */
   it("does not require customer industries even when revealed", () => {
     expect(validateScreen({ screen: "customer", answers: complete }).valid).toBe(true);
+  });
+
+  it("does not require the Other customer industry text", () => {
+    const res = validateScreen({
+      screen: "customer",
+      answers: { ...complete, customer_industries: ["Other"] },
+    });
+    expect(res.valid).toBe(true);
+  });
+
+  it("caps the Other customer industry text at 200 characters", () => {
+    const at = { ...complete, customer_industries: ["Other"], customer_industries_other: "x".repeat(200) };
+    expect(validateScreen({ screen: "customer", answers: at }).valid).toBe(true);
+
+    const over = { ...at, customer_industries_other: "x".repeat(201) };
+    const res = validateScreen({ screen: "customer", answers: over });
+    expect(res.errors.customer_industries_other).toBeDefined();
+    expect(res.valid).toBe(false);
+
+    // Ignored once Other is deselected: it is cleared on save anyway.
+    const hidden = { ...over, customer_industries: ["Retail"] };
+    expect(validateScreen({ screen: "customer", answers: hidden }).valid).toBe(true);
   });
 });
 

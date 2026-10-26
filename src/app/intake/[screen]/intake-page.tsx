@@ -23,6 +23,7 @@ import {
   type ValidationResult,
 } from "@/lib/intake/validation";
 import { MIN_PRODUCTS, MIN_PLANNED_INITIATIVES } from "@/lib/intake/schema";
+import { productScreenDefaults } from "@/lib/intake/defaults";
 import { pathSelected, trackIntakeEvent } from "@/lib/intake/events";
 import type { PlanPath } from "@/lib/intake/flow";
 
@@ -116,6 +117,20 @@ export function IntakePage({ screen }: { screen: ScreenId }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.loading, screen, state.products.length, state.initiatives.length]);
+
+  /**
+   * Screen 3 shows 12 months as selected when no period is saved, so that
+   * default has to be the stored answer too — otherwise Continue is blocked by
+   * "Choose how far ahead to plan." while 12 looks chosen. Waits for the load
+   * so it cannot race a saved 3/6/18, and the helper returns an empty patch
+   * once a valid period is set, so this runs at most once per visit.
+   */
+  React.useEffect(() => {
+    if (draft.loading || screen !== "products") return;
+    const patch = productScreenDefaults(state.answers);
+    if (Object.keys(patch).length > 0) draft.setAnswers(patch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.loading, screen, state.answers.horizon_months]);
 
   const validate = React.useCallback(() => {
     const next = validateScreen({

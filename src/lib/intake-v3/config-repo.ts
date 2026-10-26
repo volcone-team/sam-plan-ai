@@ -61,6 +61,7 @@ import {
 } from "./library-config";
 import {
   CONFIG_FIELDS,
+  WORKBOOK_FLAG_FIELDS,
   deriveConfig,
   type ConfigField,
   type DeriveWarning,
@@ -103,35 +104,65 @@ const LIBRARY_COLUMNS_BASE = "initiative_key, workbook_id, name, category, own_o
 /** The raw workbook Frequency / Allowed Frequencies cells. Exist only once 051 is applied. */
 const LIBRARY_COLUMNS_051 = "allowed_kinds_raw, allowed_frequencies_raw";
 
-const LIBRARY_COLUMNS = `${LIBRARY_COLUMNS_BASE}, ${LIBRARY_COLUMNS_051}`;
+/** The raw workbook Start Date / Event Date cells. Exist only once 054 is applied. */
+const LIBRARY_COLUMNS_054 = "start_date_raw, event_date_raw";
+
+const LIBRARY_COLUMNS_PRE_054 = `${LIBRARY_COLUMNS_BASE}, ${LIBRARY_COLUMNS_051}`;
+
+const LIBRARY_COLUMNS = `${LIBRARY_COLUMNS_PRE_054}, ${LIBRARY_COLUMNS_054}`;
+
+/**
+ * The column lists to try, newest migration dropped first: everything, then
+ * without 054, then without 051 too. Same order as ingest's
+ * nextLibraryColumnSet.
+ */
+export const LIBRARY_COLUMN_FALLBACKS: readonly string[] = Object.freeze([
+  LIBRARY_COLUMNS,
+  LIBRARY_COLUMNS_PRE_054,
+  LIBRARY_COLUMNS_BASE,
+]);
 
 type SelectResult = { data: unknown; error: { code?: string | null; message?: string | null } | null };
 
+let warned054 = false;
 let warned051 = false;
 
+function warnFallback(dropped: string): void {
+  if (dropped === LIBRARY_COLUMNS_054 && !warned054) {
+    warned054 = true;
+    console.warn(
+      "[intake-v3/config-repo] migration 054 columns missing on wb_initiative_library; " +
+      "every record asks for both dates until it is applied."
+    );
+  } else if (dropped === LIBRARY_COLUMNS_051 && !warned051) {
+    warned051 = true;
+    console.warn(
+      "[intake-v3/config-repo] migration 051 columns missing on wb_initiative_library; " +
+      "kinds and frequencies are not derived from the workbook until it is applied."
+    );
+  }
+}
+
 /**
- * Run a wb_initiative_library select with the 051 columns, and again without
- * them if the database does not have them yet. Migrations are applied by hand,
- * so the admin page and the intake picker must keep working before 051: the
- * record then simply derives no kinds / frequencies (the raw cells read as
- * blank). Any other error is returned as is.
+ * Run a wb_initiative_library select with the 051 and 054 columns, and again
+ * with fewer (054 dropped first, then 051) while the database refuses a
+ * missing column. Migrations are applied by hand, so the admin page and the
+ * intake picker must keep working before either: the record then simply
+ * derives no kinds / frequencies, or no date flags (the raw cells read as
+ * blank, and a blank date flag means "ask"). Any other error is returned as is.
  */
 function selectLibrary(run: (columns: string) => PromiseLike<SelectResult>): Promise<SelectResult> {
   // NOT async: the first `run` must throw synchronously, as the bare query
   // did, so a throwing client inside Promise.all is caught by the caller's
   // try/catch instead of becoming an unhandled rejection.
-  const first = run(LIBRARY_COLUMNS);
-  return Promise.resolve(first).then((res) => {
+  const first = run(LIBRARY_COLUMN_FALLBACKS[0]);
+  const retry = (res: SelectResult, step: number): PromiseLike<SelectResult> | SelectResult => {
     if (!res.error || !isMissingColumnError(res.error)) return res;
-    if (!warned051) {
-      warned051 = true;
-      console.warn(
-        "[intake-v3/config-repo] migration 051 columns missing on wb_initiative_library; " +
-        "kinds and frequencies are not derived from the workbook until it is applied."
-      );
-    }
-    return run(LIBRARY_COLUMNS_BASE);
-  });
+    if (step + 1 >= LIBRARY_COLUMN_FALLBACKS.length) return res;
+    warnFallback(step === 0 ? LIBRARY_COLUMNS_054 : LIBRARY_COLUMNS_051);
+    return Promise.resolve(run(LIBRARY_COLUMN_FALLBACKS[step + 1])).then((next) => retry(next, step + 1));
+  };
+  return Promise.resolve(first).then((res) => retry(res, 0));
 }
 
 /** The config as stored, camelCase. Same shape as DerivedConfig: every field optional. */
@@ -312,6 +343,12 @@ export function mergeEffective(
       sources[f] = "unset";
     }
   }
+  // The workbook-only date flags: ALWAYS the derived value, saved row or not.
+  // There is no column to save them in, so a saved config never carries them.
+  for (const f of WORKBOOK_FLAG_FIELDS) {
+    const v = derived[f];
+    if (typeof v === "boolean") effective[f] = v;
+  }
   return { effective: effective as StoredConfig, sources };
 }
 
@@ -349,6 +386,9 @@ export function toRecordConfig(config: StoredConfig): LibraryRecordConfig | null
     ...(config.ongoingLabel !== undefined ? { ongoingLabel: config.ongoingLabel } : {}),
     ...(config.formatOverride !== undefined ? { formatOverride: config.formatOverride } : {}),
     ...(config.partnerBlock !== undefined ? { partnerBlock: config.partnerBlock } : {}),
+    // Workbook-only; unset means "ask" (see resolveFormLayout).
+    ...(typeof config.askStartDate === "boolean" ? { askStartDate: config.askStartDate } : {}),
+    ...(typeof config.askEventDate === "boolean" ? { askEventDate: config.askEventDate } : {}),
   };
 }
 
@@ -630,6 +670,9 @@ interface LibraryRow {
   /** Migration 051; absent when the select fell back to the pre-051 columns. */
   allowed_kinds_raw?: string | null;
   allowed_frequencies_raw?: string | null;
+  /** Migration 054; absent when the select fell back to the pre-054 columns. */
+  start_date_raw?: string | null;
+  event_date_raw?: string | null;
 }
 
 interface SettingsRow {
@@ -650,6 +693,8 @@ function deriveFor(row: LibraryRow) {
     cta_options: row.cta_options,
     allowed_kinds_raw: row.allowed_kinds_raw ?? null,
     allowed_frequencies_raw: row.allowed_frequencies_raw ?? null,
+    start_date_raw: row.start_date_raw ?? null,
+    event_date_raw: row.event_date_raw ?? null,
   });
 }
 

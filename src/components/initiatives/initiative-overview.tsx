@@ -209,14 +209,20 @@ export function InitiativeOverview({
           Overview
         </h2>
         {canEdit && !editing && (
-          <button
-            type="button"
-            onClick={handleEdit}
-            className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-border bg-card px-3 py-1.5 text-sm font-medium text-[hsl(var(--foreground))] transition-colors hover:border-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            Edit
-          </button>
+          <div className="flex items-center gap-3">
+            <p id="overview-edit-hint" className="hidden text-sm text-[hsl(var(--foreground-muted))] sm:block">
+              Click edit to edit the goals and details of your initiative.
+            </p>
+            <button
+              type="button"
+              onClick={handleEdit}
+              aria-describedby="overview-edit-hint"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] border border-border bg-card px-3 py-1.5 text-sm font-medium text-[hsl(var(--foreground))] transition-colors hover:border-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </button>
+          </div>
         )}
       </div>
 

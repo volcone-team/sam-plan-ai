@@ -976,6 +976,23 @@ export interface LibraryRecordConfig {
    * `recurring` is an allowed kind; validation refuses it otherwise.
    */
   allowedFrequencies: readonly RecurrenceFrequency[];
+  /**
+   * Does the form ask for a start date? From the workbook's "Start Date"
+   * column (Yes / No) ONLY — there is no admin input and no
+   * initiative_library_config column for it (see deriveConfig).
+   *
+   * ABSENT MEANS ASK, today's behaviour: a blank or unreadable cell, a
+   * database without migration 054, or a workbook without the column. Only an
+   * explicit `false` hides the field, and even then resolveFormLayout keeps it
+   * for an ongoing run with no event date (it needs a launch date).
+   */
+  askStartDate?: boolean;
+  /**
+   * Does the form ask for an event date? From the workbook's "Event Date"
+   * column, with the same rules as askStartDate. `false` makes the event date
+   * absent whatever the kind.
+   */
+  askEventDate?: boolean;
 }
 
 /**
@@ -1186,8 +1203,19 @@ export interface FormLayout {
   /** The options for the conversion-path question, after the two spec rules. */
   availablePaths: readonly ConversionPath[];
   frequency: SettingState<RecurrenceFrequency>;
-  /** Absent on an `ongoing` record: there is no event. */
+  /**
+   * Absent on an `ongoing` record (there is no event), and wherever the
+   * workbook says the record does not ask for one (askEventDate === false).
+   */
   eventDate: SettingState<never>;
+  /**
+   * The start date (activation_date). Rendered unless the workbook says the
+   * record does not ask for one (askStartDate === false) — except that an
+   * ongoing run with no event date keeps it, because it needs a launch date.
+   * Absent means: no "Enter a start date" error, no "before the start date"
+   * checks, and activation_date written as null.
+   */
+  activationDate: SettingState<never>;
   /**
    * The close-date field. ALWAYS PRESENT — only its wording and whether it
    * is required change (CLOSE_DATE_COPY[variant]).
@@ -1453,9 +1481,23 @@ export function resolveFormLayout(args: {
   // ONGOING MEANS NO EVENT. The field does not render and Timing goes with it:
   // there is no "when in the year" for something that runs permanently. Both
   // are `absent`, not `suppressed` — there is no date to invent.
+  //
+  // THE WORKBOOK'S "Event Date" / "Start Date" COLUMNS say which of the two
+  // dates the record asks for. Only an explicit `false` removes a field; an
+  // unset flag asks, as before the columns existed.
   const eventDate: SettingState<never> = isOngoing
     ? { state: "absent", reason: "An ongoing initiative has no event date." }
-    : { state: "rendered" };
+    : config.askEventDate === false
+      ? { state: "absent", reason: "The workbook says this initiative does not ask for an event date." }
+      : { state: "rendered" };
+  // An ongoing run with no event date would be left with no date to launch
+  // on, so it keeps the start date whatever the workbook says.
+  const activationDate: SettingState<never> =
+    config.askStartDate !== false
+      ? { state: "rendered" }
+      : isOngoing && eventDate.state !== "rendered"
+        ? { state: "rendered" }
+        : { state: "absent", reason: "The workbook says this initiative does not ask for a start date." };
 
   /* ---- Sections ------------------------------------------------ */
   const slots: SlotPlan[] = FORM_SLOT_ORDER.map((id) => {
@@ -1593,6 +1635,7 @@ export function resolveFormLayout(args: {
     availablePaths,
     frequency,
     eventDate,
+    activationDate,
     closeDate: { rendered: true, variant: closeVariant, label: closeCopy.label, required: closeCopy.required },
     ongoingLabel: config.ongoingLabel?.trim() || DEFAULT_ONGOING_LABEL,
     blocks,

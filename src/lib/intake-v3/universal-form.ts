@@ -323,6 +323,9 @@ type ReadDate =
   /** `stored` is what is written: the day, or the 1st of the month. */
   | { status: "ok"; stored: string; month: string; precision: DatePrecision };
 
+/** How a date the layout does not ask for reads. */
+const EMPTY_READ: ReadDate = Object.freeze({ status: "empty" }) as ReadDate;
+
 function realDay(v: string): boolean {
   const d = new Date(`${v}T00:00:00Z`);
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
@@ -405,6 +408,15 @@ export function ongoingCloseDefault(planYear: number | null | undefined, activat
   return a.status === "ok" ? `${a.stored.slice(0, 4)}-12-31` : null;
 }
 
+/**
+ * The start date as the layout lets it be read: the draft's, or blank when the
+ * record does not ask for one (so a hidden, stale value never sets a year).
+ * ongoingCloseDefault then falls back to the plan year alone.
+ */
+function askedActivation(draft: IntakeDraft, config: LibraryRecordConfig): DraftDate {
+  return layoutFor(draft, config).activationDate.state === "rendered" ? draft.dates.activation : emptyDate();
+}
+
 /** Fill a blank close date with the plan-year end while the draft is ongoing. */
 export function withOngoingCloseDefault(
   draft: IntakeDraft,
@@ -413,7 +425,7 @@ export function withOngoingCloseDefault(
 ): IntakeDraft {
   if (layoutFor(draft, config).effectiveKind !== "ongoing") return draft;
   if (readDate(draft.dates.close).status !== "empty") return draft;
-  const value = ongoingCloseDefault(planYear, draft.dates.activation);
+  const value = ongoingCloseDefault(planYear, askedActivation(draft, config));
   return value ? { ...draft, dates: { ...draft.dates, close: { value, precision: "day" } } } : draft;
 }
 
@@ -432,7 +444,7 @@ export function setDraftKind(
   let next: IntakeDraft = { ...draft, kind };
   const isOngoing = layoutFor(next, config).effectiveKind === "ongoing";
   if (wasOngoing && !isOngoing) {
-    const fallback = ongoingCloseDefault(planYear, draft.dates.activation);
+    const fallback = ongoingCloseDefault(planYear, askedActivation(draft, config));
     const close = draft.dates.close;
     if (fallback && close.precision === "day" && close.value?.trim() === fallback) {
       next = { ...next, dates: { ...next.dates, close: emptyDate() } };
@@ -756,12 +768,18 @@ export function draftErrors(draft: IntakeDraft, config: LibraryRecordConfig): Dr
     else if (!config.allowedFrequencies.includes(draft.frequency)) errors.frequency = "That frequency is not available.";
   }
 
-  const activation = readDate(draft.dates.activation);
+  // A field the layout leaves out reads as empty: no error of its own, and no
+  // "before the start date" check against a value the user cannot see.
+  const startAsked = layout.activationDate.state === "rendered";
+  const eventAsked = layout.eventDate.state === "rendered";
+  const activation = startAsked ? readDate(draft.dates.activation) : EMPTY_READ;
   const close = readDate(draft.dates.close);
-  const event = layout.eventDate.state === "rendered" ? readDate(draft.dates.event) : ({ status: "empty" } as const);
+  const event = eventAsked ? readDate(draft.dates.event) : EMPTY_READ;
 
-  if (activation.status === "empty") errors["dates.activation"] = "Enter a start date.";
-  else if (activation.status === "invalid") errors["dates.activation"] = "Enter a valid start date.";
+  if (startAsked) {
+    if (activation.status === "empty") errors["dates.activation"] = "Enter a start date.";
+    else if (activation.status === "invalid") errors["dates.activation"] = "Enter a valid start date.";
+  }
 
   // One field; its wording and whether it is required come from the layout.
   const closeCopy = CLOSE_DATE_COPY[layout.closeDate.variant];
@@ -773,7 +791,7 @@ export function draftErrors(draft: IntakeDraft, config: LibraryRecordConfig): Dr
   }
 
   if (event.status === "invalid") errors["dates.event"] = "Enter a valid event date.";
-  else if (event.status === "empty" && layout.effectiveKind === "one-time") {
+  else if (event.status === "empty" && eventAsked && layout.effectiveKind === "one-time") {
     errors["dates.event"] = "Enter the event date.";
   } else if (event.status === "ok" && activation.status === "ok" && before(event, activation)) {
     errors["dates.event"] = "The event can't be before the start date.";
@@ -1022,8 +1040,10 @@ export function buildCreateRequest(
   const handoffTo = draft.leads?.handoffTo?.trim() ?? "";
   if (attached.has("lead-handoff") && handoffTo !== "") attrs[LEAD_HANDOFF_ATTR] = handoffTo;
 
-  const activation = readDate(draft.dates.activation);
-  const event = isOngoing ? ({ status: "empty" } as const) : readDate(draft.dates.event);
+  // A date the layout leaves out is written as null (precision 'day'), even if
+  // the draft still holds a value typed before the kind changed.
+  const activation = layout.activationDate.state === "rendered" ? readDate(draft.dates.activation) : EMPTY_READ;
+  const event = isOngoing || layout.eventDate.state !== "rendered" ? EMPTY_READ : readDate(draft.dates.event);
   const close = readDate(draft.dates.close);
   if (close.status === "ok" && close.precision === "month") attrs.revenue_close_date_precision = "month";
 

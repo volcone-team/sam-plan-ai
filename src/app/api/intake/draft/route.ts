@@ -15,6 +15,7 @@ import {
 import { resolveResumeScreen, type ScreenId } from "@/lib/intake/flow";
 import type { IntakeAnswers } from "@/lib/intake/validation";
 import { currentIntakeInput, loadIntakeDraft } from "@/lib/intake/load-draft";
+import { withDraftColumnFallback } from "@/lib/intake/draft-columns";
 import { intakeFrequencyFallback, withFrequencyFallback } from "@/lib/initiatives/frequency-fallback";
 
 export const runtime = "nodejs";
@@ -170,24 +171,29 @@ export async function POST(request: NextRequest) {
 
     if (existing?.id) {
       planningInputId = existing.id as string;
-      const { error } = await db
-        .from("planning_inputs")
-        .update(row)
-        .eq("id", planningInputId)
-        // Belt and braces: the id came from a company-filtered read, and this
-        // keeps the write scoped even if that ever changes.
-        .eq("company_id", companyId);
+      const { error } = await withDraftColumnFallback(
+        row,
+        (payload) =>
+          db
+            .from("planning_inputs")
+            .update(payload)
+            .eq("id", planningInputId)
+            // Belt and braces: the id came from a company-filtered read, and
+            // this keeps the write scoped even if that ever changes.
+            .eq("company_id", companyId),
+        "[intake/draft]"
+      );
 
       if (error) {
         console.error("[intake/draft] update failed:", error.message);
         return NextResponse.json({ error: error.message }, { status: 500 });
       }
     } else {
-      const { data, error } = await db
-        .from("planning_inputs")
-        .insert({ ...row, company_id: companyId, intake_route: "full" })
-        .select("id")
-        .single();
+      const { data, error } = await withDraftColumnFallback(
+        { ...row, company_id: companyId, intake_route: "full" },
+        (payload) => db.from("planning_inputs").insert(payload).select("id").single(),
+        "[intake/draft]"
+      );
 
       if (error || !data) {
         console.error("[intake/draft] insert failed:", error?.message);

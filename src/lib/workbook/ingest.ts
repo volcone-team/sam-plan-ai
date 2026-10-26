@@ -8,7 +8,9 @@ import {
 } from "@/lib/workbook/parse";
 import { isMissingColumnError } from "@/lib/workbook/read";
 import { parseMetricsCell, toStoredMetrics } from "@/lib/metrics/parse-metrics";
-import { MIGRATION_040_WARNING, MIGRATION_051_WARNING, metricsWarnings } from "@/lib/workbook/ingest-messages";
+import {
+  MIGRATION_040_WARNING, MIGRATION_051_WARNING, MIGRATION_054_WARNING, metricsWarnings,
+} from "@/lib/workbook/ingest-messages";
 
 /**
  * Workbook ingest: parse the uploaded sheets into the wb_* tables that
@@ -83,6 +85,9 @@ export async function ingestWorkbook(
     if (!columnSet.m051 && library.some((r) => r.allowedKindsRaw || r.allowedFrequenciesRaw)) {
       parsed.warnings.push(MIGRATION_051_WARNING);
     }
+    if (!columnSet.m054 && library.some((r) => r.startDateRaw || r.eventDateRaw)) {
+      parsed.warnings.push(MIGRATION_054_WARNING);
+    }
     if (!columnSet.m040) {
       parsed.warnings.push(MIGRATION_040_WARNING);
       console.warn("[workbook/ingest] migration 040 columns missing; library stored without scores.");
@@ -152,7 +157,7 @@ const ALL_TABLES = ["wb_initiative_library", "wb_benchmarks", "wb_task_templates
 const CHUNK = 200;
 
 // Both live in a pure module so the browser-side upload preview can use them.
-export { MIGRATION_040_WARNING, MIGRATION_051_WARNING, metricsWarnings };
+export { MIGRATION_040_WARNING, MIGRATION_051_WARNING, MIGRATION_054_WARNING, metricsWarnings };
 
 /** Columns that exist only once migration 040 is applied. */
 const MIGRATION_040_COLUMNS = [
@@ -178,11 +183,17 @@ function libraryRow(r: LibraryRow): Record<string, unknown> {
     // ---- migration 051 ----
     allowed_kinds_raw: r.allowedKindsRaw ?? null,
     allowed_frequencies_raw: r.allowedFrequenciesRaw ?? null,
+    // ---- migration 054 ----
+    start_date_raw: r.startDateRaw ?? null,
+    event_date_raw: r.eventDateRaw ?? null,
   };
 }
 
 /** Columns that exist only once migration 051 is applied. */
 export const MIGRATION_051_COLUMNS = ["allowed_kinds_raw", "allowed_frequencies_raw"] as const;
+
+/** Columns that exist only once migration 054 is applied. */
+export const MIGRATION_054_COLUMNS = ["start_date_raw", "event_date_raw"] as const;
 
 function without(row: Record<string, unknown>, columns: readonly string[]): Record<string, unknown> {
   const out = { ...row };
@@ -196,11 +207,14 @@ export interface LibraryColumnSet {
   m040: boolean;
   /** Migration 051: the raw Frequency / Allowed Frequencies cells. */
   m051: boolean;
+  /** Migration 054: the raw Start Date / Event Date cells. */
+  m054: boolean;
 }
 
 /** The row as the column set allows. */
 export function shapeLibraryRow(row: Record<string, unknown>, set: LibraryColumnSet): Record<string, unknown> {
   let out = row;
+  if (!set.m054) out = without(out, MIGRATION_054_COLUMNS);
   if (!set.m051) out = without(out, MIGRATION_051_COLUMNS);
   if (!set.m040) out = without(out, MIGRATION_040_COLUMNS);
   return out;
@@ -210,15 +224,17 @@ export function shapeLibraryRow(row: Record<string, unknown>, set: LibraryColumn
  * After an insert refused for a missing column, the column set to retry with,
  * or null when there is nothing left to drop (the error is then real).
  *
- * 051 is dropped FIRST: it is the newest migration, so on a database that has
- * 040 but not 051 the retry keeps the scores. If that retry is refused too,
- * 040 goes next — exactly the pre-051 behaviour. Pure; tested.
+ * Newest migration first: 054, then 051, then 040. On a database that has
+ * 051 but not 054 the first retry keeps the frequency cells and the scores; on
+ * one with 040 only, the second retry keeps the scores; with neither, the
+ * third is exactly the pre-040 behaviour. Pure; tested.
  */
 export function nextLibraryColumnSet(
   current: LibraryColumnSet,
   error: { code?: string | null; message?: string | null } | null
 ): LibraryColumnSet | null {
   if (!isMissingColumnError(error)) return null;
+  if (current.m054) return { ...current, m054: false };
   if (current.m051) return { ...current, m051: false };
   if (current.m040) return { ...current, m040: false };
   return null;
@@ -226,12 +242,13 @@ export function nextLibraryColumnSet(
 
 /** Logged once per process, not once per upload chunk. */
 let warned051 = false;
+let warned054 = false;
 
 /**
- * Insert the library, preferring the full (migration 040 + 051) column set.
+ * Insert the library, preferring the full (migration 040 + 051 + 054) column set.
  *
  * The first chunk decides: each refusal for a missing column drops the next
- * optional group (051, then 040; see nextLibraryColumnSet) and retries, and
+ * optional group (054, then 051, then 040; see nextLibraryColumnSet) and retries, and
  * every later chunk goes in with whatever set the first one landed with. So an
  * upload made before the owner applies 051 (or 040) still lands — the raw
  * frequency cells must never fail an upload. Returns the column set used.
@@ -241,7 +258,7 @@ async function insertLibrary(
   client: SupabaseClient,
   rows: Record<string, unknown>[]
 ): Promise<LibraryColumnSet> {
-  let set: LibraryColumnSet = { m040: true, m051: true };
+  let set: LibraryColumnSet = { m040: true, m051: true, m054: true };
   for (let i = 0; i < rows.length; i += CHUNK) {
     const chunk = rows.slice(i, i + CHUNK);
     let { error } = await client.from("wb_initiative_library").insert(chunk.map((r) => shapeLibraryRow(r, set)));
@@ -253,6 +270,13 @@ async function insertLibrary(
       ({ error } = await client.from("wb_initiative_library").insert(chunk.map((r) => shapeLibraryRow(r, set))));
     }
     if (error) throw new Error(`inserting wb_initiative_library: ${error.message}`);
+  }
+  if (!set.m054 && !warned054) {
+    warned054 = true;
+    console.warn(
+      "[workbook/ingest] migration 054 columns missing; library stored without the raw " +
+      "Start Date / Event Date cells. Apply 054 and re-upload the workbook."
+    );
   }
   if (!set.m051 && !warned051) {
     warned051 = true;

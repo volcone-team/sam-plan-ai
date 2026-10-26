@@ -40,7 +40,11 @@ import {
   supabaseTypeStore,
   type TypeSource,
 } from "@/lib/workbook/initiative-type";
-import { SOMETHING_ELSE_KEY } from "@/lib/intake/schema";
+import {
+  DEFAULT_PLANNING_PERIOD,
+  SOMETHING_ELSE_KEY,
+  isPlanningPeriod,
+} from "@/lib/intake/schema";
 import { defaultLibraryMetricSet } from "@/lib/metrics/library-metric-set";
 import type { InitiativeMetricSet } from "@/lib/metrics/metric-set";
 import {
@@ -334,7 +338,10 @@ export async function POST(request: NextRequest) {
 
     // The horizon the funnel figures are projected over. Defaults to 12 so a
     // missing answer does not silently zero every forecast.
-    const horizonMonths = num(input.horizon_months) ?? 12;
+    const savedHorizon = num(input.horizon_months);
+    const horizonMonths = isPlanningPeriod(savedHorizon)
+      ? savedHorizon
+      : DEFAULT_PLANNING_PERIOD;
 
     for (const [index, initiative] of plannedInitiatives.entries()) {
       const key = str(initiative.initiative_key);

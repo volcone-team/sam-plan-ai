@@ -813,6 +813,48 @@ describe("resolveFormLayout: ongoing removes the event date and Timing", () => {
   });
 });
 
+describe("resolveFormLayout: the workbook's Start Date / Event Date flags", () => {
+  const layout = (over: Partial<LibraryRecordConfig>, kind?: "one-time" | "recurring" | "ongoing") =>
+    resolveFormLayout({ config: config(over), category: cat("webinars"), answers: kind ? { kind } : {} });
+  const states = (l: ReturnType<typeof resolveFormLayout>) => [l.activationDate.state, l.eventDate.state];
+
+  it("start No / event Yes: event only", () => {
+    expect(states(layout({ askStartDate: false, askEventDate: true }))).toEqual(["absent", "rendered"]);
+  });
+
+  it("start Yes / event No: start only, whatever the kind", () => {
+    expect(states(layout({ askStartDate: true, askEventDate: false }))).toEqual(["rendered", "absent"]);
+    expect(states(layout({ allowedKinds: ["recurring"], allowedFrequencies: ["monthly"], askStartDate: true, askEventDate: false })))
+      .toEqual(["rendered", "absent"]);
+  });
+
+  it("both Yes, and both unset (today's behaviour): both", () => {
+    expect(states(layout({ askStartDate: true, askEventDate: true }))).toEqual(["rendered", "rendered"]);
+    expect(states(layout({}))).toEqual(["rendered", "rendered"]);
+  });
+
+  it("ongoing with no event and start No still asks the start date (it needs a launch date)", () => {
+    const ongoing = { allowedKinds: ["ongoing"] as const, ongoingLabel: "Evergreen", askStartDate: false };
+    expect(states(layout({ ...ongoing, askEventDate: true }))).toEqual(["rendered", "absent"]);
+    expect(states(layout({ ...ongoing, askEventDate: false }))).toEqual(["rendered", "absent"]);
+  });
+
+  it("the ongoing exception follows the answered kind", () => {
+    const over = {
+      allowedKinds: ["one-time", "ongoing"] as const, ongoingLabel: "Evergreen",
+      askStartDate: false, askEventDate: true,
+    };
+    expect(states(layout(over, "one-time"))).toEqual(["absent", "rendered"]);
+    expect(states(layout(over, "ongoing"))).toEqual(["rendered", "absent"]);
+  });
+
+  it("the close date is unaffected", () => {
+    const l = layout({ askStartDate: false, askEventDate: false });
+    expect(l.closeDate.rendered).toBe(true);
+    expect(l.closeDate.variant).toBe("undecided");
+  });
+});
+
 describe("resolveFormLayout: frequency", () => {
   it("suppresses the question when a recurring record allows one frequency", () => {
     const layout = resolveFormLayout({

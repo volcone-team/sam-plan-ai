@@ -3,6 +3,7 @@ import {
   mentionsEvergreen,
   parseWorkbookFrequencies,
   parseWorkbookKinds,
+  parseWorkbookYesNo,
 } from "./workbook-kinds";
 import { INITIATIVE_KINDS, RECURRENCE_FREQUENCIES } from "./library-config";
 
@@ -132,6 +133,35 @@ describe("parseWorkbookFrequencies — every distinct token in the client's work
       expect(a).toEqual(b);
       expect(new Set(a).size).toBe(a.length);
       expect(a).toEqual(RECURRENCE_FREQUENCIES.filter((f) => a.includes(f)));
+    }
+  });
+});
+
+describe("parseWorkbookYesNo", () => {
+  it("reads yes / y / true / 1 as true, any case and spacing", () => {
+    for (const raw of ["Yes", "yes", " YES ", "y", "Y", "true", "TRUE", "1"]) {
+      expect(parseWorkbookYesNo(raw)).toEqual({ value: true, warnings: [] });
+    }
+  });
+
+  it("reads no / n / false / 0 as false", () => {
+    for (const raw of ["No", "no", " NO\n", "n", "N", "false", "False", "0"]) {
+      expect(parseWorkbookYesNo(raw)).toEqual({ value: false, warnings: [] });
+    }
+  });
+
+  it("blank is null with no warning", () => {
+    for (const raw of [null, undefined, "", "   ", "\n"]) {
+      expect(parseWorkbookYesNo(raw)).toEqual({ value: null, warnings: [] });
+    }
+  });
+
+  it("anything else is null with an unknown_yes_no warning", () => {
+    for (const raw of ["Maybe", "Yes/No", "2", "yes please", "TBD"]) {
+      const r = parseWorkbookYesNo(raw);
+      expect(r.value).toBeNull();
+      expect(r.warnings).toHaveLength(1);
+      expect(r.warnings[0]).toMatchObject({ code: "unknown_yes_no", value: raw.trim() });
     }
   });
 });

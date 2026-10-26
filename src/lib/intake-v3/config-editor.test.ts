@@ -14,6 +14,8 @@ import {
   CATEGORY_OPTIONS,
   DEFAULT_FILTERS,
   NAMED_DATE_LABEL,
+  fieldLabel,
+  workbookFlagLine,
   type EditorDraft,
   type FilterableRecord,
 } from "./config-editor";
@@ -291,5 +293,24 @@ describe("labels", () => {
       { field: "allowedKinds", count: 87, text: "87 still need a frequency" },
       { field: "revenueLines", count: 3, text: "3 still need revenue lines" },
     ]);
+  });
+});
+
+describe("workbook date flags (read-only)", () => {
+  it("says asked / not asked, from the workbook", () => {
+    expect(workbookFlagLine("askStartDate", false)).toBe("Start date: not asked (from workbook)");
+    expect(workbookFlagLine("askStartDate", true)).toBe("Start date: asked (from workbook)");
+    expect(workbookFlagLine("askEventDate", false)).toBe("Event date: not asked (from workbook)");
+    expect(workbookFlagLine("askEventDate", true)).toBe("Event date: asked (from workbook)");
+  });
+
+  it("unset reads as asked, and says the cell was blank or not read", () => {
+    expect(workbookFlagLine("askEventDate", undefined)).toBe("Event date: asked (workbook cell blank or not read)");
+  });
+
+  it("labels the flags in warnings", () => {
+    expect(fieldLabel("askStartDate")).toBe("Start date");
+    expect(fieldLabel("askEventDate")).toBe("Event date");
+    expect(fieldLabel("allowedKinds")).toBe("Frequency");
   });
 });

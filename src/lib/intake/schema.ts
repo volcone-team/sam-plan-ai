@@ -361,6 +361,18 @@ export function showsCustomerIndustries(customerType: string | null): boolean {
   );
 }
 
+/**
+ * Cap on `customer_industries_other`, the free text revealed by picking
+ * "Other" among the customer industries. Stored for data only; nothing in the
+ * recommendations reads it.
+ */
+export const CUSTOMER_INDUSTRIES_OTHER_MAX_LENGTH = 200;
+
+/** Whether the customer-industries answer includes "Other". */
+export function includesIndustryOther(industries: unknown): boolean {
+  return Array.isArray(industries) && industries.includes(INDUSTRY_OTHER);
+}
+
 /* ------------------------------------------------------------------ *
  * Screen 8 — audience today (REQ-11.1, REQ-11.2)
  * ------------------------------------------------------------------ */
@@ -409,7 +421,8 @@ export const NOT_SURE_LABEL = "Not sure";
 /** REQ-11.2 — feeds OPS initiative recommendations. Stored in `borrowed_audiences`. */
 export const OTHER_AUDIENCE_OPTIONS: readonly Option[] = [
   { value: "partners", label: "Partners who promote me" },
-  { value: "speaking_stages", label: "Speaking stages" },
+  // The value stays "speaking_stages" so saved answers keep matching.
+  { value: "speaking_stages", label: "Speaking on Stages" },
   { value: "podcast_guest", label: "Podcast guest spots" },
   { value: "affiliates", label: "Affiliates" },
   { value: "none_yet", label: "None yet" },
@@ -459,8 +472,10 @@ export const REQUIRED_FIELDS: Record<ScreenId, readonly string[]> = {
   start: ["intake_path"],
   business: ["industry", "prior_period_revenue", "growth_stage"],
   team: ["team_size", "monthly_marketing_budget"],
-  // horizon_months and plan_start_month both have defaults, so they are
-  // required in the sense that they must be set — never blank on arrival.
+  // horizon_months defaults to 12: the intake stores it when screen 3 is shown
+  // (`defaults.ts`), and `validateProducts` treats a missing one as that
+  // default rather than blocking. plan_start_month has NO default — its select
+  // shows a placeholder — so a blank one blocks.
   products: ["horizon_months", "plan_start_month"],
   goal: ["revenue_goal"],
   initiatives: [],
@@ -668,6 +683,10 @@ export const FIELD_COPY: Record<
   // Screen 7
   sells_to: { label: "Do you sell to businesses, consumers, or both?" },
   customer_industries: { label: "What industries are your customers in?" },
+  customer_industries_other: {
+    label: "Which industry?",
+    placeholder: "e.g. Veterinary clinics",
+  },
   ideal_customer: {
     label: "Who do you serve?",
     placeholder:

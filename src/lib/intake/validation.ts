@@ -32,6 +32,8 @@ import {
   PRICING_MODEL_RECURRING,
   INDUSTRY_OTHER,
   SOMETHING_ELSE_KEY,
+  CUSTOMER_INDUSTRIES_OTHER_MAX_LENGTH,
+  includesIndustryOther,
   isPlanningPeriod,
 } from "@/lib/intake/schema";
 
@@ -230,6 +232,14 @@ function requiredErrors(screen: ScreenId, answers: IntakeAnswers): FieldErrors {
   return errors;
 }
 
+/**
+ * Required fields whose screen shows a default as selected. A missing value
+ * stands for that default, so it never blocks (see `defaults.ts`). They stay
+ * in REQUIRED_FIELDS because the answer must exist by build time — the shell
+ * stores the default and the build route falls back to it.
+ */
+export const DEFAULTED_REQUIRED_FIELDS: readonly string[] = ["horizon_months"];
+
 /* ------------------------------------------------------------------ *
  * Per-screen validators
  * ------------------------------------------------------------------ */
@@ -287,6 +297,10 @@ export function validateProducts(
 ): ValidationResult {
   const errors = requiredErrors("products", answers);
 
+  // A missing period means the default the screen shows as selected (12), so
+  // it must not block — the shell stores it, and the build falls back to it.
+  // Only a value that IS present but not an offered period is an error.
+  for (const field of DEFAULTED_REQUIRED_FIELDS) delete errors[field];
   if (isAnswered(answers.horizon_months) && !isPlanningPeriod(answers.horizon_months)) {
     errors.horizon_months = "Choose 3, 6, 12 or 18 months.";
   }
@@ -482,7 +496,20 @@ function validateWins(answers: IntakeAnswers): ValidationResult {
 function validateCustomer(answers: IntakeAnswers): ValidationResult {
   // REQ-10.2's industries field is NOT required even when revealed: a user
   // selling to businesses across the board has no single answer to give.
-  return result(requiredErrors("customer", answers));
+  const errors = requiredErrors("customer", answers);
+
+  // The "Other" text is optional too; only its length is checked, and only
+  // while Other is picked (otherwise it is cleared on save).
+  const other = answers.customer_industries_other;
+  if (
+    includesIndustryOther(answers.customer_industries) &&
+    typeof other === "string" &&
+    other.trim().length > CUSTOMER_INDUSTRIES_OTHER_MAX_LENGTH
+  ) {
+    errors.customer_industries_other = `Keep it to ${CUSTOMER_INDUSTRIES_OTHER_MAX_LENGTH} characters.`;
+  }
+
+  return result(errors);
 }
 
 /**

@@ -114,6 +114,42 @@ describe("deriveConfig: allowedPaths", () => {
   });
 });
 
+describe("deriveConfig: date flags from the workbook's Start Date / Event Date columns", () => {
+  const wb = (start: string | null, event: string | null) =>
+    deriveConfig(row({ start_date_raw: start, event_date_raw: event }));
+
+  it("sets both from Yes / No", () => {
+    expect(wb("No", "Yes").config).toMatchObject({ askStartDate: false, askEventDate: true });
+    expect(wb("Yes", "No").config).toMatchObject({ askStartDate: true, askEventDate: false });
+    expect(wb("Yes", "Yes").config).toMatchObject({ askStartDate: true, askEventDate: true });
+    expect(wb("No", "Yes").warnings).toEqual([]);
+  });
+
+  it("blank or absent leaves them unset (= ask), with no warning", () => {
+    for (const r of [wb(null, null), wb("", "  "), deriveConfig(row())]) {
+      expect(r.config).not.toHaveProperty("askStartDate");
+      expect(r.config).not.toHaveProperty("askEventDate");
+      expect(r.warnings.filter((w) => w.code === "date_flag_unknown")).toEqual([]);
+    }
+  });
+
+  it("an unreadable cell leaves the flag unset and warns on that flag", () => {
+    const r = wb("Maybe", "No");
+    expect(r.config).not.toHaveProperty("askStartDate");
+    expect(r.config.askEventDate).toBe(false);
+    expect(r.warnings).toEqual([
+      expect.objectContaining({ code: "date_flag_unknown", field: "askStartDate", value: "Maybe" }),
+    ]);
+  });
+
+  it("is never in the derived / needs-a-human lists (not admin-configurable)", () => {
+    const r = wb("No", "No");
+    expect(r.derived).not.toContain("askStartDate" as never);
+    expect(r.needsHuman).not.toContain("askEventDate" as never);
+    expect(CONFIG_FIELDS).not.toContain("askStartDate" as never);
+  });
+});
+
 describe("deriveConfig: kinds and frequencies from the workbook's Frequency columns", () => {
   const wb = (kinds: string | null, freqs: string | null = null) =>
     deriveConfig(row({ allowed_kinds_raw: kinds, allowed_frequencies_raw: freqs }));

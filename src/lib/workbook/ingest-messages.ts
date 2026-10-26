@@ -15,6 +15,12 @@ export const MIGRATION_040_WARNING =
   "Difficulty and speed were still derived from the scores and stored. Apply " +
   "supabase/migrations/040_library_scores_metrics.sql, then upload the workbook again.";
 
+export const MIGRATION_054_WARNING =
+  "Migration 054 is not applied, so the library was stored WITHOUT its Start Date and " +
+  "Event Date cells, and the New Initiative form will ask for both dates on every " +
+  "initiative. Everything else ingested. Apply " +
+  "supabase/migrations/054_workbook_date_flags.sql, then upload the workbook again.";
+
 export const MIGRATION_051_WARNING =
   "Migration 051 is not applied, so the library was stored WITHOUT its Frequency and " +
   "Allowed Frequencies cells, and the intake config cannot derive kinds or frequencies " +

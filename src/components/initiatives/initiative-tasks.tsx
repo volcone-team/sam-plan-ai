@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import type { Task, TaskStatus, TaskPriority } from '@/types';
 import { taskService } from '@/services/task.service';
+import { TaskProgressSummary } from './task-progress-summary';
 
 export interface InitiativeTasksProps {
   initiativeId: string;
@@ -203,6 +204,10 @@ export function InitiativeTasks({ initiativeId }: InitiativeTasksProps) {
 
   return (
     <div className="space-y-6">
+      {/* Progress (moved here from the hidden Project Plan tab). Fed from the
+          same `tasks` state the list below edits, so it updates live. */}
+      {tasks.length > 0 && <TaskProgressSummary tasks={tasks} />}
+
       {/* Header with add button */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-[hsl(var(--foreground))]">

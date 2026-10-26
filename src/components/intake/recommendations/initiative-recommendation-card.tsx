@@ -5,17 +5,9 @@ import { Check, X, Shuffle, Info, Undo2, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatMoney } from "@/lib/format-money";
 import { BENCHMARK_NOTICE } from "@/lib/intake/schema";
-import { MAX_SCORE, SCORE_LETTERS, type ScoreBreakdown, type ScoreLetter } from "@/lib/recommend/score";
+import type { ScoreBreakdown, ScoreLetter } from "@/lib/recommend/score";
 import type { RecommendationExplanation } from "@/lib/recommend/explain";
-import {
-  SCORE_LABELS,
-  SCORE_NOTE,
-  barLabel,
-  formatTotal,
-  provisionalNote,
-  rankLabel,
-  weightedTotalLabel,
-} from "@/lib/recommend/score-display";
+import { ScoreBreakdownView } from "@/components/recommend/score-breakdown";
 
 /**
  * One recommendation card (REQ-13.4, REQ-13.6, REQ-13.14).
@@ -231,101 +223,6 @@ export function RecommendationCard({
           <X className="h-3.5 w-3.5" aria-hidden="true" />
           Not for me
         </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Rank, total and the five S/C/O/R/E bars.
- *
- * Each bar carries its value as TEXT ("Speed 5 of 5") as well as length, so
- * nothing depends on colour or shape alone: the visible digit for sighted
- * users, `role="img"` + `aria-label` for screen readers.
- */
-function ScoreBreakdownView({
-  score,
-  rank,
-  eligibleCount,
-  revenueWeight,
-}: {
-  score: CardScore;
-  rank: number | null;
-  eligibleCount: number | null;
-  revenueWeight: number;
-}) {
-  const weighted = weightedTotalLabel(score.weightedTotal, revenueWeight);
-  const note = score.complete ? null : provisionalNote(score.missing);
-
-  return (
-    <div className="space-y-2 rounded-[var(--radius-md)] border border-border px-3 py-2.5">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <p className="flex flex-wrap items-baseline gap-x-2 text-xs text-[hsl(var(--foreground-muted))]">
-          {rank !== null && (
-            <span className="font-semibold text-foreground">{rankLabel(rank, eligibleCount)}</span>
-          )}
-          <span>
-            SCORE{" "}
-            <span className="font-semibold tabular-nums text-foreground">
-              {formatTotal(score.total)}
-            </span>
-          </span>
-          {weighted && <span className="tabular-nums">({weighted})</span>}
-        </p>
-        {!score.complete && (
-          <span className="rounded-full bg-[hsl(var(--warning)_/_0.15)] px-2 py-0.5 text-[10px] font-medium text-foreground">
-            Provisional score
-          </span>
-        )}
-      </div>
-
-      <ul className="grid grid-cols-5 gap-2" aria-label="Score breakdown">
-        {SCORE_LETTERS.map((letter) => (
-          <li key={letter}>
-            <ScoreBar
-              letter={letter}
-              value={score.breakdown[letter]}
-              missing={score.missing.includes(letter)}
-            />
-          </li>
-        ))}
-      </ul>
-
-      {note && (
-        <p className="text-[11px] text-[hsl(var(--foreground-muted))]">
-          {note} <span aria-hidden="true">Marked *.</span>
-        </p>
-      )}
-      <p className="text-[11px] text-[hsl(var(--foreground-muted))]">{SCORE_NOTE}</p>
-    </div>
-  );
-}
-
-function ScoreBar({ letter, value, missing }: { letter: ScoreLetter; value: number; missing: boolean }) {
-  const { label, best } = SCORE_LABELS[letter];
-  return (
-    <div role="img" aria-label={`${barLabel(letter, value, missing)}. ${best}.`} title={best} className="space-y-1">
-      <div className="flex items-baseline justify-between gap-1 text-[11px]" aria-hidden="true">
-        <span className="truncate text-[hsl(var(--foreground-muted))]">{label}</span>
-        <span className="font-semibold tabular-nums text-foreground">
-          {value}
-          {missing && "*"}
-        </span>
-      </div>
-      <div className="flex gap-0.5" aria-hidden="true">
-        {Array.from({ length: MAX_SCORE }, (_, i) => (
-          <span
-            key={i}
-            className={cn(
-              "h-1.5 flex-1 rounded-full",
-              i < value
-                ? missing
-                  ? "border border-dashed border-[hsl(var(--primary))] bg-transparent"
-                  : "bg-[hsl(var(--primary))]"
-                : "bg-[hsl(var(--background-muted))]"
-            )}
-          />
-        ))}
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ import {
   monthLabel,
   exactDate,
   NOT_ANSWERED,
+  OTHER_CUSTOMER_INDUSTRY_LABEL,
   type AnswerSection,
   type AnswerField,
   type AnswerRecords,
@@ -306,6 +307,47 @@ describe("toAnswerSections — scalar answers", () => {
 
     const consumers = section(sections(inputRow({ sells_to: "consumers" })), "customer");
     expect(value(consumers, FIELD_COPY.customer_industries.label)).toBeUndefined();
+  });
+
+  it("shows the Other customer industry only when Other is among the picks", () => {
+    const without = section(
+      sections(inputRow({ customer_industries_other: "Veterinary clinics" })),
+      "customer"
+    );
+    expect(value(without, OTHER_CUSTOMER_INDUSTRY_LABEL)).toBeUndefined();
+
+    const withOther = section(
+      sections(
+        inputRow({
+          customer_industries: ["Real Estate & Investing", "Other"],
+          customer_industries_other: "Veterinary clinics",
+        })
+      ),
+      "customer"
+    );
+    expect(value(withOther, OTHER_CUSTOMER_INDUSTRY_LABEL)).toBe("Veterinary clinics");
+
+    // Shown but left blank reads as unanswered.
+    const blank = section(
+      sections(inputRow({ customer_industries: ["Other"], customer_industries_other: null })),
+      "customer"
+    );
+    expect(value(blank, OTHER_CUSTOMER_INDUSTRY_LABEL)).toBeNull();
+
+    // Hidden with the industries question for consumer-only sellers.
+    const consumers = section(
+      sections(inputRow({ sells_to: "consumers", customer_industries: ["Other"] })),
+      "customer"
+    );
+    expect(value(consumers, OTHER_CUSTOMER_INDUSTRY_LABEL)).toBeUndefined();
+  });
+
+  it("shows the renamed speaking label for the unchanged stored value", () => {
+    const audience = section(
+      sections(inputRow({ borrowed_audiences: ["speaking_stages"] })),
+      "audience"
+    );
+    expect(value(audience, FIELD_COPY.borrowed_audiences.label)).toBe("Speaking on Stages");
   });
 
   it("distinguishes a number, a zero, Not sure and unanswered on the audience screen", () => {

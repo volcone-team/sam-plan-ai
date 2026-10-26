@@ -386,6 +386,59 @@ describe('library Frequency / Allowed Frequencies columns', () => {
   });
 });
 
+describe('library Start Date / Event Date columns', () => {
+  const HEADERS = [
+    'ID', 'Initiative Name', 'Category', 'Frequency', 'Allowed Frequencies', 'Start Date', 'Event Date',
+    'Call to Action Options',
+  ];
+
+  it('finds both by exact header, without disturbing the frequency columns', () => {
+    const extra = resolveLibraryExtraColumns(HEADERS);
+    expect(extra).toMatchObject({ frequency: 3, allowedFrequencies: 4, startDate: 5, eventDate: 6, ctaOptions: 7 });
+    // Case, surrounding space and a parenthetical note normalise away.
+    expect(resolveLibraryExtraColumns(['Name', ' START DATE ', 'Event date\n(Yes/No)']))
+      .toMatchObject({ startDate: 1, eventDate: 2 });
+  });
+
+  it('matches exactly: a longer header is not claimed', () => {
+    const extra = resolveLibraryExtraColumns(['Name', 'Start Date Notes', 'Event Dates', 'Start']);
+    expect(extra).toMatchObject({ startDate: -1, eventDate: -1 });
+  });
+
+  it('keeps every other field off those columns', () => {
+    const cols = resolveLibraryColumns(HEADERS);
+    expect(Object.values(cols)).not.toContain(5);
+    expect(Object.values(cols)).not.toContain(6);
+    const extra = resolveLibraryExtraColumns(HEADERS);
+    const used = Object.values(extra).filter((i) => i >= 0);
+    expect(new Set(used).size).toBe(used.length);
+  });
+
+  it('stores the trimmed raw cells on the row, null when blank', () => {
+    const p = parseWorkbook([{
+      name: '1. Initiative Library', headers: HEADERS,
+      rows: [
+        ['IN01', 'Live Webinar', 'Webinars', 'Once', 'n/a', ' No ', 'Yes', 'Offer'],
+        ['IN02', 'Email Campaign', 'Email', 'Recurring', 'Monthly', 'Yes', '  ', 'Offer'],
+      ],
+    }]);
+    expect(p.library.map((r) => [r.startDateRaw, r.eventDateRaw])).toEqual([
+      ['No', 'Yes'],
+      ['Yes', null],
+    ]);
+    expect(p.library[0]).toMatchObject({ allowedKindsRaw: 'Once', allowedFrequenciesRaw: 'n/a' });
+  });
+
+  it('a workbook without the columns parses as before, with both null', () => {
+    expect(resolveLibraryExtraColumns(REAL_LIBRARY_HEADERS)).toMatchObject({ startDate: -1, eventDate: -1 });
+    const p = parseWorkbook([{
+      name: '1. Initiative Library', headers: LEGACY_LIBRARY_HEADERS,
+      rows: [['Webinars', 'IN01', 'Live Webinar', '2', 'Fast', 'x', 'y', 'NO', 'Mid', 'OWN']],
+    }]);
+    expect(p.library[0]).toMatchObject({ name: 'Live Webinar', startDateRaw: null, eventDateRaw: null });
+  });
+});
+
 describe('parseWorkbook — library fields land in the right columns', () => {
   /** One real row from the client's workbook, verbatim. */
   const DINNERS = [

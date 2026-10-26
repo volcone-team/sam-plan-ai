@@ -57,6 +57,7 @@ describe('new library layout — columns by header', () => {
       training: 3, metrics: 4, idealIndustries: 10, ctaOptions: 11,
       speedScore: 12, costScore: 13, oddsScore: 14, revenueScore: 15, easeScore: 16,
       sheetScoreTotal: 17, frequency: -1, allowedFrequencies: -1,
+      startDate: -1, eventDate: -1,
     });
   });
 
@@ -84,6 +85,7 @@ describe('new library layout — columns by header', () => {
       idealIndustries: ['Retail', 'Health & Wellness'], ctaOptions: ['Offer', 'Lead Collect'],
       training: ['Email Course', 'SOD'], metricsRaw: 'Opens\nClicks',
       allowedKindsRaw: null, allowedFrequenciesRaw: null,
+      startDateRaw: null, eventDateRaw: null,
     });
     expect(p.warnings.some((w) => /Initiative Library: (could not find|no column)/.test(w))).toBe(false);
   });

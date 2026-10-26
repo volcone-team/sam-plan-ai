@@ -52,7 +52,12 @@ import {
 } from "./library-config";
 import { normalizeKey } from "../workbook/parse";
 import { typeExtrasFor } from "./type-extras";
-import { mentionsEvergreen, parseWorkbookFrequencies, parseWorkbookKinds } from "./workbook-kinds";
+import {
+  mentionsEvergreen,
+  parseWorkbookFrequencies,
+  parseWorkbookKinds,
+  parseWorkbookYesNo,
+} from "./workbook-kinds";
 
 /* ------------------------------------------------------------------ *
  * Shapes
@@ -71,7 +76,26 @@ export interface LibraryRowInput {
    */
   allowed_kinds_raw?: string | null;
   allowed_frequencies_raw?: string | null;
+  /**
+   * The raw "Start Date" / "Event Date" Yes / No cells (migration 054).
+   * Optional: absent on a database without 054, which reads as blank (= ask).
+   */
+  start_date_raw?: string | null;
+  event_date_raw?: string | null;
 }
+
+/**
+ * The two date flags. WORKBOOK ONLY: not ConfigFields, so they are never in
+ * an admin patch, never saved to initiative_library_config, and never in the
+ * needs-a-human lists. config-repo copies them from the derived config onto
+ * the effective one whatever the saved row says.
+ */
+export type WorkbookFlagField = "askStartDate" | "askEventDate";
+
+export const WORKBOOK_FLAG_FIELDS: readonly WorkbookFlagField[] = Object.freeze([
+  "askStartDate",
+  "askEventDate",
+]);
 
 /**
  * The derived config.
@@ -141,12 +165,14 @@ export type DeriveWarningCode =
   /** Recurring is allowed but Allowed Frequencies gives no interval. allowedFrequencies left unset. */
   | "recurring_frequencies_missing"
   /** Allowed Frequencies lists intervals but the kinds exclude recurring. Saved as none. */
-  | "frequencies_ignored_not_recurring";
+  | "frequencies_ignored_not_recurring"
+  /** A Start Date / Event Date cell that is not Yes or No. Left unset (the date is asked). */
+  | "date_flag_unknown";
 
 export interface DeriveWarning {
   code: DeriveWarningCode;
   initiativeKey: string;
-  field: ConfigField;
+  field: ConfigField | WorkbookFlagField;
   message: string;
   /** The raw value that caused it, where there is one. */
   value?: string;
@@ -304,6 +330,30 @@ function deriveKindsAndFrequencies(
   }
 }
 
+/**
+ * askStartDate / askEventDate from the workbook's Yes / No cells. A blank or
+ * unreadable cell leaves the flag UNSET, which the layout reads as "ask" —
+ * today's behaviour. Mutates `config`.
+ */
+function deriveDateFlags(
+  row: LibraryRowInput,
+  config: DerivedConfig,
+  initiativeKey: string,
+  warn: (w: Omit<DeriveWarning, "initiativeKey">) => void
+): void {
+  const cells: ReadonlyArray<[WorkbookFlagField, string | null, string]> = [
+    ["askStartDate", row.start_date_raw ?? null, "Start Date"],
+    ["askEventDate", row.event_date_raw ?? null, "Event Date"],
+  ];
+  for (const [field, raw, column] of cells) {
+    const parsed = parseWorkbookYesNo(raw);
+    for (const w of parsed.warnings) {
+      warn({ code: "date_flag_unknown", field, value: w.value, message: `${initiativeKey} ${column}: ${w.message}` });
+    }
+    if (parsed.value !== null) config[field] = parsed.value;
+  }
+}
+
 /* ------------------------------------------------------------------ *
  * Single record
  * ------------------------------------------------------------------ */
@@ -382,6 +432,9 @@ export function deriveConfig(row: LibraryRowInput): DeriveResult {
 
   // Kinds and frequencies, from the workbook's Frequency columns.
   deriveKindsAndFrequencies(row, config, initiativeKey, warn);
+
+  // Which dates the form asks for, from the Start Date / Event Date columns.
+  deriveDateFlags(row, config, initiativeKey, warn);
 
   const derived = CONFIG_FIELDS.filter((f) => config[f] !== undefined);
   const needsHuman = CONFIG_FIELDS.filter(

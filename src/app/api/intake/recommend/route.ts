@@ -11,7 +11,7 @@ import {
   type ContextEntry,
 } from "@/lib/workbook/read";
 import { classifyAiFailure, aiFailureLogDetail } from "@/lib/ai-errors";
-import { EXCLUDED_PICKER_CATEGORIES } from "@/lib/intake/schema";
+import { DEFAULT_PLANNING_PERIOD, EXCLUDED_PICKER_CATEGORIES } from "@/lib/intake/schema";
 import { filterEligible, isEligible, type EligibilityContext } from "@/lib/recommend/eligibility";
 import { recommendationCount, recommendationCapacity } from "@/lib/recommend/sizing";
 import {
@@ -118,7 +118,7 @@ export async function POST() {
 
     const { input, products, initiatives } = intake;
 
-    const horizonMonths = num(input.horizon_months) ?? 12;
+    const horizonMonths = num(input.horizon_months) ?? DEFAULT_PLANNING_PERIOD;
     const revenueGoal = num(input.revenue_goal) ?? 0;
 
     /* ---- The user's own initiatives, forecast ---- */

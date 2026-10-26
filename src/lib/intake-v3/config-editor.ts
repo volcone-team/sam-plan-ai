@@ -45,7 +45,7 @@ import {
   type RecurrenceFrequency,
   type RevenueLine,
 } from "./library-config";
-import { CONFIG_FIELDS, type ConfigField } from "./derive-config";
+import { CONFIG_FIELDS, type ConfigField, type WorkbookFlagField } from "./derive-config";
 import type { ConfigPatch, ConfigStatus, FieldSource, StoredConfig } from "./config-repo";
 
 /* ------------------------------------------------------------------ *
@@ -137,9 +137,33 @@ const FIELD_PHRASE: Readonly<Record<ConfigField, string>> = Object.freeze({
   fieldExtras: "field extras",
 });
 
+/**
+ * The two read-only date flags, named after their workbook columns. Not
+ * ConfigFields: they come only from the workbook and cannot be edited here.
+ */
+export const WORKBOOK_FLAG_LABEL: Readonly<Record<WorkbookFlagField, string>> = Object.freeze({
+  askStartDate: "Start date",
+  askEventDate: "Event date",
+});
+
 /** Label for a field name that may not be a ConfigField (problems carry plain strings). */
 export function fieldLabel(field: string): string {
-  return (FIELD_LABEL as Record<string, string>)[field] ?? field;
+  return (
+    (FIELD_LABEL as Record<string, string>)[field] ??
+    (WORKBOOK_FLAG_LABEL as Record<string, string>)[field] ??
+    field
+  );
+}
+
+/**
+ * "Start date: asked (from workbook)" / "Event date: not asked (from workbook)".
+ * Unset reads as asked — the form's behaviour — and says the workbook is silent.
+ */
+export function workbookFlagLine(field: WorkbookFlagField, value: boolean | undefined): string {
+  const label = WORKBOOK_FLAG_LABEL[field];
+  if (value === false) return `${label}: not asked (from workbook)`;
+  if (value === true) return `${label}: asked (from workbook)`;
+  return `${label}: asked (workbook cell blank or not read)`;
 }
 
 /** One line per field that still needs a human, CONFIG_FIELDS order, zeros dropped. */
