@@ -3,8 +3,7 @@
 import { useCompanyId } from '@/hooks/use-auth';
 
 import { useState, useEffect, useMemo } from 'react';
-import { Package, TrendingUp, Crown, BarChart3, Download } from 'lucide-react';
-import { exportToCSV } from '@/lib/csv-export';
+import { Package, TrendingUp, Crown, BarChart3 } from 'lucide-react';
 import { productService } from '@/services/product.service';
 import { projectionService } from '@/services/projection.service';
 import { resultService } from '@/services/result.service';
@@ -168,27 +167,6 @@ export function ProductsReport() {
 
   return (
     <div className="space-y-6">
-      {/* Header with Export */}
-      <div className="flex items-center justify-end">
-        <button
-          onClick={() => {
-            const headers = ['Product Name', 'Revenue (Actual)', 'Revenue (Projected)', 'Variance', 'Variance %', 'Share of Total'];
-            const rows = productRevenueData.map(data => [
-              data.product.name,
-              data.actualRevenue.toString(),
-              data.projectedRevenue.toString(),
-              data.variance.toString(),
-              `${data.variancePercent.toFixed(1)}%`,
-              `${data.percentOfTotal.toFixed(1)}%`,
-            ]);
-            exportToCSV('products-report.csv', headers, rows);
-          }}
-          className="flex items-center gap-2 border border-border px-3 py-2 text-sm rounded-[var(--radius-md)] hover:bg-[hsl(var(--muted))] transition-colors"
-        >
-          <Download className="h-4 w-4" />
-          Export CSV
-        </button>
-      </div>
 
       {/* Product Revenue Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

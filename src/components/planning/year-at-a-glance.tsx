@@ -183,17 +183,17 @@ export function YearAtAGlance() {
           };
           const initiativesInYear = initiativesData.filter(inSelectedYear);
           if (initiativesInYear.length > 0) {
-            // The year has real initiatives. Keep them, and keep the goals of
-            // the plan that generated them - a spanned year is the SAME plan,
-            // so it must not show zeroed targets.
+            // The year has real initiatives: keep them, whichever plan owns them.
+            //
+            // Goals come ONLY from this year's own plan row. This used to fall
+            // back to the plan owning any initiative in the year, which showed
+            // another year's targets here - a 2026 view borrowed the 2028
+            // plan's $0 goals because two 2026-dated initiatives had been
+            // filed under 2028. With no row for the year, the goal cards read
+            // "No target set", and pace and initiatives still come from the
+            // date-filtered initiatives above. Intake build now creates a row
+            // for every year its horizon covers.
             initiativesData = initiativesInYear;
-            if (!plan) {
-              const owningId = initiativesInYear.find((i) => i.annualPlanId)?.annualPlanId;
-              if (owningId) {
-                const owning = await planService.getAnnualPlanById(owningId);
-                if (owning) plan = owning;
-              }
-            }
             projections = plan?.id
               ? projections.filter((pr: { annualPlanId?: string }) => pr.annualPlanId === plan!.id)
               : [];

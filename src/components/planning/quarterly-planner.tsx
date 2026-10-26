@@ -16,11 +16,12 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { planService } from '@/services/plan.service';
-import { projectionService } from '@/services/projection.service';
 import { initiativeService } from '@/services/initiative.service';
 import { resultService } from '@/services/result.service';
 import { QuarterlySummaryTable } from './quarterly-summary-table';
-import type { QuarterlyPlan, Initiative, Projection } from '@/types';
+import type { QuarterlyPlan, Initiative } from '@/types';
+import { monthBuckets, quarterBuckets, quarterTargets } from '@/lib/planning/period-totals';
+import { loadMonthTargets } from '@/lib/planning/load-period-targets';
 import { usePlanYears } from '@/hooks/use-plan-years';
 import { PlanYearTabs } from '@/components/planning/plan-year-tabs';
 
@@ -93,62 +94,57 @@ export function QuarterlyPlanner() {
   const [error, setError] = useState<string | null>(null);
 
   const [quarterPlan, setQuarterPlan] = useState<QuarterlyPlan | null>(null);
+  /** This quarter's share of the year's plan goal. */
+  const [quarterTarget, setQuarterTarget] = useState(0);
   const [quarterProjections, setQuarterProjections] = useState<QuarterProjections>({ good: 0, better: 0, best: 0 });
   const [actualRevenue, setActualRevenue] = useState(0);
   const [monthlyBreakdown, setMonthlyBreakdown] = useState<MonthlyBreakdown[]>([]);
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
 
   useEffect(() => {
+    // Wait for the company: running with an empty id loaded nothing and, with
+    // companyId missing from the dependencies, never loaded again.
+    if (!companyId) return;
     const loadQuarterData = async () => {
       try {
         setLoading(true);
         setError(null);
 
         const { start, end } = getQuarterDateRange(selectedQuarter, YEAR);
-        const months = QUARTER_MONTHS[selectedQuarter];
 
-        // Fetch all data in parallel
-        const [quarterlyPlans, projections, results, quarterInitiatives] = await Promise.all([
+        // Good/Better/Best and Target come from the initiatives and the annual
+        // plan (lib/planning/period-totals), the same figures as the summary
+        // table above. The projections and quarterly_plans tables are not
+        // written by the current intake, so reading them showed $0.
+        const [quarterlyPlans, allInitiatives, monthTargets, results, quarterInitiatives] = await Promise.all([
           planService.getQuarterlyPlans(companyId, YEAR),
-          projectionService.getProjectionsByCompany(companyId),
-          resultService.getResultsByDateRange(start, end),
+          initiativeService.getInitiativesByCompany(companyId),
+          loadMonthTargets(companyId, YEAR),
+          resultService.getResultsByDateRange(start, end, companyId),
           initiativeService.getInitiativesByDateRange(companyId, start, end),
         ]);
 
-        // Find the plan for this quarter
+        // Notes, if a quarterly plan row exists.
         const plan = quarterlyPlans.find(p => p.quarter === selectedQuarter) || null;
         setQuarterPlan(plan);
 
-        // Calculate quarter projections from monthly data
-        const goodProj = projections.find(p => p.scenario === 'good');
-        const betterProj = projections.find(p => p.scenario === 'better');
-        const bestProj = projections.find(p => p.scenario === 'best');
-
-        const sumMonths = (proj: Projection | undefined, monthList: number[]) => {
-          if (!proj?.monthly) return 0;
-          return (proj.monthly as any[])
-            .filter((m: any) => monthList.includes(m.month))
-            .reduce((sum: number, m: any) => sum + m.revenue, 0);
-        };
-
-        const qGood = sumMonths(goodProj, months);
-        const qBetter = sumMonths(betterProj, months);
-        const qBest = sumMonths(bestProj, months);
-        setQuarterProjections({ good: qGood, better: qBetter, best: qBest });
+        const months = monthBuckets(allInitiatives, YEAR);
+        const quarter = quarterBuckets(months)[selectedQuarter - 1];
+        setQuarterProjections({ good: quarter.good, better: quarter.better, best: quarter.best });
+        setQuarterTarget(quarterTargets(monthTargets)[selectedQuarter - 1] ?? 0);
 
         // Calculate actual revenue to date
         const totalActual = results.reduce((sum, r) => sum + r.actualRevenue, 0);
         setActualRevenue(totalActual);
 
-        // Build monthly breakdown
-        const monthlyData: MonthlyBreakdown[] = months.map(m => ({
+        // Build monthly breakdown: the quarter's three months, same rule.
+        const monthlyData: MonthlyBreakdown[] = QUARTER_MONTHS[selectedQuarter].map(m => ({
           month: m,
           name: MONTH_NAMES[m],
-          target: 0, // from plan monthly targets if available
-          // Year-aware: a 2027 entry must not supply 2026's value.
-          good: (goodProj?.monthly as any[])?.find((x: any) => x.month === m && (x.year === undefined || x.year === YEAR))?.revenue || 0,
-          better: (betterProj?.monthly as any[])?.find((x: any) => x.month === m && (x.year === undefined || x.year === YEAR))?.revenue || 0,
-          best: (bestProj?.monthly as any[])?.find((x: any) => x.month === m && (x.year === undefined || x.year === YEAR))?.revenue || 0,
+          target: monthTargets[m - 1] ?? 0,
+          good: months[m - 1].good,
+          better: months[m - 1].better,
+          best: months[m - 1].best,
         }));
         setMonthlyBreakdown(monthlyData);
 
@@ -164,7 +160,7 @@ export function QuarterlyPlanner() {
     };
 
     loadQuarterData();
-  }, [selectedQuarter, YEAR]);
+  }, [selectedQuarter, YEAR, companyId]);
 
   if (loading) {
     return (
@@ -183,7 +179,7 @@ export function QuarterlyPlanner() {
     );
   }
 
-  const targetRevenue = quarterPlan?.targetRevenue || 0;
+  const targetRevenue = quarterTarget;
   const progressPct = targetRevenue > 0 ? Math.min((actualRevenue / targetRevenue) * 100, 100) : 0;
 
   return (
@@ -219,7 +215,7 @@ export function QuarterlyPlanner() {
       <div className="rounded-[var(--radius-lg)] border border-border bg-card p-6 space-y-5">
         <div className="flex items-center gap-2">
           <Target className="h-5 w-5 text-[hsl(var(--foreground-muted))]" />
-          <h3 className="text-lg font-semibold">Q{selectedQuarter} Revenue Summary</h3>
+          <h3 className="text-lg font-semibold">Q{selectedQuarter} {YEAR} Revenue Summary</h3>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -229,6 +225,9 @@ export function QuarterlyPlanner() {
           <SummaryCard label="Best" value={formatCurrency(quarterProjections.best)} variant="emerald" />
           <SummaryCard label="Actual to Date" value={formatCurrency(actualRevenue)} variant="default" />
         </div>
+        <p className="text-xs text-[hsl(var(--foreground-muted))]">
+          Target is this quarter&apos;s share of your {YEAR} goal. Good, Better and Best add up the initiatives whose event falls in Q{selectedQuarter}.
+        </p>
 
         {/* Progress bar */}
         <div className="space-y-2">
@@ -264,6 +263,10 @@ export function QuarterlyPlanner() {
             >
               <h4 className="text-sm font-semibold">{month.name}</h4>
               <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-[hsl(var(--foreground-muted))] font-medium">Target</span>
+                  <span className="font-semibold">{formatCurrency(month.target)}</span>
+                </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-amber-600 font-medium">Good</span>
                   <span className="font-semibold">{formatCurrency(month.good)}</span>

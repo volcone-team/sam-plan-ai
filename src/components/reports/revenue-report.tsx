@@ -3,8 +3,7 @@
 import { useCompanyId } from '@/hooks/use-auth';
 
 import { useState, useEffect, useMemo } from 'react';
-import { TrendingUp, TrendingDown, DollarSign, Target, Hash, Download } from 'lucide-react';
-import { exportToCSV } from '@/lib/csv-export';
+import { TrendingUp, TrendingDown, DollarSign, Target, Hash } from 'lucide-react';
 import { resultService } from '@/services/result.service';
 import { projectionService } from '@/services/projection.service';
 import type { Projection, Result } from '@/types';
@@ -199,24 +198,6 @@ export function RevenueReport() {
           ))}
         </div>
         </div>
-        <button
-          onClick={() => {
-            const headers = ['Period', 'Projected', 'Actual', 'Variance', 'Variance %', 'Status'];
-            const rows = currentPeriodData.map(row => [
-              row.label,
-              row.projected.toString(),
-              row.actual.toString(),
-              row.variance.toString(),
-              `${row.variancePercent.toFixed(1)}%`,
-              row.variance >= 0 ? 'Over' : 'Under',
-            ]);
-            exportToCSV(`revenue-report-${periodView}.csv`, headers, rows);
-          }}
-          className="flex items-center gap-2 border border-border px-3 py-2 text-sm rounded-[var(--radius-md)] hover:bg-[hsl(var(--muted))] transition-colors"
-        >
-          <Download className="h-4 w-4" />
-          Export CSV
-        </button>
       </div>
 
       {/* Summary Cards */}

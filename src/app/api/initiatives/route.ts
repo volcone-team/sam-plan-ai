@@ -18,6 +18,8 @@ import { todayDateOnly } from "@/lib/plan-dates";
 import { taskAnchorDate } from "@/lib/initiatives/schedule";
 import { readHandoffId, withHandoff } from "@/lib/initiatives/lead-handoff";
 import { isInitiativeId } from "@/lib/initiatives/recurring-request";
+import { planYearForInitiative } from "@/lib/intake/plan-years";
+import { findAnnualPlan, getOrCreateAnnualPlan } from "@/lib/plans/annual-plan-store";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -81,19 +83,41 @@ export async function POST(request: NextRequest) {
     }
 
     /**
+     * FILED UNDER ITS LAUNCH YEAR, not the page's. The panel passes the plan
+     * of whichever year the page has selected, so an initiative dated
+     * Oct 2026 added while 2028 was selected used to land in the 2028 plan —
+     * and the dashboard then borrowed that plan's $0 targets for 2026.
+     *
+     * The passed plan is still checked above (it proves the caller's plan
+     * belongs to their company) and is kept for an undated initiative. A
+     * missing launch-year row is created as a DRAFT with zero targets, but
+     * only after the limit check below passes, so a refused request writes
+     * nothing.
+     */
+    const passedYear = typeof plan.year === "number" ? plan.year : Number(plan.year);
+    const targetYear = planYearForInitiative(req, passedYear);
+    let targetPlanId: string | null =
+      targetYear === passedYear
+        ? (plan.id as string)
+        : (await findAnnualPlan(db, companyId, targetYear))?.id ?? null;
+
+    /**
      * Lead handoff target: must be one of this company's initiatives in the
-     * same plan. Anything else is dropped (written as "Decide later") rather
-     * than refused — the handoff is optional and only ever warns.
+     * plan the panel showed or the plan this initiative is filed under (they
+     * differ when the dates move it to another year). Anything else is dropped
+     * (written as "Decide later") rather than refused — the handoff is
+     * optional and only ever warns.
      */
     const handoffTo = readHandoffId(req.attrs);
     if (handoffTo !== null && req.attrs) {
+      const planIds = [...new Set([plan.id as string, ...(targetPlanId ? [targetPlanId] : [])])];
       const { data: target } = isInitiativeId(handoffTo)
         ? await db
             .from("initiatives")
             .select("id")
             .eq("id", handoffTo)
             .eq("company_id", companyId)
-            .eq("annual_plan_id", plan.id)
+            .in("annual_plan_id", planIds)
             .maybeSingle()
         : { data: null };
       if (!target) req.attrs = withHandoff(req.attrs, null);
@@ -101,12 +125,23 @@ export async function POST(request: NextRequest) {
 
     /* ---- Plan limit: max_initiatives, live, per plan year ---- */
 
-    // Before anything is written, including a custom initiative type.
+    // Before anything is written, including a custom initiative type or the
+    // launch year's plan row. No row yet counts as an empty year.
     const limit = await checkLiveLimit(db, companyId, LIMIT_KEYS.MAX_INITIATIVES, 1, {
-      annualPlanId: plan.id as string,
-      year: typeof plan.year === "number" ? plan.year : null,
+      annualPlanId: targetPlanId,
+      year: Number.isInteger(targetYear) ? targetYear : null,
     });
     if (!limit.ok) return liveLimitResponse(limit);
+
+    if (!targetPlanId) {
+      const created = await getOrCreateAnnualPlan(
+        db, companyId, targetYear, { status: "draft" }, "[initiatives/create]"
+      );
+      if (!created) {
+        return NextResponse.json({ error: "Could not save the initiative. Please try again." }, { status: 500 });
+      }
+      targetPlanId = created.id;
+    }
 
     /* ---- The initiative type ---- */
 
@@ -176,7 +211,7 @@ export async function POST(request: NextRequest) {
     const { data: created, error } = await insertWithLibraryKey(
       {
         company_id: companyId,
-        annual_plan_id: req.annualPlanId,
+        annual_plan_id: targetPlanId,
         product_id: req.productId,
         initiative_type_id: typeId,
         name: req.name,

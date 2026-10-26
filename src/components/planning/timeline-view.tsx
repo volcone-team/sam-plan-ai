@@ -1,5 +1,5 @@
 'use client';
-import { formatDate, formatDateShort } from '@/lib/format-date';
+import { formatDate } from '@/lib/format-date';
 
 import { useCompanyId } from '@/hooks/use-auth';
 
@@ -13,10 +13,51 @@ import {
 import { initiativeService } from '@/services/initiative.service';
 import { productService } from '@/services/product.service';
 import type { Initiative, Product } from '@/types';
+import { usePlanYears } from '@/hooks/use-plan-years';
+import { PlanYearTabs } from '@/components/planning/plan-year-tabs';
+import { horizonSpan } from '@/lib/initiatives/schedule';
+import { daysInMonth, parseDateOnly, toDateOnly, type DateOnly } from '@/lib/plan-dates';
 
-/** Where an initiative starts on the timeline: activation, else its event; null when undated. */
-const startOf = (i: Pick<Initiative, 'activationDate' | 'eventDate'>): Date | null =>
-  i.activationDate ?? i.eventDate ?? null;
+/**
+ * An initiative's bar for one calendar year: launch -> revenue close (the
+ * event date for older rows), clipped to the year. Null when the initiative
+ * has no dates or does not touch the year.
+ *
+ * The timeline used to ignore the year: everything was placed by month alone,
+ * so January 2027 work sat in "Q1" beside 2026 work, and an initiative with no
+ * end ran to a hard-coded 31 Dec 2026.
+ */
+interface YearBar {
+  start: DateOnly;
+  end: DateOnly;
+  /** Began in an earlier year. */
+  continuesFrom: boolean;
+  /** Runs on past this year (or has no end). */
+  continuesTo: boolean;
+}
+
+function barForYear(i: Initiative, year: number): YearBar | null {
+  const span = horizonSpan(i);
+  if (!span) return null;
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+  if (span.start > yearEnd) return null;
+  if (span.end !== null && span.end < yearStart) return null;
+  return {
+    start: span.start < yearStart ? yearStart : span.start,
+    end: span.end === null || span.end > yearEnd ? yearEnd : span.end,
+    continuesFrom: span.start < yearStart,
+    continuesTo: span.end === null || span.end > yearEnd,
+  };
+}
+
+/** 0–12 across the year. Start of day for a start, end of day for an end. */
+function position(d: DateOnly, edge: 'start' | 'end'): number {
+  const month = Number(d.slice(5, 7));
+  const dayOfMonth = Number(d.slice(8, 10));
+  const days = daysInMonth(Number(d.slice(0, 4)), month);
+  return month - 1 + (edge === 'start' ? dayOfMonth - 1 : dayOfMonth) / days;
+}
 
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -42,22 +83,15 @@ const STATUS_LABELS: Record<string, string> = {
 interface QuarterGroup {
   label: string;
   quarter: number;
-  initiatives: Initiative[];
+  initiatives: { initiative: Initiative; bar: YearBar }[];
 }
 
-function getMonthPosition(date: Date): number {
-  const month = date.getMonth();
-  const day = date.getDate();
-  const daysInMonth = new Date(date.getFullYear(), month + 1, 0).getDate();
-  return month + (day / daysInMonth);
-}
-
-function getQuarterForDate(date: Date): number {
-  return Math.floor(date.getMonth() / 3) + 1;
-}
+const QUARTER_RANGES = ['Jan – Mar', 'Apr – Jun', 'Jul – Sep', 'Oct – Dec'];
 
 export function TimelineView() {
   const companyId = useCompanyId() || "";
+  // Same year tabs, and the same remembered year, as Monthly and Quarterly.
+  const { selectedYear: YEAR, setSelectedYear, years: planYears } = usePlanYears(companyId);
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -96,34 +130,29 @@ export function TimelineView() {
   }, [initiatives, selectedProduct]);
 
   const quarterGroups: QuarterGroup[] = useMemo(() => {
-    const groups: QuarterGroup[] = [
-      { label: 'Q1 (Jan – Mar)', quarter: 1, initiatives: [] },
-      { label: 'Q2 (Apr – Jun)', quarter: 2, initiatives: [] },
-      { label: 'Q3 (Jul – Sep)', quarter: 3, initiatives: [] },
-      { label: 'Q4 (Oct – Dec)', quarter: 4, initiatives: [] },
-    ];
+    const groups: QuarterGroup[] = QUARTER_RANGES.map((range, idx) => ({
+      label: `Q${idx + 1} ${YEAR} (${range})`,
+      quarter: idx + 1,
+      initiatives: [],
+    }));
 
+    // Grouped by the quarter the bar starts in within this year; work that
+    // began in an earlier year starts in Q1. Undated initiatives sit nowhere.
     filteredInitiatives.forEach(init => {
-      // An unscheduled (undated) initiative sits in no quarter; one with only
-      // an event date starts there.
-      const start = startOf(init);
-      if (!start) return;
-      const activationQ = getQuarterForDate(new Date(start));
-      const groupIdx = activationQ - 1;
-      if (groupIdx >= 0 && groupIdx < 4) {
-        groups[groupIdx].initiatives.push(init);
-      }
+      const bar = barForYear(init, YEAR);
+      if (!bar) return;
+      const quarter = Math.floor((Number(bar.start.slice(5, 7)) - 1) / 3);
+      groups[quarter].initiatives.push({ initiative: init, bar });
     });
 
-    // Sort within each quarter by activation date
     groups.forEach(g => {
-      g.initiatives.sort(
-        (a, b) => new Date(startOf(a)!).getTime() - new Date(startOf(b)!).getTime()
-      );
+      g.initiatives.sort((a, b) => a.bar.start.localeCompare(b.bar.start));
     });
 
     return groups;
-  }, [filteredInitiatives]);
+  }, [filteredInitiatives, YEAR]);
+
+  const yearCount = quarterGroups.reduce((n, g) => n + g.initiatives.length, 0);
 
   if (loading) {
     return (
@@ -144,6 +173,13 @@ export function TimelineView() {
 
   return (
     <div className="space-y-6">
+      {/* Year tabs first: which year you are looking at governs everything below. */}
+      <PlanYearTabs
+        years={planYears}
+        selectedYear={YEAR}
+        onSelect={setSelectedYear}
+        currentYear={new Date().getFullYear()}
+      />
       {/* Product Filter */}
       <div className="flex items-center gap-3">
         <Filter className="h-4 w-4 text-[hsl(var(--foreground-muted))]" />
@@ -164,7 +200,7 @@ export function TimelineView() {
           ))}
         </select>
         <span className="ml-auto text-xs text-[hsl(var(--foreground-muted))]">
-          {filteredInitiatives.length} initiative{filteredInitiatives.length !== 1 ? 's' : ''}
+          {yearCount} initiative{yearCount !== 1 ? 's' : ''} in {YEAR}
         </span>
       </div>
 
@@ -183,7 +219,7 @@ export function TimelineView() {
         {/* Month headers */}
         <div className="min-w-[800px]">
           <div className="flex">
-            <div className="w-52 shrink-0" />
+            <div className="w-52 shrink-0 text-sm font-semibold">{YEAR}</div>
             <div className="flex-1 grid grid-cols-12 gap-0">
               {MONTH_LABELS.map(label => (
                 <div
@@ -210,16 +246,15 @@ export function TimelineView() {
               </p>
             ) : (
               <div className="space-y-2">
-                {group.initiatives.map(initiative => {
-                  const startPos = getMonthPosition(new Date(startOf(initiative)!));
-                  const endDate = initiative.eventDate
-                    ? new Date(initiative.eventDate)
-                    : new Date(2026, 11, 31);
-                  const endPos = getMonthPosition(endDate);
+                {group.initiatives.map(({ initiative, bar }) => {
+                  const startPos = position(bar.start, 'start');
+                  const endPos = position(bar.end, 'end');
 
                   const leftPct = (startPos / 12) * 100;
-                  const widthPct = Math.max(((endPos - startPos) / 12) * 100, 2);
+                  const widthPct = Math.max(((endPos - startPos) / 12) * 100, 1);
                   const colorClass = STATUS_COLORS[initiative.status] || 'bg-slate-400';
+                  const event = initiative.eventDate ? toDateOnly(initiative.eventDate) : '';
+                  const eventInYear = event.startsWith(`${YEAR}-`);
 
                   return (
                     <div
@@ -238,6 +273,8 @@ export function TimelineView() {
                         </span>
                         <span className="text-[10px] text-[hsl(var(--foreground-muted))] capitalize">
                           {initiative.status.replace('_', ' ')}
+                          {bar.continuesFrom && ' · from previous year'}
+                          {bar.continuesTo && ' · continues next year'}
                         </span>
                       </div>
                       <div className="flex-1 relative h-7 bg-[hsl(var(--muted))]/30 rounded">
@@ -249,15 +286,18 @@ export function TimelineView() {
                         </div>
                         {/* Initiative bar */}
                         <div
-                          className={`absolute top-1 bottom-1 rounded ${colorClass} opacity-80 group-hover:opacity-100 transition-opacity`}
+                          className={`absolute top-1 bottom-1 ${colorClass} opacity-80 group-hover:opacity-100 transition-opacity ${
+                            bar.continuesFrom ? 'rounded-r' : bar.continuesTo ? 'rounded-l' : 'rounded'
+                          }`}
                           style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                          title={`${formatDate(parseDateOnly(bar.start))} – ${bar.continuesTo ? 'continues' : formatDate(parseDateOnly(bar.end))}`}
                         />
-                        {/* Event date marker */}
-                        {initiative.eventDate && (
+                        {/* Event date marker, only when the event is in this year */}
+                        {eventInYear && (
                           <div
                             className="absolute top-0 bottom-0 w-0.5 bg-gray-800/60"
-                            style={{ left: `${(getMonthPosition(new Date(initiative.eventDate)) / 12) * 100}%` }}
-                            title={`Event: ${formatDate(initiative.eventDate)}`}
+                            style={{ left: `${(position(event, 'end') / 12) * 100}%` }}
+                            title={`Event: ${formatDate(parseDateOnly(event))}`}
                           />
                         )}
                       </div>
@@ -269,9 +309,9 @@ export function TimelineView() {
           </div>
         ))}
 
-        {filteredInitiatives.length === 0 && (
+        {yearCount === 0 && (
           <p className="text-sm text-[hsl(var(--foreground-muted))] text-center py-8">
-            No initiatives found for the selected filter.
+            No initiatives in {YEAR} for the selected filter.
           </p>
         )}
       </div>

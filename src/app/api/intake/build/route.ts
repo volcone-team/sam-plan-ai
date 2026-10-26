@@ -54,6 +54,8 @@ import {
 } from "@/lib/workbook/materialise";
 import { sequenceEventDates } from "@/lib/plan-schedule";
 import { toDateOnly } from "@/lib/plan-dates";
+import { horizonYears, launchYear, prorateTargets } from "@/lib/intake/plan-years";
+import { getOrCreateAnnualPlan } from "@/lib/plans/annual-plan-store";
 import { snapshotProducts } from "@/lib/snapshot-products";
 import { enqueueMilestoneEvent } from "@/lib/ghl/producers/milestone";
 import { initiativeFrequencyFallback, withFrequencyFallback } from "@/lib/initiatives/frequency-fallback";
@@ -499,7 +501,7 @@ export async function POST(request: NextRequest) {
     /**
      * max_initiatives is a LIVE count per plan year (src/lib/billing/live-limits.ts).
      *
-     * Each initiative is filed under its EVENT's year (see insertInitiative),
+     * Each initiative is filed under its LAUNCH year (see insertInitiative),
      * and writes one row per product it sells. The year being rebuilt
      * (`wipeYear`, the same year clearPreviousPlan uses) is emptied first, so
      * it starts from 0; any other year the plan spills into keeps what it has.
@@ -509,7 +511,11 @@ export async function POST(request: NextRequest) {
 
     const newByYear = new Map<number, number>();
     for (const [index, item] of pending.entries()) {
-      const year = Number(toDateOnly(scheduled[index].eventDate).slice(0, 4)) || wipeYear;
+      const year =
+        launchYear(
+          toDateOnly(scheduled[index].activationDate),
+          toDateOnly(scheduled[index].eventDate)
+        ) ?? wipeYear;
       newByYear.set(year, (newByYear.get(year) ?? 0) + item.intakeProductIds.length);
     }
 
@@ -790,19 +796,43 @@ export async function POST(request: NextRequest) {
      */
     const targets = planTargets(num(input.revenue_goal));
 
-    if (targets.baseline > 0) {
-      const planIds = [...new Set(scheduled.map((s) => s.eventDate.getUTCFullYear()))];
+    /**
+     * EVERY CALENDAR YEAR THE HORIZON COVERS, not only the years an initiative
+     * happens to land in. Keying this on scheduled event dates left a plan
+     * starting November 2026 with no 2026 row at all — the dashboard showed
+     * 2026 as "No target set" while 2027 carried the whole goal.
+     *
+     * The goal is PRORATED by the horizon months in each year (Nov 2026 + 12
+     * months: 2/12 to 2026, 10/12 to 2027), rounded to whole dollars with the
+     * remainder on the last year so the parts sum to the stated goal.
+     *
+     * The row is ensured even with no goal, so every year the horizon covers
+     * exists; targets are only written when there is a goal, so a blank goal
+     * does not zero targets the user set by hand (the previous behaviour).
+     */
+    const yearTargets = prorateTargets(targets, horizonYears(planStart, horizonMonths));
 
-      for (const year of planIds) {
-        await db
-          .from("annual_plans")
-          .update({
-            baseline_revenue: targets.baseline,
-            stretch_revenue: targets.stretch,
-            status: "active",
-          })
-          .eq("company_id", companyId)
-          .eq("year", year);
+    for (const target of yearTargets) {
+      const plan = await getOrCreateAnnualPlan(
+        db,
+        companyId,
+        target.year,
+        { status: "active" },
+        "[intake/build]"
+      );
+      if (!plan || targets.baseline <= 0) continue;
+
+      const { error: targetError } = await db
+        .from("annual_plans")
+        .update({
+          baseline_revenue: target.baseline,
+          stretch_revenue: target.stretch,
+          status: "active",
+        })
+        .eq("id", plan.id)
+        .eq("company_id", companyId);
+      if (targetError) {
+        console.error("[intake/build] plan target update failed for", target.year, targetError.message);
       }
     }
 
@@ -1061,9 +1091,18 @@ async function insertInitiative(
     metricSet: InitiativeMetricSet | null;
   }
 ): Promise<boolean> {
-  // Filed under the EVENT's year, not the activation year: an initiative
-  // prepared in December and run in January belongs to January's plan.
-  const annualPlanId = await resolveAnnualPlan(db, args.companyId, args.eventDate);
+  /**
+   * Filed under its LAUNCH year: the activation date's year, else the event's.
+   * That is the year the dashboard shows it in (launchDate in
+   * year-at-a-glance), so the plan that owns it and the year it is displayed
+   * in agree. Each initiative resolves its own year; nothing shares one plan.
+   */
+  const year =
+    launchYear(args.activationDate, args.eventDate) ?? new Date().getUTCFullYear();
+  const plan = await getOrCreateAnnualPlan(
+    db, args.companyId, year, { status: "active" }, "[intake/build]"
+  );
+  const annualPlanId = plan?.id ?? null;
   if (!annualPlanId) {
     console.error("[intake/build] no annual plan for", args.companyId);
     return false;
@@ -1194,43 +1233,6 @@ async function insertInitiative(
   }
 
   return true;
-}
-
-/**
- * The annual plan the initiative belongs to, created if absent.
- *
- * Keyed on the activation YEAR rather than the current one: an 18-month plan
- * starting in November spills into the following year, and filing those
- * initiatives under this year's plan would put them on the wrong calendar.
- */
-async function resolveAnnualPlan(
-  db: SupabaseClient,
-  companyId: string,
-  activationDate: string
-): Promise<string | null> {
-  const year = Number(activationDate.slice(0, 4)) || new Date().getUTCFullYear();
-
-  const { data: existing } = await db
-    .from("annual_plans")
-    .select("id")
-    .eq("company_id", companyId)
-    .eq("year", year)
-    .maybeSingle();
-
-  if (existing?.id) return existing.id as string;
-
-  const { data: created, error } = await db
-    .from("annual_plans")
-    .insert({ company_id: companyId, year, status: "active" })
-    .select("id")
-    .single();
-
-  if (error) {
-    console.error("[intake/build] annual plan insert failed:", error.message);
-    return null;
-  }
-
-  return (created?.id as string) ?? null;
 }
 
 /* ------------------------------------------------------------------ *

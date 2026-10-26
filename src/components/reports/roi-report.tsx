@@ -4,8 +4,7 @@ import { useCompanyId } from '@/hooks/use-auth';
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { TrendingUp, TrendingDown, DollarSign, Percent, BarChart3, Download } from 'lucide-react';
-import { exportToCSV } from '@/lib/csv-export';
+import { TrendingUp, TrendingDown, DollarSign, Percent, BarChart3 } from 'lucide-react';
 import { initiativeService } from '@/services/initiative.service';
 import { resultService } from '@/services/result.service';
 import { initiativeTypeService } from '@/services/initiative-type.service';
@@ -108,28 +107,6 @@ export function ROIReport() {
 
   return (
     <div className="space-y-6">
-      {/* Header with Export */}
-      <div className="flex items-center justify-end">
-        <button
-          onClick={() => {
-            const headers = ['Initiative Name', 'Type', 'Revenue', 'Spend', 'Net', 'ROI %', 'Status'];
-            const rows = initiativeROIs.map(row => [
-              row.name,
-              row.typeName,
-              row.revenue.toString(),
-              row.spend.toString(),
-              row.net.toString(),
-              row.roi !== null ? `${row.roi.toFixed(1)}%` : 'N/A',
-              formatStatus(row.status),
-            ]);
-            exportToCSV('roi-report.csv', headers, rows);
-          }}
-          className="flex items-center gap-2 border border-border px-3 py-2 text-sm rounded-[var(--radius-md)] hover:bg-[hsl(var(--muted))] transition-colors"
-        >
-          <Download className="h-4 w-4" />
-          Export CSV
-        </button>
-      </div>
 
       {/* Overall ROI Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

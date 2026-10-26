@@ -19,11 +19,12 @@ import {
   Minus,
 } from 'lucide-react';
 import { planService } from '@/services/plan.service';
-import { projectionService } from '@/services/projection.service';
 import { initiativeService } from '@/services/initiative.service';
 import { resultService } from '@/services/result.service';
 import { MonthlySummaryTable } from './monthly-summary-table';
-import type { MonthlyPlan, Initiative, Projection, Result } from '@/types';
+import type { MonthlyPlan, Initiative, Result } from '@/types';
+import { monthBuckets } from '@/lib/planning/period-totals';
+import { loadMonthTargets } from '@/lib/planning/load-period-targets';
 import { usePlanYears } from '@/hooks/use-plan-years';
 import { PlanYearTabs } from '@/components/planning/plan-year-tabs';
 
@@ -110,6 +111,8 @@ export function MonthlyPlanner() {
   const [error, setError] = useState<string | null>(null);
 
   const [monthlyPlan, setMonthlyPlan] = useState<MonthlyPlan | null>(null);
+  /** This month's share of the year's plan goal. */
+  const [monthTarget, setMonthTarget] = useState(0);
   const [projections, setProjections] = useState<MonthProjections>({ good: 0, better: 0, best: 0 });
   const [actualRevenue, setActualRevenue] = useState(0);
   const [weekBreakdown, setWeekBreakdown] = useState<WeekBreakdown[]>([]);
@@ -127,36 +130,28 @@ export function MonthlyPlanner() {
         const monthStart = new Date(YEAR, selectedMonth - 1, 1);
         const monthEnd = new Date(YEAR, selectedMonth, 0, 23, 59, 59, 999);
 
-        // Fetch all data in parallel
-        const [monthlyPlans, allProjections, results, monthInitiatives] = await Promise.all([
+        // Fetch all data in parallel. Good/Better/Best and Target come from the
+        // initiatives and the annual plan (lib/planning/period-totals): the
+        // projections and monthly_plans tables are not written by the current
+        // intake, so reading them showed $0 for every month.
+        const [monthlyPlans, allInitiatives, monthTargets, results, monthInitiatives] = await Promise.all([
           planService.getMonthlyPlans(companyId, YEAR, quarter),
-          projectionService.getProjectionsByCompany(companyId),
+          initiativeService.getInitiativesByCompany(companyId),
+          loadMonthTargets(companyId, YEAR),
           resultService.getResultsByMonth(companyId, YEAR, selectedMonth),
           initiativeService.getInitiativesByDateRange(companyId, monthStart, monthEnd),
         ]);
 
-        // Find the plan for this month
+        // Notes, if a monthly plan row exists.
         const plan = monthlyPlans.find(p => p.month === selectedMonth) || null;
         setMonthlyPlan(plan);
+        setMonthTarget(monthTargets[selectedMonth - 1] ?? 0);
 
-        // Calculate month projections from projection data
-        const goodProj = allProjections.find(p => p.scenario === 'good');
-        const betterProj = allProjections.find(p => p.scenario === 'better');
-        const bestProj = allProjections.find(p => p.scenario === 'best');
-
-        const getMonthRevenue = (proj: Projection | undefined): number => {
-          if (!proj?.monthly) return 0;
-          // Year-aware: projection entries carry { year, month, revenue }, so
-          // matching on month alone pulled a 2027 figure into 2026.
-          const monthEntry = (proj.monthly as any[]).find(
-            (m: any) => m.month === selectedMonth && (m.year === undefined || m.year === YEAR)
-          );
-          return monthEntry?.revenue || 0;
-        };
-
-        const monthGood = getMonthRevenue(goodProj);
-        const monthBetter = getMonthRevenue(betterProj);
-        const monthBest = getMonthRevenue(bestProj);
+        // Each initiative's revenue counts in its event month.
+        const bucket = monthBuckets(allInitiatives, YEAR)[selectedMonth - 1];
+        const monthGood = bucket.good;
+        const monthBetter = bucket.better;
+        const monthBest = bucket.best;
         setProjections({ good: monthGood, better: monthBetter, best: monthBest });
 
         // Calculate actual revenue for the month
@@ -229,7 +224,7 @@ export function MonthlyPlanner() {
     );
   }
 
-  const targetRevenue = monthlyPlan?.targetRevenue || 0;
+  const targetRevenue = monthTarget;
   const moderateProjection = projections.better;
   const progressPct = moderateProjection > 0 ? Math.min((actualRevenue / moderateProjection) * 100, 100) : 0;
 
@@ -282,6 +277,9 @@ export function MonthlyPlanner() {
           <SummaryCard label="Best" value={formatCurrency(projections.best)} variant="emerald" />
           <SummaryCard label="Actual" value={formatCurrency(actualRevenue)} variant="default" />
         </div>
+        <p className="text-xs text-[hsl(var(--foreground-muted))]">
+          Target is this month&apos;s share of your {YEAR} goal. Good, Better and Best add up the initiatives whose event falls in {MONTH_NAMES[selectedMonth - 1]}.
+        </p>
 
         {/* Progress bar: actual vs moderate projection */}
         <div className="space-y-2">

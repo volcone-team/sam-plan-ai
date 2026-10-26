@@ -454,8 +454,17 @@ export function restoreDraft(
      * An off-path or unknown slug falls back to the start rather than
      * stranding the user: someone who changed their screen-0 answer may have a
      * stored screen their new path does not contain.
+     *
+     * A FINISHED intake (completed_at set by the build) has nothing to resume,
+     * so it always reopens at the start with its answers pre-filled. Otherwise
+     * regenerating from the dashboard jumped straight to whatever screen was
+     * saved last. That is usually the final screen, which the page already
+     * skips, but the tab-hidden autosave and Back can leave screen 8 or 9
+     * stored, and those were resumed.
      */
-    resumeScreen: resolveResumeScreen(path, asString(input.resume_screen)),
+    resumeScreen: input.completed_at
+      ? "start"
+      : resolveResumeScreen(path, asString(input.resume_screen)),
     path,
     found: true,
   };

@@ -1,5 +1,5 @@
 'use client';
-import { formatDate, formatDateShort } from '@/lib/format-date';
+import { formatDate } from '@/lib/format-date';
 import { formatMoney } from '@/lib/format-money';
 
 import { useCompanyId } from '@/hooks/use-auth';
@@ -9,43 +9,26 @@ import Link from 'next/link';
 import {
   ChevronDown,
   ChevronRight,
-  Download,
   Plus,
   Loader2,
   AlertCircle,
 } from 'lucide-react';
-import { projectionService } from '@/services/projection.service';
 import { resultService } from '@/services/result.service';
 import { initiativeService } from '@/services/initiative.service';
-import { exportToCSV } from '@/lib/csv-export';
-import type { Initiative, Projection } from '@/types';
+import type { Initiative } from '@/types';
 import { usePlanYears } from '@/hooks/use-plan-years';
+import { toDateOnly } from '@/lib/plan-dates';
+import {
+  monthBuckets,
+  quarterBuckets,
+  quarterTargets,
+  sumBuckets,
+} from '@/lib/planning/period-totals';
+import { loadMonthTargets } from '@/lib/planning/load-period-targets';
 
 // Year comes from the shared PlanYearProvider, not a module-level constant.
 // The old `const YEAR = new Date().getFullYear()` was evaluated once when this
 // chunk was parsed, which made a plan spanning into the next year unviewable.
-
-const QUARTER_MONTHS: Record<number, number[]> = {
-  1: [1, 2, 3],
-  2: [4, 5, 6],
-  3: [7, 8, 9],
-  4: [10, 11, 12],
-};
-
-function getCurrentQuarter(): number {
-  const month = new Date().getMonth() + 1;
-  if (month <= 3) return 1;
-  if (month <= 6) return 2;
-  if (month <= 9) return 3;
-  return 4;
-}
-
-function getQuarterDateRange(quarter: number, year: number): { start: Date; end: Date } {
-  const startMonth = (quarter - 1) * 3;
-  const start = new Date(year, startMonth, 1);
-  const end = new Date(year, startMonth + 3, 0, 23, 59, 59, 999);
-  return { start, end };
-}
 
 // Full comma-separated figures — see lib/format-money.
 const formatCurrency = formatMoney;
@@ -55,18 +38,18 @@ function formatPercent(value: number): string {
   return `${sign}${value.toFixed(1)}%`;
 }
 
-// formatDate imported from @/lib/format-date
-
 interface QuarterData {
   quarter: number;
-  /** True when the quarter has initiatives, so its targets are real. */
+  /** True when the quarter has a target or initiatives, so its figures are real. */
   planned: boolean;
+  target: number;
   good: number;
   better: number;
   best: number;
   actual: number;
   variance: number;
   variancePercent: number | null;
+  /** The initiatives whose revenue is counted in this quarter (event month). */
   initiatives: Initiative[];
 }
 
@@ -79,17 +62,27 @@ const STATUS_COLORS: Record<string, { dot: string; badge: string }> = {
   retired: { dot: 'bg-gray-400', badge: 'bg-gray-100 text-gray-500' },
 };
 
+/** Variance of actual against the Better scenario, as before. */
+function variances(actual: number, better: number) {
+  return {
+    variance: actual - better,
+    variancePercent: better > 0 ? ((actual - better) / better) * 100 : null,
+  };
+}
+
 export function QuarterlySummaryTable() {
   const companyId = useCompanyId() || "";
   // Shared with Year-at-a-Glance: the plan year being viewed, which may be a
   // year the plan spans into rather than the current calendar year.
-  const { selectedYear: YEAR, setSelectedYear, years: planYears } = usePlanYears(companyId);
+  const { selectedYear: YEAR } = usePlanYears(companyId);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [quartersData, setQuartersData] = useState<QuarterData[]>([]);
   const [expandedQuarter, setExpandedQuarter] = useState<number | null>(null);
 
-  const currentQuarter = getCurrentQuarter();
+  // "Now" only applies to the current year.
+  const now = new Date();
+  const nowQuarter = YEAR === now.getFullYear() ? Math.floor(now.getMonth() / 3) + 1 : null;
 
   useEffect(() => {
     if (!companyId) return;
@@ -98,54 +91,43 @@ export function QuarterlySummaryTable() {
         setLoading(true);
         setError(null);
 
-        // Fetch projections once
-        const projections = await projectionService.getProjectionsByCompany(companyId);
-        const goodProj = projections.find(p => p.scenario === 'good');
-        const betterProj = projections.find(p => p.scenario === 'better');
-        const bestProj = projections.find(p => p.scenario === 'best');
+        // Same source and rule as the Monthly table, so a quarter is exactly
+        // its three months: initiatives counted once in their event month.
+        const [initiatives, monthTargets, results] = await Promise.all([
+          initiativeService.getInitiativesByCompany(companyId),
+          loadMonthTargets(companyId, YEAR),
+          resultService.getResultsByDateRange(
+            new Date(YEAR, 0, 1),
+            new Date(YEAR, 11, 31),
+            companyId
+          ),
+        ]);
 
-        const sumMonths = (proj: Projection | undefined, months: number[]) => {
-          if (!proj?.monthly) return 0;
-          return (proj.monthly as any[])
-            // Year-aware: without this a 2027 entry was summed into 2026's quarter.
-            .filter((m: any) => months.includes(m.month) && (m.year === undefined || m.year === YEAR))
-            .reduce((sum: number, m: any) => sum + m.revenue, 0);
-        };
+        const actualByQuarter = [0, 0, 0, 0];
+        for (const r of results) {
+          const d = toDateOnly(r.weekStartDate);
+          if (Number(d.slice(0, 4)) !== YEAR) continue;
+          actualByQuarter[Math.floor((Number(d.slice(5, 7)) - 1) / 3)] += r.actualRevenue || 0;
+        }
 
-        // Load data for all 4 quarters
-        const quarterPromises = [1, 2, 3, 4].map(async (q) => {
-          const months = QUARTER_MONTHS[q];
-          const { start, end } = getQuarterDateRange(q, YEAR);
-
-          const [results, initiatives] = await Promise.all([
-            resultService.getResultsByDateRange(start, end),
-            initiativeService.getInitiativesByDateRange(companyId, start, end),
-          ]);
-
-          // A quarter with no initiatives has no plan, so it shows no targets.
-          const planned = initiatives.length > 0;
-          const good = planned ? sumMonths(goodProj, months) : 0;
-          const better = planned ? sumMonths(betterProj, months) : 0;
-          const best = planned ? sumMonths(bestProj, months) : 0;
-          const actual = results.reduce((sum, r) => sum + r.actualRevenue, 0);
-          const variance = actual - better;
-          const variancePercent = better > 0 ? ((actual - better) / better) * 100 : null;
-
-          return {
-            quarter: q,
-            planned,
-            good,
-            better,
-            best,
-            actual,
-            variance,
-            variancePercent,
-            initiatives,
-          };
-        });
-
-        const data = await Promise.all(quarterPromises);
-        setQuartersData(data);
+        const targets = quarterTargets(monthTargets);
+        const buckets = quarterBuckets(monthBuckets(initiatives, YEAR));
+        setQuartersData(
+          buckets.map((b, idx) => {
+            const actual = actualByQuarter[idx];
+            return {
+              quarter: idx + 1,
+              planned: b.initiatives.length > 0 || targets[idx] > 0,
+              target: targets[idx],
+              good: b.good,
+              better: b.better,
+              best: b.best,
+              actual,
+              ...variances(actual, b.better),
+              initiatives: b.initiatives,
+            };
+          })
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load summary data';
         setError(message);
@@ -157,70 +139,6 @@ export function QuarterlySummaryTable() {
 
     loadAllQuarters();
   }, [companyId, YEAR]);
-
-  const handleExportCSV = () => {
-    const headers = [
-      'Quarter',
-      'Good',
-      'Better',
-      'Best',
-      'Actual',
-      '$ Variance',
-      '% Variance',
-      'Initiatives',
-      'Status',
-    ];
-
-    const rows = quartersData.map((q) => {
-      const nowYear = new Date().getFullYear();
-      const status = !q.planned
-        ? 'Not planned'
-        : YEAR < nowYear || (YEAR === nowYear && q.quarter < currentQuarter)
-          ? 'Complete'
-          : YEAR === nowYear && q.quarter === currentQuarter
-            ? 'Current'
-            : 'Upcoming';
-      return [
-        `Q${q.quarter} ${YEAR}`,
-        q.good.toFixed(2),
-        q.better.toFixed(2),
-        q.best.toFixed(2),
-        q.actual.toFixed(2),
-        q.variance.toFixed(2),
-        q.variancePercent !== null ? q.variancePercent.toFixed(1) + '%' : 'N/A',
-        q.initiatives.length.toString(),
-        status,
-      ];
-    });
-
-    // Add year total row
-    const totals = quartersData.reduce(
-      (acc, q) => ({
-        good: acc.good + q.good,
-        better: acc.better + q.better,
-        best: acc.best + q.best,
-        actual: acc.actual + q.actual,
-      }),
-      { good: 0, better: 0, best: 0, actual: 0 }
-    );
-    const totalVariance = totals.actual - totals.better;
-    const totalVariancePct = totals.better > 0 ? ((totals.actual - totals.better) / totals.better) * 100 : null;
-    const totalInitiatives = quartersData.reduce((sum, q) => sum + q.initiatives.length, 0);
-
-    rows.push([
-      'YEAR TOTAL',
-      totals.good.toFixed(2),
-      totals.better.toFixed(2),
-      totals.best.toFixed(2),
-      totals.actual.toFixed(2),
-      totalVariance.toFixed(2),
-      totalVariancePct !== null ? totalVariancePct.toFixed(1) + '%' : 'N/A',
-      totalInitiatives.toString(),
-      '',
-    ]);
-
-    exportToCSV(`quarterly-summary-${YEAR}.csv`, headers, rows);
-  };
 
   const toggleExpand = (quarter: number) => {
     setExpandedQuarter(expandedQuarter === quarter ? null : quarter);
@@ -243,35 +161,23 @@ export function QuarterlySummaryTable() {
     );
   }
 
-  // Year totals
-  const yearTotals = quartersData.reduce(
-    (acc, q) => ({
-      good: acc.good + q.good,
-      better: acc.better + q.better,
-      best: acc.best + q.best,
-      actual: acc.actual + q.actual,
-      initiatives: acc.initiatives + q.initiatives.length,
-    }),
-    { good: 0, better: 0, best: 0, actual: 0, initiatives: 0 }
+  // Year totals: every initiative sits in exactly one quarter.
+  const yearScenarios = sumBuckets(quartersData);
+  const yearTarget = quartersData.reduce((sum, q) => sum + q.target, 0);
+  const yearActual = quartersData.reduce((sum, q) => sum + q.actual, 0);
+  const { variance: yearVariance, variancePercent: yearVariancePct } = variances(
+    yearActual,
+    yearScenarios.better
   );
-  const yearVariance = yearTotals.actual - yearTotals.better;
-  const yearVariancePct = yearTotals.better > 0 ? ((yearTotals.actual - yearTotals.better) / yearTotals.better) * 100 : null;
 
   return (
     <div className="space-y-3">
       {/* Header row */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-[hsl(var(--foreground-muted))]">
-          See the quarters listed below with the good, better, and best revenue targets. Click a row to drill into its initiatives.
+          The four quarters of {YEAR}. Each initiative&apos;s revenue counts in the quarter of its event date. Click a row to see its initiatives.
         </p>
         <div className="flex items-center gap-2 shrink-0 ml-4">
-          <button
-            onClick={handleExportCSV}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-[var(--radius-lg)] border border-border bg-card text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Export CSV
-          </button>
           <Link
             href="/initiatives"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-[var(--radius-lg)] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/90 transition-colors"
@@ -283,11 +189,12 @@ export function QuarterlySummaryTable() {
       </div>
 
       {/* Table */}
-      <div className="rounded-[var(--radius-lg)] border border-border bg-card overflow-hidden">
+      <div className="rounded-[var(--radius-lg)] border border-border bg-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-[hsl(var(--muted))]/50">
               <th className="text-left py-3 px-4 font-medium text-[hsl(var(--foreground-muted))]">Quarter</th>
+              <th className="text-right py-3 px-3 font-medium text-[hsl(var(--foreground-muted))]">Target</th>
               <th className="text-right py-3 px-3 font-medium text-[hsl(var(--foreground-muted))]">Good</th>
               <th className="text-right py-3 px-3 font-medium text-[hsl(var(--foreground-muted))]">Better</th>
               <th className="text-right py-3 px-3 font-medium text-[hsl(var(--foreground-muted))]">Best</th>
@@ -304,25 +211,26 @@ export function QuarterlySummaryTable() {
                 key={q.quarter}
                 data={q}
                 year={YEAR}
-                isCurrent={q.quarter === currentQuarter}
+                isCurrent={q.quarter === nowQuarter}
                 isExpanded={expandedQuarter === q.quarter}
                 onToggle={() => toggleExpand(q.quarter)}
               />
             ))}
             {/* Year Total Row */}
             <tr className="bg-[hsl(var(--muted))]/30 font-semibold">
-              <td className="py-3 px-4 text-[hsl(var(--foreground))]">YEAR TOTAL</td>
-              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearTotals.good)}</td>
-              <td className="text-right py-3 px-3 font-bold text-[hsl(var(--foreground))]">{formatCurrency(yearTotals.better)}</td>
-              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearTotals.best)}</td>
-              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearTotals.actual)}</td>
+              <td className="py-3 px-4 text-[hsl(var(--foreground))]">{YEAR} TOTAL</td>
+              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearTarget)}</td>
+              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearScenarios.good)}</td>
+              <td className="text-right py-3 px-3 font-bold text-[hsl(var(--foreground))]">{formatCurrency(yearScenarios.better)}</td>
+              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearScenarios.best)}</td>
+              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearActual)}</td>
               <td className={`text-right py-3 px-3 ${yearVariance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                 {formatCurrency(yearVariance)}
               </td>
               <td className={`text-right py-3 px-3 ${yearVariancePct !== null && yearVariancePct >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                 {yearVariancePct !== null ? formatPercent(yearVariancePct) : '—'}
               </td>
-              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{yearTotals.initiatives}</td>
+              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{yearScenarios.initiatives.length}</td>
               <td className="text-center py-3 px-3">—</td>
             </tr>
           </tbody>
@@ -343,7 +251,7 @@ interface QuarterRowProps {
 }
 
 function QuarterRow({ data, year, isCurrent, isExpanded, onToggle }: QuarterRowProps) {
-  const { quarter, planned, good, better, best, actual, variance, variancePercent, initiatives } = data;
+  const { quarter, planned, target, good, better, best, actual, variance, variancePercent, initiatives } = data;
 
   return (
     <>
@@ -366,6 +274,7 @@ function QuarterRow({ data, year, isCurrent, isExpanded, onToggle }: QuarterRowP
             )}
           </div>
         </td>
+        <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{planned ? formatCurrency(target) : '—'}</td>
         <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{planned ? formatCurrency(good) : '—'}</td>
         <td className="text-right py-3 px-3 font-bold text-[hsl(var(--foreground))]">{planned ? formatCurrency(better) : '—'}</td>
         <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{planned ? formatCurrency(best) : '—'}</td>
@@ -391,8 +300,8 @@ function QuarterRow({ data, year, isCurrent, isExpanded, onToggle }: QuarterRowP
       )}
       {isExpanded && initiatives.length === 0 && (
         <tr>
-          <td colSpan={9} className="py-3 px-4 pl-12 text-sm text-[hsl(var(--foreground-muted))] italic">
-            No initiatives in this quarter.
+          <td colSpan={10} className="py-3 px-4 pl-12 text-sm text-[hsl(var(--foreground-muted))] italic">
+            No initiatives have their event in this quarter.
           </td>
         </tr>
       )}
@@ -410,8 +319,6 @@ function InitiativeChildRow({ initiative }: InitiativeChildRowProps) {
   const { revenueScenarios, status } = initiative;
   const statusColor = STATUS_COLORS[status] || STATUS_COLORS.planned;
 
-  // For initiative actual, we don't have per-initiative results loaded here,
-  // so we display "—" for actual and variance at the initiative level
   const eventDate = initiative.eventDate || initiative.activationDate;
 
   return (
@@ -434,6 +341,7 @@ function InitiativeChildRow({ initiative }: InitiativeChildRowProps) {
           </span>
         </div>
       </td>
+      <td className="text-right py-2.5 px-3 text-sm text-[hsl(var(--foreground-muted))]">—</td>
       <td className="text-right py-2.5 px-3 text-sm text-[hsl(var(--foreground-muted))]">
         {formatCurrency(revenueScenarios.good)}
       </td>

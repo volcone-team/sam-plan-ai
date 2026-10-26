@@ -107,6 +107,26 @@ export function proratedStretch(
   return Math.round(prorated * (1 + rate));
 }
 
+/**
+ * The stretch goal for THIS period's revenue goal: goal x 1.3.
+ *
+ * What the goal screen shows beside the goal field, and the same figure the
+ * plan build stores as the stretch target (planTargets in
+ * src/lib/intake/build-forecast.ts: Math.round(goal x 1.3)). Based on the goal
+ * the user types, not on last year's revenue: the client's rule is "stretch =
+ * current period goal + 30%".
+ *
+ * Null until a positive goal is entered, so nothing is shown for a blank field.
+ */
+export function stretchForGoal(
+  revenueGoal: number | null | undefined,
+  rate: number = SUGGESTED_GROWTH_RATE
+): number | null {
+  const goal = finite(revenueGoal);
+  if (goal <= 0) return null;
+  return Math.round(goal * (1 + rate));
+}
+
 /** Growth implied by a goal against last period, as a percentage. */
 export function impliedGrowthPercent(
   goal: number | null | undefined,

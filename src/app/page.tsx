@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ArrowRight, Play, BarChart3, Calendar, Target, Zap } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
@@ -41,7 +42,15 @@ async function signupHref(): Promise<string> {
   }
 }
 
+/**
+ * The landing page is switched off for now: "/" sends everyone to login.
+ * Signed-in visitors are then forwarded from /auth/login to the app by the
+ * middleware. Set to true to bring the landing page back unchanged.
+ */
+const SHOW_LANDING_PAGE = false;
+
 export default async function LandingPage() {
+  if (!SHOW_LANDING_PAGE) redirect("/auth/login");
   const signupPath = await signupHref();
 
   return (

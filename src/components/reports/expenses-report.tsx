@@ -4,8 +4,7 @@ import { useCompanyId } from '@/hooks/use-auth';
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { DollarSign, Receipt, Hash, TrendingUp, Download } from 'lucide-react';
-import { exportToCSV } from '@/lib/csv-export';
+import { DollarSign, Receipt, Hash, TrendingUp } from 'lucide-react';
 import { expenseService } from '@/services/expense.service';
 import { initiativeService } from '@/services/initiative.service';
 import type { Expense, ExpenseCategory, Initiative } from '@/types';
@@ -151,26 +150,6 @@ export function ExpensesReport() {
 
   return (
     <div className="space-y-6">
-      {/* Header with Export */}
-      <div className="flex items-center justify-end">
-        <button
-          onClick={() => {
-            const headers = ['Date', 'Initiative', 'Category', 'Description', 'Amount'];
-            const rows = sortedExpenses.map(expense => [
-              formatDate(expense.date),
-              expense.initiativeName,
-              CATEGORY_LABELS[expense.category],
-              expense.description,
-              expense.amount.toString(),
-            ]);
-            exportToCSV('expenses-report.csv', headers, rows);
-          }}
-          className="flex items-center gap-2 border border-border px-3 py-2 text-sm rounded-[var(--radius-md)] hover:bg-[hsl(var(--muted))] transition-colors"
-        >
-          <Download className="h-4 w-4" />
-          Export CSV
-        </button>
-      </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

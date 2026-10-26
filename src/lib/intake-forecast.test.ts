@@ -7,6 +7,7 @@ import {
   assessGoal,
   proratedPriorRevenue,
   proratedStretch,
+  stretchForGoal,
   assessGoalForPeriod,
   funnelSteps,
   forecastPerRun,
@@ -383,6 +384,26 @@ describe("proratedStretch", () => {
   it("returns null when there is no baseline to stretch from", () => {
     expect(proratedStretch(0, 12)).toBeNull();
     expect(proratedStretch(null, 6)).toBeNull();
+  });
+});
+
+describe("stretchForGoal", () => {
+  // Client rule: stretch = this period's goal + 30%, not last year's revenue.
+  it("is the typed goal x 1.3", () => {
+    expect(stretchForGoal(200_000)).toBe(260_000);
+    expect(stretchForGoal(123_455)).toBe(Math.round(123_455 * 1.3));
+  });
+
+  it("ignores prior revenue entirely", () => {
+    // $200k last-12 would give $260k under the old rule; a $150k goal gives $195k.
+    expect(stretchForGoal(150_000)).toBe(195_000);
+  });
+
+  it("returns null until a positive goal is entered", () => {
+    expect(stretchForGoal(0)).toBeNull();
+    expect(stretchForGoal(null)).toBeNull();
+    expect(stretchForGoal(undefined)).toBeNull();
+    expect(stretchForGoal(-5)).toBeNull();
   });
 });
 

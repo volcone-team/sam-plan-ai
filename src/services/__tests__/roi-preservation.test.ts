@@ -324,17 +324,13 @@ describe("Property 4: Preservation - ROI outputs unchanged where spend sources a
   });
 });
 
-describe("Property 4: Preservation - ROI CSV columns (3.7)", () => {
-  const EXPECTED_HEADERS = ["Initiative Name", "Type", "Revenue", "Spend", "Net", "ROI %", "Status"];
-
-  it("roi-report.tsx still exports exactly today's CSV header list", () => {
-    // Guards the real file: task 10.2 must keep this header array identical.
+describe("ROI CSV export (3.7, superseded)", () => {
+  it("roi-report.tsx no longer offers a CSV export", () => {
+    // 3.7 pinned the CSV header list. The client then asked for Export CSV to be
+    // removed from every screen (Oct 2026), so this now guards the removal.
     const src = readFileSync(resolve(__dirname, "../../components/reports/roi-report.tsx"), "utf8");
-    const m = src.match(/const headers = \[([^\]]*)\];/);
-    expect(m).not.toBeNull();
-    const headers = Array.from(m![1].matchAll(/'([^']*)'|"([^"]*)"/g)).map((x) => x[1] ?? x[2]);
-    expect(headers).toEqual(EXPECTED_HEADERS);
-    expect(src).toContain("exportToCSV('roi-report.csv', headers, rows)");
+    expect(src).not.toContain("exportToCSV");
+    expect(src).not.toContain("Export CSV");
   });
 });
 

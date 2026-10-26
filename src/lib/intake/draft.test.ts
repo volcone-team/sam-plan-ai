@@ -656,6 +656,22 @@ describe("restoreDraft", () => {
     ).toBe("initiatives");
   });
 
+  /**
+   * Regenerating from the dashboard reopens a FINISHED intake. Its stored
+   * screen is wherever the last save happened (often screen 8 or 9 after a
+   * Back or a tab-hidden autosave), and resuming there skipped the whole form.
+   */
+  it("always restarts a completed intake at the start", () => {
+    const restored = restoreDraft({
+      intake_path: "know_most",
+      resume_screen: "audience",
+      completed_at: "2026-10-26T17:23:29.97+00:00",
+      revenue_goal: 120000,
+    });
+    expect(restored.resumeScreen).toBe("start");
+    expect(restored.answers.revenue_goal).toBe(120000); // answers still pre-filled
+  });
+
   it("falls back to the start on a junk slug", () => {
     expect(restoreDraft({ resume_screen: "../../etc/passwd" }).resumeScreen).toBe("start");
     expect(restoreDraft({ resume_screen: null }).resumeScreen).toBe("start");

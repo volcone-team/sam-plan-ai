@@ -19,6 +19,36 @@ import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
 import { toDateOnly } from '@/lib/plan-dates';
 
 export class PlanService {
+  /**
+   * The plan horizon from the latest intake answers: the month it starts and
+   * how many months it runs. Null when there are no v2 answers (a plan made
+   * before the current intake), in which case callers treat the whole year as
+   * covered.
+   */
+  async getPlanHorizon(
+    companyId: string
+  ): Promise<{ planStartMonth: string | null; horizonMonths: number | null } | null> {
+    if (!companyId || !isSupabaseConfigured()) return null;
+    try {
+      const { data, error } = await getSupabase()
+        .from('planning_inputs')
+        .select('plan_start_month, horizon_months')
+        .eq('company_id', companyId)
+        .eq('intake_version', 2)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error || !data) return null;
+      const months = Number(data.horizon_months);
+      return {
+        planStartMonth: typeof data.plan_start_month === 'string' ? data.plan_start_month : null,
+        horizonMonths: Number.isFinite(months) && months > 0 ? months : null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   async getAnnualPlan(companyId: string, year: number): Promise<AnnualPlan | null> {
     if (!companyId) { console.log("[plan] getAnnualPlan - no companyId"); return null; }
     if (isSupabaseConfigured()) {

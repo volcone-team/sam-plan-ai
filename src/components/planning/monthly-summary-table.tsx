@@ -1,5 +1,5 @@
 'use client';
-import { formatDate, formatDateShort } from '@/lib/format-date';
+import { formatDate } from '@/lib/format-date';
 import { formatMoney } from '@/lib/format-money';
 
 import { useCompanyId } from '@/hooks/use-auth';
@@ -9,17 +9,17 @@ import Link from 'next/link';
 import {
   ChevronDown,
   ChevronRight,
-  Download,
   Plus,
   Loader2,
   AlertCircle,
 } from 'lucide-react';
-import { projectionService } from '@/services/projection.service';
 import { resultService } from '@/services/result.service';
 import { initiativeService } from '@/services/initiative.service';
-import { exportToCSV } from '@/lib/csv-export';
-import type { Initiative, Projection } from '@/types';
+import type { Initiative } from '@/types';
 import { usePlanYears } from '@/hooks/use-plan-years';
+import { toDateOnly } from '@/lib/plan-dates';
+import { monthBuckets, sumBuckets } from '@/lib/planning/period-totals';
+import { loadMonthTargets } from '@/lib/planning/load-period-targets';
 
 // Year comes from the shared PlanYearProvider, not a module-level constant.
 // The old `const YEAR = new Date().getFullYear()` was evaluated once when this
@@ -30,16 +30,6 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-function getCurrentMonth(): number {
-  return new Date().getMonth() + 1;
-}
-
-function getMonthDateRange(month: number, year: number): { start: Date; end: Date } {
-  const start = new Date(year, month - 1, 1);
-  const end = new Date(year, month, 0, 23, 59, 59, 999);
-  return { start, end };
-}
-
 // Full comma-separated figures — see lib/format-money.
 const formatCurrency = formatMoney;
 
@@ -49,15 +39,17 @@ function formatPercent(value: number): string {
 }
 
 interface MonthData {
-  /** True when the month has initiatives, so its targets are real. */
+  /** True when the month has a target or initiatives, so its figures are real. */
   planned: boolean;
   month: number;
+  target: number;
   good: number;
   better: number;
   best: number;
   actual: number;
   variance: number;
   variancePercent: number | null;
+  /** The initiatives whose revenue is counted in this month (event month). */
   initiatives: Initiative[];
 }
 
@@ -70,17 +62,27 @@ const STATUS_COLORS: Record<string, { dot: string; badge: string }> = {
   retired: { dot: 'bg-gray-400', badge: 'bg-gray-100 text-gray-500' },
 };
 
+/** Variance of actual against the Better scenario, as before. */
+function variances(actual: number, better: number) {
+  return {
+    variance: actual - better,
+    variancePercent: better > 0 ? ((actual - better) / better) * 100 : null,
+  };
+}
+
 export function MonthlySummaryTable() {
   const companyId = useCompanyId() || "";
   // Shared with Year-at-a-Glance: the plan year being viewed, which may be a
   // year the plan spans into rather than the current calendar year.
-  const { selectedYear: YEAR, setSelectedYear, years: planYears } = usePlanYears(companyId);
+  const { selectedYear: YEAR } = usePlanYears(companyId);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [monthsData, setMonthsData] = useState<MonthData[]>([]);
   const [expandedMonth, setExpandedMonth] = useState<number | null>(null);
 
-  const currentMonth = getCurrentMonth();
+  // "Now" is a point in time: the current month of the current YEAR only.
+  const now = new Date();
+  const nowMonth = YEAR === now.getFullYear() ? now.getMonth() + 1 : null;
 
   useEffect(() => {
     if (!companyId) return;
@@ -89,59 +91,47 @@ export function MonthlySummaryTable() {
         setLoading(true);
         setError(null);
 
-        // Fetch projections once
-        const projections = await projectionService.getProjectionsByCompany(companyId);
-        const goodProj = projections.find(p => p.scenario === 'good');
-        const betterProj = projections.find(p => p.scenario === 'better');
-        const bestProj = projections.find(p => p.scenario === 'best');
+        /*
+         * Figures come from the initiatives and the annual plan. They used to
+         * come from the `projections` table, which the current intake never
+         * writes, so every month read $0 above initiatives with real numbers.
+         * Each initiative's revenue is counted once, in its event month (see
+         * lib/planning/period-totals), so a month equals the rows under it.
+         */
+        const [initiatives, targets, results] = await Promise.all([
+          initiativeService.getInitiativesByCompany(companyId),
+          loadMonthTargets(companyId, YEAR),
+          resultService.getResultsByDateRange(
+            new Date(YEAR, 0, 1),
+            new Date(YEAR, 11, 31),
+            companyId
+          ),
+        ]);
 
-        const getMonthRevenue = (proj: Projection | undefined, month: number): number => {
-          if (!proj?.monthly) return 0;
-          // Match the YEAR as well as the month. Projection entries carry
-          // { year, month, revenue }, so matching on month alone made a 2027
-          // entry supply the value for the same month of 2026.
-          const monthEntry = (proj.monthly as any[]).find(
-            (m: any) => m.month === month && (m.year === undefined || m.year === YEAR)
-          );
-          return monthEntry?.revenue || 0;
-        };
+        const actualByMonth = Array.from({ length: 12 }, () => 0);
+        for (const r of results) {
+          const d = toDateOnly(r.weekStartDate);
+          if (Number(d.slice(0, 4)) !== YEAR) continue;
+          actualByMonth[Number(d.slice(5, 7)) - 1] += r.actualRevenue || 0;
+        }
 
-        // Load data for all 12 months
-        const monthPromises = Array.from({ length: 12 }, (_, i) => i + 1).map(async (m) => {
-          const { start, end } = getMonthDateRange(m, YEAR);
-
-          const [results, initiatives] = await Promise.all([
-            resultService.getResultsByDateRange(start, end),
-            initiativeService.getInitiativesByDateRange(companyId, start, end),
-          ]);
-
-          // A month with no initiatives has no plan, so it must not show
-          // Good/Better/Best figures. Projections are a year-level rollup and
-          // previously filled in every month, including the months before a
-          // mid-year plan even starts.
-          const planned = initiatives.length > 0;
-          const good = planned ? getMonthRevenue(goodProj, m) : 0;
-          const better = planned ? getMonthRevenue(betterProj, m) : 0;
-          const best = planned ? getMonthRevenue(bestProj, m) : 0;
-          const actual = results.reduce((sum, r) => sum + r.actualRevenue, 0);
-          const variance = actual - better;
-          const variancePercent = better > 0 ? ((actual - better) / better) * 100 : null;
-
-          return {
-            month: m,
-            planned,
-            good,
-            better,
-            best,
-            actual,
-            variance,
-            variancePercent,
-            initiatives,
-          };
-        });
-
-        const data = await Promise.all(monthPromises);
-        setMonthsData(data);
+        const buckets = monthBuckets(initiatives, YEAR);
+        setMonthsData(
+          buckets.map((b, idx) => {
+            const actual = actualByMonth[idx];
+            return {
+              month: idx + 1,
+              planned: b.initiatives.length > 0 || targets[idx] > 0,
+              target: targets[idx],
+              good: b.good,
+              better: b.better,
+              best: b.best,
+              actual,
+              ...variances(actual, b.better),
+              initiatives: b.initiatives,
+            };
+          })
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load summary data';
         setError(message);
@@ -153,72 +143,6 @@ export function MonthlySummaryTable() {
 
     loadAllMonths();
   }, [companyId, YEAR]);
-
-  const handleExportCSV = () => {
-    const headers = [
-      'Month',
-      'Good',
-      'Better',
-      'Best',
-      'Actual',
-      '$ Variance',
-      '% Variance',
-      'Initiatives',
-      'Status',
-    ];
-
-    const rows = monthsData.map((m) => {
-      // Mirrors the badge: unplanned months have no status, and the comparison
-      // is against a real point in time rather than a bare month number.
-      const nowYear = new Date().getFullYear();
-      const status = !m.planned
-        ? 'Not planned'
-        : YEAR < nowYear || (YEAR === nowYear && m.month < currentMonth)
-          ? 'Complete'
-          : YEAR === nowYear && m.month === currentMonth
-            ? 'Current'
-            : 'Upcoming';
-      return [
-        `${MONTH_NAMES[m.month - 1]} ${YEAR}`,
-        m.good.toFixed(2),
-        m.better.toFixed(2),
-        m.best.toFixed(2),
-        m.actual.toFixed(2),
-        m.variance.toFixed(2),
-        m.variancePercent !== null ? m.variancePercent.toFixed(1) + '%' : 'N/A',
-        m.initiatives.length.toString(),
-        status,
-      ];
-    });
-
-    // Add year total row
-    const totals = monthsData.reduce(
-      (acc, m) => ({
-        good: acc.good + m.good,
-        better: acc.better + m.better,
-        best: acc.best + m.best,
-        actual: acc.actual + m.actual,
-      }),
-      { good: 0, better: 0, best: 0, actual: 0 }
-    );
-    const totalVariance = totals.actual - totals.better;
-    const totalVariancePct = totals.better > 0 ? ((totals.actual - totals.better) / totals.better) * 100 : null;
-    const totalInitiatives = monthsData.reduce((sum, m) => sum + m.initiatives.length, 0);
-
-    rows.push([
-      'YEAR TOTAL',
-      totals.good.toFixed(2),
-      totals.better.toFixed(2),
-      totals.best.toFixed(2),
-      totals.actual.toFixed(2),
-      totalVariance.toFixed(2),
-      totalVariancePct !== null ? totalVariancePct.toFixed(1) + '%' : 'N/A',
-      totalInitiatives.toString(),
-      '',
-    ]);
-
-    exportToCSV(`monthly-summary-${YEAR}.csv`, headers, rows);
-  };
 
   const toggleExpand = (month: number) => {
     setExpandedMonth(expandedMonth === month ? null : month);
@@ -241,35 +165,23 @@ export function MonthlySummaryTable() {
     );
   }
 
-  // Year totals
-  const yearTotals = monthsData.reduce(
-    (acc, m) => ({
-      good: acc.good + m.good,
-      better: acc.better + m.better,
-      best: acc.best + m.best,
-      actual: acc.actual + m.actual,
-      initiatives: acc.initiatives + m.initiatives.length,
-    }),
-    { good: 0, better: 0, best: 0, actual: 0, initiatives: 0 }
+  // Year totals: every initiative sits in exactly one month, so none is counted twice.
+  const yearScenarios = sumBuckets(monthsData);
+  const yearTarget = monthsData.reduce((sum, m) => sum + m.target, 0);
+  const yearActual = monthsData.reduce((sum, m) => sum + m.actual, 0);
+  const { variance: yearVariance, variancePercent: yearVariancePct } = variances(
+    yearActual,
+    yearScenarios.better
   );
-  const yearVariance = yearTotals.actual - yearTotals.better;
-  const yearVariancePct = yearTotals.better > 0 ? ((yearTotals.actual - yearTotals.better) / yearTotals.better) * 100 : null;
 
   return (
     <div className="space-y-3">
       {/* Header row */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-[hsl(var(--foreground-muted))]">
-          All 12 months with good, better, and best revenue targets. Click a row to drill into its initiatives.
+          All 12 months of {YEAR}. Each initiative&apos;s revenue counts in the month of its event date. Click a row to see its initiatives.
         </p>
         <div className="flex items-center gap-2 shrink-0 ml-4">
-          <button
-            onClick={handleExportCSV}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-[var(--radius-lg)] border border-border bg-card text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Export CSV
-          </button>
           <Link
             href="/initiatives"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-[var(--radius-lg)] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/90 transition-colors"
@@ -281,11 +193,12 @@ export function MonthlySummaryTable() {
       </div>
 
       {/* Table */}
-      <div className="rounded-[var(--radius-lg)] border border-border bg-card overflow-hidden">
+      <div className="rounded-[var(--radius-lg)] border border-border bg-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-[hsl(var(--muted))]/50">
               <th className="text-left py-3 px-4 font-medium text-[hsl(var(--foreground-muted))]">Month</th>
+              <th className="text-right py-3 px-3 font-medium text-[hsl(var(--foreground-muted))]">Target</th>
               <th className="text-right py-3 px-3 font-medium text-[hsl(var(--foreground-muted))]">Good</th>
               <th className="text-right py-3 px-3 font-medium text-[hsl(var(--foreground-muted))]">Better</th>
               <th className="text-right py-3 px-3 font-medium text-[hsl(var(--foreground-muted))]">Best</th>
@@ -302,25 +215,26 @@ export function MonthlySummaryTable() {
                 key={m.month}
                 data={m}
                 year={YEAR}
-                isCurrent={m.month === currentMonth}
+                isCurrent={m.month === nowMonth}
                 isExpanded={expandedMonth === m.month}
                 onToggle={() => toggleExpand(m.month)}
               />
             ))}
             {/* Year Total Row */}
             <tr className="bg-[hsl(var(--muted))]/30 font-semibold">
-              <td className="py-3 px-4 text-[hsl(var(--foreground))]">YEAR TOTAL</td>
-              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearTotals.good)}</td>
-              <td className="text-right py-3 px-3 font-bold text-[hsl(var(--foreground))]">{formatCurrency(yearTotals.better)}</td>
-              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearTotals.best)}</td>
-              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearTotals.actual)}</td>
+              <td className="py-3 px-4 text-[hsl(var(--foreground))]">{YEAR} TOTAL</td>
+              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearTarget)}</td>
+              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearScenarios.good)}</td>
+              <td className="text-right py-3 px-3 font-bold text-[hsl(var(--foreground))]">{formatCurrency(yearScenarios.better)}</td>
+              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearScenarios.best)}</td>
+              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{formatCurrency(yearActual)}</td>
               <td className={`text-right py-3 px-3 ${yearVariance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                 {formatCurrency(yearVariance)}
               </td>
               <td className={`text-right py-3 px-3 ${yearVariancePct !== null && yearVariancePct >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                 {yearVariancePct !== null ? formatPercent(yearVariancePct) : '—'}
               </td>
-              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{yearTotals.initiatives}</td>
+              <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">{yearScenarios.initiatives.length}</td>
               <td className="text-center py-3 px-3">—</td>
             </tr>
           </tbody>
@@ -342,7 +256,7 @@ interface MonthRowProps {
 }
 
 function MonthRow({ data, year, isCurrent, isExpanded, onToggle }: MonthRowProps) {
-  const { month, planned, good, better, best, actual, variance, variancePercent, initiatives } = data;
+  const { month, planned, target, good, better, best, actual, variance, variancePercent, initiatives } = data;
   // A month is only "planned" when it actually has initiatives. Without that,
   // the year-level projection rollup filled in targets for every month - including
   // the months before a mid-year plan starts, which is misleading.
@@ -370,6 +284,9 @@ function MonthRow({ data, year, isCurrent, isExpanded, onToggle }: MonthRowProps
               </span>
             )}
           </div>
+        </td>
+        <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">
+          {hasData ? formatCurrency(target) : '—'}
         </td>
         <td className="text-right py-3 px-3 text-[hsl(var(--foreground))]">
           {hasData ? formatCurrency(good) : '—'}
@@ -404,8 +321,8 @@ function MonthRow({ data, year, isCurrent, isExpanded, onToggle }: MonthRowProps
       )}
       {isExpanded && initiatives.length === 0 && (
         <tr>
-          <td colSpan={9} className="py-3 px-4 pl-12 text-sm text-[hsl(var(--foreground-muted))] italic">
-            No initiatives in this month.
+          <td colSpan={10} className="py-3 px-4 pl-12 text-sm text-[hsl(var(--foreground-muted))] italic">
+            No initiatives have their event in this month.
           </td>
         </tr>
       )}
@@ -445,6 +362,7 @@ function InitiativeChildRow({ initiative }: InitiativeChildRowProps) {
           </span>
         </div>
       </td>
+      <td className="text-right py-2.5 px-3 text-sm text-[hsl(var(--foreground-muted))]">—</td>
       <td className="text-right py-2.5 px-3 text-sm text-[hsl(var(--foreground-muted))]">
         {formatCurrency(revenueScenarios.good)}
       </td>

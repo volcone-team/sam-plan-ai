@@ -33,6 +33,8 @@ import { NumberInputRaw } from '@/components/ui/number-input';
 import { MetricInputs } from '@/components/initiatives/metric-inputs';
 import { metricGroupsOf, parseMetricDraft } from '@/lib/metrics/result-metrics';
 import type { WeeklyPlan, Initiative, Task, TaskStatus, Result } from '@/types';
+import { weekTarget } from '@/lib/planning/period-totals';
+import { loadMonthTargets } from '@/lib/planning/load-period-targets';
 
 
 const MONTH_SHORT = [
@@ -135,6 +137,8 @@ export function WeeklyPlanner() {
   const [error, setError] = useState<string | null>(null);
 
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null);
+  /** This week's share of the plan goal. */
+  const [weekTargetRevenue, setWeekTargetRevenue] = useState(0);
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [tasks, setTasks] = useState<TaskWithInitiative[]>([]);
   const [actualRevenue, setActualRevenue] = useState(0);
@@ -180,13 +184,23 @@ export function WeeklyPlanner() {
         const end = getWeekEnd(weekStart);
 
         // Fetch plan and active initiatives in parallel
-        const [plan, activeInitiatives, weekResults] = await Promise.all([
+        // The week's target is derived from the annual plan: each day takes its
+        // share of its month's target (lib/planning/period-totals). The
+        // weekly_plans table is not written by the current intake, so reading
+        // its target left the card blank. A week across New Year needs both years.
+        const weekYears = [...new Set([weekStart.getFullYear(), end.getFullYear()])];
+        const [plan, activeInitiatives, weekResults, ...yearTargets] = await Promise.all([
           planService.getWeeklyPlan(companyId, weekStart),
           initiativeService.getActiveInitiatives(companyId),
           resultService.getResultsByWeek(companyId, weekStart),
+          ...weekYears.map(y => loadMonthTargets(companyId, y)),
         ]);
 
         setWeeklyPlan(plan);
+        const targetsByYear = new Map(weekYears.map((y, i) => [y, yearTargets[i] as number[]]));
+        setWeekTargetRevenue(
+          weekTarget(weekStart, (y, m) => targetsByYear.get(y)?.[m - 1] ?? 0)
+        );
 
         // Filter initiatives active during this week. activeInWeek keeps this
         // planner's old rule for legacy rows verbatim; new-intake rows use
@@ -337,7 +351,7 @@ export function WeeklyPlanner() {
     );
   }
 
-  const targetRevenue = weeklyPlan?.targetRevenue || 0;
+  const targetRevenue = weekTargetRevenue;
   const progressPct = targetRevenue > 0 ? Math.min((actualRevenue / targetRevenue) * 100, 100) : 0;
   const isCurrentWeek = getWeekStart(new Date()).getTime() === weekStart.getTime();
 

@@ -17,7 +17,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   Ban,
-  Download,
   Plus,
   ArrowRight,
 } from 'lucide-react';
@@ -255,29 +254,6 @@ export function DailyPlanner() {
     tasks.find((t) => t.status !== 'completed' && t.status !== 'cancelled') ||
     null;
 
-  /** Today's board as CSV: what was due, for whom, and where it stands. */
-  const exportCsv = () => {
-    const rows = [
-      ['Task', 'Initiative', 'Status', 'Priority', 'Due date'],
-      ...[...tasks, ...slipped, ...upcoming].map((t) => [
-        t.name,
-        t.initiativeName,
-        t.status,
-        t.priority,
-        formatDateShort(new Date(t.dueDate)),
-      ]),
-    ];
-    const csv = rows
-      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
-      .join('\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `sam-daily-${formatDateShort(selectedDate).replace(/\s+/g, '-')}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
   const doneToday = tasks.filter((t) => t.status === 'completed').length;
   const donePct = tasks.length > 0 ? Math.round((doneToday / tasks.length) * 100) : 0;
 
@@ -323,13 +299,6 @@ export function DailyPlanner() {
             className="rounded-[var(--radius-md)] border border-border p-1.5 transition-colors hover:bg-[hsl(var(--background-muted))]"
           >
             <ChevronRight className="h-4 w-4" />
-          </button>
-          <button
-            onClick={exportCsv}
-            className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-[hsl(var(--background-muted))]"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Export CSV
           </button>
           <button
             onClick={() => router.push('/initiatives')}
