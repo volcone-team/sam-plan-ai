@@ -21,7 +21,7 @@ import { resultService } from '@/services/result.service';
 import { QuarterlySummaryTable } from './quarterly-summary-table';
 import type { QuarterlyPlan, Initiative } from '@/types';
 import { monthBuckets, quarterBuckets, quarterTargets } from '@/lib/planning/period-totals';
-import { loadMonthTargets } from '@/lib/planning/load-period-targets';
+import { loadPlanPeriod } from '@/lib/planning/load-period-targets';
 import { usePlanYears } from '@/hooks/use-plan-years';
 import { PlanYearTabs } from '@/components/planning/plan-year-tabs';
 
@@ -116,10 +116,10 @@ export function QuarterlyPlanner() {
         // plan (lib/planning/period-totals), the same figures as the summary
         // table above. The projections and quarterly_plans tables are not
         // written by the current intake, so reading them showed $0.
-        const [quarterlyPlans, allInitiatives, monthTargets, results, quarterInitiatives] = await Promise.all([
+        const [quarterlyPlans, allInitiatives, period, results, quarterInitiatives] = await Promise.all([
           planService.getQuarterlyPlans(companyId, YEAR),
           initiativeService.getInitiativesByCompany(companyId),
-          loadMonthTargets(companyId, YEAR),
+          loadPlanPeriod(companyId, YEAR),
           resultService.getResultsByDateRange(start, end, companyId),
           initiativeService.getInitiativesByDateRange(companyId, start, end),
         ]);
@@ -128,7 +128,8 @@ export function QuarterlyPlanner() {
         const plan = quarterlyPlans.find(p => p.quarter === selectedQuarter) || null;
         setQuarterPlan(plan);
 
-        const months = monthBuckets(allInitiatives, YEAR);
+        const monthTargets = period.monthTargets;
+        const months = monthBuckets(allInitiatives, YEAR, period.planEnd);
         const quarter = quarterBuckets(months)[selectedQuarter - 1];
         setQuarterProjections({ good: quarter.good, better: quarter.better, best: quarter.best });
         setQuarterTarget(quarterTargets(monthTargets)[selectedQuarter - 1] ?? 0);
@@ -226,7 +227,7 @@ export function QuarterlyPlanner() {
           <SummaryCard label="Actual to Date" value={formatCurrency(actualRevenue)} variant="default" />
         </div>
         <p className="text-xs text-[hsl(var(--foreground-muted))]">
-          Target is this quarter&apos;s share of your {YEAR} goal. Good, Better and Best add up the initiatives whose event falls in Q{selectedQuarter}.
+          Target is this quarter&apos;s share of your {YEAR} goal. Good, Better and Best add up what each initiative earns in Q{selectedQuarter}: one-time work in its event month, recurring work for each run.
         </p>
 
         {/* Progress bar */}

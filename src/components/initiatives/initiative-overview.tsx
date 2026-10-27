@@ -14,7 +14,18 @@ import { sumExpensesByInitiative } from '@/lib/initiative-spend';
 import { NumberInputRaw } from '@/components/ui/number-input';
 import { DateInput } from '@/components/ui/date-input';
 import { usePermission } from '@/hooks/use-permission';
-import { formatNumber } from '@/lib/format-money';
+import { formatNumber, formatMoney } from '@/lib/format-money';
+import { autoBest, autoBetter } from '@/lib/intake-v3/revenue';
+import { planService } from '@/services/plan.service';
+import { horizonEnd, perRun } from '@/lib/planning/revenue-spread';
+import { REPEAT_FREQUENCY_LABELS, REPEAT_RUNS_PER_YEAR, type RepeatFrequency } from '@/lib/intake-forecast';
+import type { DateOnly } from '@/lib/plan-dates';
+import { editLayout } from '@/lib/initiatives/edit-layout';
+import type { LibraryRecordConfig } from '@/lib/intake-v3/library-config';
+import type { InitiativeKind } from '@/types';
+
+/** Frequencies frequent enough that "per month" is a meaningful figure. */
+const MONTHLY_OR_FASTER = new Set<string>(['weekly', 'bi-weekly', 'monthly']);
 
 export interface InitiativeOverviewProps {
   initiative: Initiative;
@@ -39,6 +50,8 @@ const kindLabels: Record<string, string> = {
   recurring: 'Recurring',
   evergreen: 'Evergreen',
 };
+
+type EditErrors = { name?: string; activationDate?: string; eventDate?: string; closeDate?: string; frequency?: string };
 
 const inputClass =
   'w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-[hsl(var(--primary))] placeholder:text-[hsl(var(--foreground-muted))]';
@@ -77,7 +90,7 @@ export function InitiativeOverview({
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<{ name?: string; activationDate?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<EditErrors>({});
 
   // Form state
   const [name, setName] = useState(initiative.name);
@@ -87,6 +100,31 @@ export function InitiativeOverview({
   const [productId, setProductId] = useState(initiative.productId || '');
   const [activationDate, setActivationDate] = useState(toDateInputValue(initiative.activationDate));
   const [eventDate, setEventDate] = useState(toDateInputValue(initiative.eventDate));
+  const [closeDate, setCloseDate] = useState(toDateInputValue(initiative.revenueCloseDate));
+  const [kindValue, setKindValue] = useState<InitiativeKind>(initiative.kind);
+  const [frequencyValue, setFrequencyValue] = useState(initiative.repeatFrequency ?? '');
+  /**
+   * The library record config the Add form used, so Edit shows the same
+   * dates, kind and frequency (edit-layout.ts). Null until loaded, and for a
+   * custom initiative; the form then offers every field.
+   */
+  const [formConfig, setFormConfig] = useState<{ config: LibraryRecordConfig | null; categoryId: string | null } | null>(null);
+  useEffect(() => {
+    if (!editing || formConfig) return;
+    let cancelled = false;
+    fetch(`/api/initiatives/${initiative.id}/form-config`, { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : { config: null, categoryId: null }))
+      .then(body => { if (!cancelled) setFormConfig({ config: body.config ?? null, categoryId: body.categoryId ?? null }); })
+      .catch(() => { if (!cancelled) setFormConfig({ config: null, categoryId: null }); });
+    return () => { cancelled = true; };
+  }, [editing, formConfig, initiative.id]);
+  const layout = editLayout({
+    config: formConfig?.config ?? null,
+    categoryId: formConfig?.categoryId ?? null,
+    kind: kindValue,
+    conversionPath: initiative.conversionPath ?? (typeof initiative.attrs?.conversion_ask === 'string' ? initiative.attrs.conversion_ask : null),
+    hasCloseDate: Boolean(initiative.revenueCloseDate),
+  });
   const [trafficInput, setTrafficInput] = useState(numberToInputValue(initiative.trafficInput));
   const [plannedBudget, setPlannedBudget] = useState(numberToInputValue(initiative.plannedBudget));
   /** D2: Σ this initiative's recorded expenses; null while loading. */
@@ -103,9 +141,46 @@ export function InitiativeOverview({
       .catch(() => { if (!cancelled) setExpenseSpend(0); });
     return () => { cancelled = true; };
   }, [initiative.id]);
+  /** Last day of the plan horizon: bounds which runs of a recurring initiative count. */
+  const [planEnd, setPlanEnd] = useState<DateOnly | null>(null);
+  useEffect(() => {
+    if (initiative.kind !== 'recurring' || !initiative.companyId) return;
+    let cancelled = false;
+    planService
+      .getPlanHorizon(initiative.companyId)
+      .then(h => { if (!cancelled) setPlanEnd(horizonEnd(h?.planStartMonth, h?.horizonMonths)); })
+      .catch(() => { /* no horizon: runs are counted over twelve months */ });
+    return () => { cancelled = true; };
+  }, [initiative.companyId, initiative.kind]);
+
+  // How often it runs, and what one run (and one month) earns.
+  const frequency =
+    initiative.kind === 'recurring' && initiative.repeatFrequency ? initiative.repeatFrequency : null;
+  const frequencyLabel = frequency
+    ? REPEAT_FREQUENCY_LABELS[frequency as RepeatFrequency] ?? frequency
+    : null;
+  const runFigures = frequency ? perRun(initiative, planEnd) : null;
+  const monthlyBetter =
+    runFigures && frequency && MONTHLY_OR_FASTER.has(frequency)
+      ? (runFigures.better * REPEAT_RUNS_PER_YEAR[frequency as RepeatFrequency]) / 12
+      : null;
+
   const [revenueGood, setRevenueGood] = useState(numberToInputValue(initiative.revenueScenarios?.good));
   const [revenueBetter, setRevenueBetter] = useState(numberToInputValue(initiative.revenueScenarios?.better));
   const [revenueBest, setRevenueBest] = useState(numberToInputValue(initiative.revenueScenarios?.best));
+  /**
+   * Better and Best follow Good (+10% / +20%) until the user types in them.
+   * Once touched in this edit they keep the typed figure; Good no longer moves them.
+   */
+  const [betterTouched, setBetterTouched] = useState(false);
+  const [bestTouched, setBestTouched] = useState(false);
+  const handleGoodChange = (value: string) => {
+    setRevenueGood(value);
+    const good = Number(value);
+    const usable = value !== '' && Number.isFinite(good) && good >= 0;
+    if (!betterTouched) setRevenueBetter(usable ? String(autoBetter(good)) : '');
+    if (!bestTouched) setRevenueBest(usable ? String(autoBest(good)) : '');
+  };
 
   /** Reset form state back to the current initiative values. */
   const resetForm = () => {
@@ -116,11 +191,16 @@ export function InitiativeOverview({
     setProductId(initiative.productId || '');
     setActivationDate(toDateInputValue(initiative.activationDate));
     setEventDate(toDateInputValue(initiative.eventDate));
+    setCloseDate(toDateInputValue(initiative.revenueCloseDate));
+    setKindValue(initiative.kind);
+    setFrequencyValue(initiative.repeatFrequency ?? '');
     setTrafficInput(numberToInputValue(initiative.trafficInput));
     setPlannedBudget(numberToInputValue(initiative.plannedBudget));
     setRevenueGood(numberToInputValue(initiative.revenueScenarios?.good));
     setRevenueBetter(numberToInputValue(initiative.revenueScenarios?.better));
     setRevenueBest(numberToInputValue(initiative.revenueScenarios?.best));
+    setBetterTouched(false);
+    setBestTouched(false);
     setFieldErrors({});
     setSaveError(null);
   };
@@ -137,11 +217,21 @@ export function InitiativeOverview({
 
   const handleSave = async () => {
     // Client-side validation
-    const errors: { name?: string; activationDate?: string } = {};
+    const errors: EditErrors = {};
     if (!name.trim()) errors.name = 'Name is required.';
-    // Required once set. A new-intake row may be unscheduled (migration 045)
-    // and stays so until the user picks a date.
-    if (!activationDate && initiative.activationDate) errors.activationDate = 'Activation date is required.';
+    // The same rules as the Add form. A start date is required where it is
+    // asked, except on a row that was saved unscheduled (migration 045),
+    // which stays so until the user picks one.
+    if (layout.start.shown && !activationDate && initiative.activationDate) errors.activationDate = 'Enter a start date.';
+    if (layout.event.shown && layout.event.required && !eventDate) errors.eventDate = 'Enter an event date.';
+    if (layout.event.shown && eventDate && activationDate && eventDate < activationDate) {
+      errors.eventDate = "The event can't be before the start date.";
+    }
+    if (layout.close.shown && layout.close.required && !closeDate) errors.closeDate = `Enter a date for "${layout.close.label}".`;
+    if (layout.close.shown && closeDate && activationDate && closeDate < activationDate) {
+      errors.closeDate = "This can't be before the start date.";
+    }
+    if (layout.frequency.shown && !frequencyValue) errors.frequency = 'Choose how often it runs.';
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
       setSaveError(null);
@@ -158,8 +248,16 @@ export function InitiativeOverview({
      * edited date is stored as 'day'; an untouched month-precision date is
      * left alone rather than silently becoming the 1st of the month.
      */
-    const activationChanged = activationDate !== toDateInputValue(initiative.activationDate);
-    const eventChanged = eventDate !== toDateInputValue(initiative.eventDate);
+    // A hidden field is never sent, so the workbook hiding a date leaves the
+    // stored one alone. Moving to ongoing is the exception: it has no event.
+    const toOngoing = kindValue === 'evergreen' && initiative.kind !== 'evergreen';
+    const activationChanged = layout.start.shown && activationDate !== toDateInputValue(initiative.activationDate);
+    const eventChanged = layout.event.shown
+      ? eventDate !== toDateInputValue(initiative.eventDate)
+      : toOngoing && Boolean(initiative.eventDate);
+    const closeChanged = layout.close.shown && closeDate !== toDateInputValue(initiative.revenueCloseDate);
+    const frequencyToSave =
+      kindValue !== 'recurring' ? null : layout.frequency.shown ? frequencyValue || null : layout.silentFrequency ?? (initiative.repeatFrequency ?? null);
 
     const dto: UpdateInitiativeDTO = {
       name: name.trim(),
@@ -174,10 +272,13 @@ export function InitiativeOverview({
             ...(activationDate ? { activationDatePrecision: 'day' as const } : {}),
           }
         : {}),
+      ...(kindValue !== initiative.kind ? { kind: kindValue } : {}),
+      ...(frequencyToSave !== (initiative.repeatFrequency ?? null) ? { repeatFrequency: frequencyToSave } : {}),
+      ...(closeChanged ? { revenueCloseDate: closeDate ? parseDateOnly(closeDate) : null } : {}),
       ...(eventChanged
         ? {
-            eventDate: eventDate ? parseDateOnly(eventDate) : null,
-            ...(eventDate ? { eventDatePrecision: 'day' as const } : {}),
+            eventDate: layout.event.shown && eventDate ? parseDateOnly(eventDate) : null,
+            ...(layout.event.shown && eventDate ? { eventDatePrecision: 'day' as const } : {}),
           }
         : {}),
       trafficInput: trafficInput === '' ? undefined : toNumber(trafficInput),
@@ -332,37 +433,108 @@ export function InitiativeOverview({
             </div>
           </div>
 
-          {/* Dates */}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <label htmlFor="overview-edit-activation" className={labelClass}>
-                Activation date <span className="text-red-500">*</span>
-              </label>
-              <DateInput
-                id="overview-edit-activation"
-                value={activationDate}
-                onValueChange={setActivationDate}
-                aria-invalid={fieldErrors.activationDate ? true : undefined}
-                error={!!fieldErrors.activationDate}
-              />
-              {fieldErrors.activationDate && (
-                <p className={fieldErrorClass}>{fieldErrors.activationDate}</p>
+          {/* How it runs: the Add form's kind and frequency questions */}
+          {(layout.kind.shown || layout.frequency.shown) && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {layout.kind.shown && (
+                <div className="space-y-1.5">
+                  <label htmlFor="overview-edit-kind" className={labelClass}>
+                    Frequency
+                  </label>
+                  <select
+                    id="overview-edit-kind"
+                    value={kindValue}
+                    onChange={e => setKindValue(e.target.value as InitiativeKind)}
+                    className={inputClass}
+                  >
+                    {/* Keep a stored kind the record no longer allows selectable, so a save does not change it silently. */}
+                    {!layout.kind.options.some(o => o.value === kindValue) && (
+                      <option value={kindValue}>{kindLabels[kindValue] || kindValue}</option>
+                    )}
+                    {layout.kind.options.map(o => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {layout.frequency.shown && (
+                <div className="space-y-1.5">
+                  <label htmlFor="overview-edit-frequency" className={labelClass}>
+                    How often? <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    id="overview-edit-frequency"
+                    value={frequencyValue}
+                    onChange={e => setFrequencyValue(e.target.value)}
+                    aria-invalid={fieldErrors.frequency ? true : undefined}
+                    className={inputClass}
+                  >
+                    <option value="">Choose…</option>
+                    {frequencyValue && !layout.frequency.options.some(o => o.value === frequencyValue) && (
+                      <option value={frequencyValue}>{frequencyValue}</option>
+                    )}
+                    {layout.frequency.options.map(o => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                  {fieldErrors.frequency && <p className={fieldErrorClass}>{fieldErrors.frequency}</p>}
+                </div>
               )}
             </div>
-
-            <div className="space-y-1.5">
-              <label htmlFor="overview-edit-event-date" className={labelClass}>
-                Event date
-              </label>
-              <DateInput
-                id="overview-edit-event-date"
-                value={eventDate}
-                onValueChange={setEventDate}
-              />
-              <p className={helperClass}>Leave empty to clear it.</p>
-            </div>
+          )}
+          {/* Dates: the workbook's Start Date / Event Date columns decide which are asked, as on the Add form */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {layout.start.shown && (
+              <div className="space-y-1.5">
+                <label htmlFor="overview-edit-activation" className={labelClass}>
+                  Start date {layout.start.required && <span className="text-red-500">*</span>}
+                </label>
+                <DateInput
+                  id="overview-edit-activation"
+                  value={activationDate}
+                  onValueChange={setActivationDate}
+                  aria-invalid={fieldErrors.activationDate ? true : undefined}
+                  error={!!fieldErrors.activationDate}
+                />
+                <p className={helperClass}>When it starts producing.</p>
+                {fieldErrors.activationDate && (
+                  <p className={fieldErrorClass}>{fieldErrors.activationDate}</p>
+                )}
+              </div>
+            )}
+            {layout.event.shown && (
+              <div className="space-y-1.5">
+                <label htmlFor="overview-edit-event-date" className={labelClass}>
+                  Event date {layout.event.required && <span className="text-red-500">*</span>}
+                </label>
+                <DateInput
+                  id="overview-edit-event-date"
+                  value={eventDate}
+                  onValueChange={setEventDate}
+                  aria-invalid={fieldErrors.eventDate ? true : undefined}
+                  error={!!fieldErrors.eventDate}
+                />
+                {kindValue === 'recurring' && <p className={helperClass}>The first run. Later runs follow the frequency.</p>}
+                {!layout.event.required && kindValue !== 'recurring' && <p className={helperClass}>Leave empty to clear it.</p>}
+                {fieldErrors.eventDate && <p className={fieldErrorClass}>{fieldErrors.eventDate}</p>}
+              </div>
+            )}
+            {layout.close.shown && (
+              <div className="space-y-1.5">
+                <label htmlFor="overview-edit-close-date" className={labelClass}>
+                  {layout.close.label} {layout.close.required && <span className="text-red-500">*</span>}
+                </label>
+                <DateInput
+                  id="overview-edit-close-date"
+                  value={closeDate}
+                  onValueChange={setCloseDate}
+                  aria-invalid={fieldErrors.closeDate ? true : undefined}
+                  error={!!fieldErrors.closeDate}
+                />
+                {fieldErrors.closeDate && <p className={fieldErrorClass}>{fieldErrors.closeDate}</p>}
+              </div>
+            )}
           </div>
-
           {/* Traffic input */}
           <div className="space-y-1.5">
             <label htmlFor="overview-edit-traffic" className={labelClass}>
@@ -405,6 +577,10 @@ export function InitiativeOverview({
           {/* Revenue scenarios */}
           <fieldset className="space-y-3">
             <legend className={labelClass}>Revenue scenarios ($)</legend>
+            <p className={helperClass}>
+              Better and Best fill in from Good (+10% and +20%). You can change them.
+              {initiative.kind === 'recurring' && ' For a recurring initiative these are the total across all its runs in the plan.'}
+            </p>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-1.5">
                 <label htmlFor="overview-edit-revenue-good" className={helperClass}>
@@ -413,31 +589,31 @@ export function InitiativeOverview({
                 <NumberInputRaw
               id="overview-edit-revenue-good"
               value={revenueGood}
-              onValueChange={setRevenueGood}
+              onValueChange={handleGoodChange}
                   className={inputClass}
                   placeholder="0"
                 />
               </div>
               <div className="space-y-1.5">
                 <label htmlFor="overview-edit-revenue-better" className={helperClass}>
-                  Better
+                  Better (+10%)
                 </label>
                 <NumberInputRaw
               id="overview-edit-revenue-better"
               value={revenueBetter}
-              onValueChange={setRevenueBetter}
+              onValueChange={v => { setBetterTouched(true); setRevenueBetter(v); }}
                   className={inputClass}
                   placeholder="0"
                 />
               </div>
               <div className="space-y-1.5">
                 <label htmlFor="overview-edit-revenue-best" className={helperClass}>
-                  Best
+                  Best (+20%)
                 </label>
                 <NumberInputRaw
               id="overview-edit-revenue-best"
               value={revenueBest}
-              onValueChange={setRevenueBest}
+              onValueChange={v => { setBestTouched(true); setRevenueBest(v); }}
                   className={inputClass}
                   placeholder="0"
                 />
@@ -458,7 +634,8 @@ export function InitiativeOverview({
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving}
+              // Wait for the record's rules, so the fields saved are the ones shown.
+              disabled={saving || !formConfig}
               className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] transition-colors hover:bg-[hsl(var(--primary))]/90 disabled:opacity-60"
             >
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -497,8 +674,35 @@ export function InitiativeOverview({
               </span>
               <span className="text-sm font-medium text-[hsl(var(--foreground))]">
                 {kindLabels[initiative.kind] || initiative.kind}
+                {frequencyLabel && ` · ${frequencyLabel}`}
               </span>
             </div>
+
+            {/* Revenue: the plan total, and for recurring work what each run earns */}
+            <div className="flex items-start justify-between gap-4">
+              <span className="text-sm text-[hsl(var(--foreground-muted))]">
+                Revenue goal{runFigures ? ' (all runs)' : ''}
+              </span>
+              <span className="text-right text-sm font-medium text-[hsl(var(--foreground))]">
+                {formatMoney(initiative.revenueScenarios?.better ?? 0)}
+                <span className="block text-xs font-normal text-[hsl(var(--foreground-muted))]">
+                  Better · Good {formatMoney(initiative.revenueScenarios?.good ?? 0)} · Best{' '}
+                  {formatMoney(initiative.revenueScenarios?.best ?? 0)}
+                </span>
+              </span>
+            </div>
+            {runFigures && (
+              <div className="flex items-start justify-between gap-4">
+                <span className="text-sm text-[hsl(var(--foreground-muted))]">Per run</span>
+                <span className="text-right text-sm font-medium text-[hsl(var(--foreground))]">
+                  {formatMoney(Math.round(runFigures.better))}
+                  <span className="block text-xs font-normal text-[hsl(var(--foreground-muted))]">
+                    {runFigures.runs} run{runFigures.runs !== 1 ? 's' : ''} in the plan
+                    {monthlyBetter !== null && ` · ≈ ${formatMoney(Math.round(monthlyBetter))} a month`}
+                  </span>
+                </span>
+              </div>
+            )}
 
             {/* Product */}
             <div className="flex items-center justify-between">
@@ -515,7 +719,7 @@ export function InitiativeOverview({
             <div className="flex items-center justify-between">
               <span className="text-sm text-[hsl(var(--foreground-muted))] flex items-center gap-2">
                 <Clock className="h-3.5 w-3.5" />
-                Activation
+                Start date
               </span>
               <span className="text-sm font-medium text-[hsl(var(--foreground))]">
                 {initiative.activationDate

@@ -5,6 +5,8 @@
 
 export type ProductTicketTier = 'low' | 'mid' | 'high';
 export type RevenueType = 'one-time' | 'recurring';
+/** How a recurring product is billed (migration 055). Matches intake_products.recurring_interval. */
+export type RecurringInterval = 'month' | 'year';
 
 export interface Product {
   id: string;
@@ -13,6 +15,8 @@ export interface Product {
   description?: string;
   price: number;
   revenueType: RevenueType;
+  /** Recurring products only; null for one-time. An unrecorded interval reads as 'month'. */
+  recurringInterval: RecurringInterval | null;
   ticketTier: ProductTicketTier;
   isActive: boolean;
   displayOrder: number;
@@ -26,6 +30,7 @@ export interface CreateProductDTO {
   description?: string;
   price: number;
   revenueType: RevenueType;
+  recurringInterval?: RecurringInterval | null;
   ticketTier?: ProductTicketTier;
   displayOrder?: number;
 }
@@ -35,6 +40,7 @@ export interface UpdateProductDTO {
   description?: string;
   price?: number;
   revenueType?: RevenueType;
+  recurringInterval?: RecurringInterval | null;
   ticketTier?: ProductTicketTier;
   isActive?: boolean;
   displayOrder?: number;

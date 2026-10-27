@@ -16,6 +16,9 @@ import type { Initiative, Product } from '@/types';
 import { usePlanYears } from '@/hooks/use-plan-years';
 import { PlanYearTabs } from '@/components/planning/plan-year-tabs';
 import { horizonSpan } from '@/lib/initiatives/schedule';
+import { horizonEnd, runDates } from '@/lib/planning/revenue-spread';
+import { planService } from '@/services/plan.service';
+import { REPEAT_FREQUENCY_LABELS, type RepeatFrequency } from '@/lib/intake-forecast';
 import { daysInMonth, parseDateOnly, toDateOnly, type DateOnly } from '@/lib/plan-dates';
 
 /**
@@ -34,11 +37,17 @@ interface YearBar {
   continuesFrom: boolean;
   /** Runs on past this year (or has no end). */
   continuesTo: boolean;
+  /** Recurring run dates inside this year (empty for other kinds). */
+  runs: DateOnly[];
 }
 
-function barForYear(i: Initiative, year: number): YearBar | null {
-  const span = horizonSpan(i);
-  if (!span) return null;
+function barForYear(i: Initiative, year: number, planEnd: DateOnly | null): YearBar | null {
+  const base = horizonSpan(i);
+  if (!base) return null;
+  // A recurring initiative runs on past its first event: the bar reaches its last run.
+  const runs = runDates(i, planEnd);
+  const lastRun = runs.length > 0 ? runs[runs.length - 1] : null;
+  const span = lastRun && base.end !== null && lastRun > base.end ? { ...base, end: lastRun } : base;
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
   if (span.start > yearEnd) return null;
@@ -48,6 +57,7 @@ function barForYear(i: Initiative, year: number): YearBar | null {
     end: span.end === null || span.end > yearEnd ? yearEnd : span.end,
     continuesFrom: span.start < yearStart,
     continuesTo: span.end === null || span.end > yearEnd,
+    runs: runs.filter(d => d >= yearStart && d <= yearEnd),
   };
 }
 
@@ -98,6 +108,8 @@ export function TimelineView() {
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<string>('all');
+  /** Last day of the plan horizon; bounds recurring runs. */
+  const [planEnd, setPlanEnd] = useState<DateOnly | null>(null);
 
   useEffect(() => {
     if (!companyId) return;
@@ -113,6 +125,8 @@ export function TimelineView() {
 
         setInitiatives(allInitiatives);
         setProducts(allProducts);
+        const horizon = await planService.getPlanHorizon(companyId);
+        setPlanEnd(horizonEnd(horizon?.planStartMonth, horizon?.horizonMonths));
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load timeline data';
         setError(message);
@@ -139,7 +153,7 @@ export function TimelineView() {
     // Grouped by the quarter the bar starts in within this year; work that
     // began in an earlier year starts in Q1. Undated initiatives sit nowhere.
     filteredInitiatives.forEach(init => {
-      const bar = barForYear(init, YEAR);
+      const bar = barForYear(init, YEAR, planEnd);
       if (!bar) return;
       const quarter = Math.floor((Number(bar.start.slice(5, 7)) - 1) / 3);
       groups[quarter].initiatives.push({ initiative: init, bar });
@@ -150,7 +164,7 @@ export function TimelineView() {
     });
 
     return groups;
-  }, [filteredInitiatives, YEAR]);
+  }, [filteredInitiatives, YEAR, planEnd]);
 
   const yearCount = quarterGroups.reduce((n, g) => n + g.initiatives.length, 0);
 
@@ -273,6 +287,8 @@ export function TimelineView() {
                         </span>
                         <span className="text-[10px] text-[hsl(var(--foreground-muted))] capitalize">
                           {initiative.status.replace('_', ' ')}
+                          {initiative.kind === 'recurring' && initiative.repeatFrequency &&
+                            ` · ${REPEAT_FREQUENCY_LABELS[initiative.repeatFrequency as RepeatFrequency] ?? initiative.repeatFrequency}`}
                           {bar.continuesFrom && ' · from previous year'}
                           {bar.continuesTo && ' · continues next year'}
                         </span>
@@ -292,6 +308,15 @@ export function TimelineView() {
                           style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
                           title={`${formatDate(parseDateOnly(bar.start))} – ${bar.continuesTo ? 'continues' : formatDate(parseDateOnly(bar.end))}`}
                         />
+                        {/* One tick per recurring run in this year */}
+                        {bar.runs.map(run => (
+                          <div
+                            key={run}
+                            className="absolute top-1.5 bottom-1.5 w-px bg-white/80"
+                            style={{ left: `${(position(run, 'start') / 12) * 100}%` }}
+                            title={`Run: ${formatDate(parseDateOnly(run))}`}
+                          />
+                        ))}
                         {/* Event date marker, only when the event is in this year */}
                         {eventInYear && (
                           <div

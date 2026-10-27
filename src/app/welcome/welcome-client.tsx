@@ -8,8 +8,6 @@ import {
   Award,
   CalendarCheck,
   CalendarDays,
-  Check,
-  ClipboardCheck,
   Play,
   Presentation,
   Users,
@@ -22,9 +20,8 @@ import {
  * dark navy page with a blue glow, and following the user's light/dark
  * preference would produce a page that matches neither the mockup nor itself.
  *
- * Copy is the mockup's, verbatim. The bracketed values ([X] months, [day],
- * [time]) are unfilled in the design too, so they live in constants below
- * rather than being invented.
+ * Copy is the client's (Oct 2026), separate for monthly and yearly
+ * purchases: PERKS_* and STEP_COPY / COACHING_BODY below.
  */
 
 /** Everything still to be supplied. Empty values render honest fallbacks. */
@@ -37,9 +34,6 @@ const VIDEO_URL = "";
  * exactly as the empty constant did.
  */
 const SUPPORT_EMAIL = "support@samplan.ai";
-const COACHING_MONTHS = "[X]";
-const COACHING_DAY = "[day]";
-const COACHING_TIME = "[time]";
 
 /**
  * Artwork from the design, served from /public/welcome. Every image falls back
@@ -54,22 +48,21 @@ const ART = {
   stepCoaching: "/welcome/step-coaching.png",
 } as const;
 
-const PERKS = [
+/** Yearly perks (client copy, Oct 2026): the onboarding call is with Pete, an annual-plan bonus. */
+const PERKS_YEARLY = [
   {
     art: ART.perkOnboarding,
     icon: Presentation,
-    title: "A 1:1 onboarding call with a co-founder.",
-    body:
-      "You'll meet with Pete Vargas or Rachel Stivers, the co-founders of " +
-      "SAM Plan AI. Future members will onboard with our team.",
+    title: "A 1:1 onboarding call with Pete.",
+    body: "This is a one-of-a-kind bonus ONLY to Founding Members on the annual plan!",
   },
   {
     art: ART.perkCoaching,
     icon: Users,
     title: "Weekly group coaching led by the co-founders.",
     body:
-      `For ${COACHING_MONTHS} months, Pete or Rachel will lead your coaching ` +
-      "calls personally. Future coaching will be led by our team.",
+      "For 12 months, Pete or Rachel will lead your coaching calls personally. " +
+      "Future coaching will be led by our team.",
   },
   {
     art: ART.perkPricing,
@@ -81,10 +74,94 @@ const PERKS = [
   },
 ] as const;
 
+/** Monthly perks (client copy, Oct 2026): Rachel only, 12 months of coaching. */
+const PERKS_MONTHLY = [
+  {
+    art: ART.perkOnboarding,
+    icon: Presentation,
+    title: "A 1:1 onboarding call with a co-founder.",
+    body:
+      "You'll meet with Rachel Stivers, the co-founder of SAM Plan AI. " +
+      "Future members will onboard with our team.",
+  },
+  {
+    art: ART.perkCoaching,
+    icon: Users,
+    title: "Weekly group coaching led by the co-founders.",
+    body:
+      "For 12 months, Pete or Rachel will lead your coaching calls personally. " +
+      "Future coaching will be led by our team.",
+  },
+  {
+    art: ART.perkPricing,
+    icon: Award,
+    title: "Our best pricing, ever.",
+    body:
+      "Your Founding Member rate is grandfathered in for as long as you're a " +
+      "member. It will never be this low again.",
+  },
+] as const;
+
+/** Which plan the customer bought; decides the copy. */
+export type WelcomePlan = "monthly" | "yearly";
+
+/** Step 1, the closing text and button, per plan. Monthly onboards with Rachel, yearly with Pete. */
+const STEP_COPY: Readonly<
+  Record<
+    WelcomePlan,
+    { bookTitle: string; bookBody: string; ctaIntro: string; bookLabel: string; coachingImageRight: boolean }
+  >
+> = {
+  monthly: {
+    bookTitle: "Pick a time to meet 1:1 with Rachel (Pete's co-founder)",
+    bookBody:
+      "Together we will review your plan and get you up and running. " +
+      "This call is only available to Founding Members, so book it " +
+      "now while times are open. This is a crucial step to completing " +
+      "your intake and getting access to the app. We want to make sure " +
+      "you are set up for success. You will get the concierge white " +
+      "glove treatment directly from Pete's co-founder.",
+    ctaIntro:
+      "To get access to your app and generate your first SAM Plan, we " +
+      "must book your onboarding call. We want to set you up for success.",
+    bookLabel: "Book your onboarding call with Rachel",
+    coachingImageRight: false,
+  },
+  yearly: {
+    bookTitle: "Pick a time to meet 1:1 with Pete.",
+    bookBody:
+      "Together we\u2019ll review your plan and get you up and running. This " +
+      "call is only available to Founding Members, so book it now while " +
+      "times are open. This is a crucial step to completing your intake and " +
+      "getting access to the app. We want to make sure you\u2019re set up for " +
+      "success, so you\u2019ll get concierge white-glove treatment directly " +
+      "from Pete.",
+    ctaIntro:
+      "To get access to the app and generate your first SAM Plan, you must " +
+      "book your onboarding call! We want to set you up for success!",
+    bookLabel: "Book your onboarding call with Pete!",
+    coachingImageRight: true,
+  },
+};
+
+const COACHING_BODY: Readonly<Record<WelcomePlan, string>> = {
+  monthly:
+    "Join Pete and Rachel every Monday at 2 p.m. Eastern / 11 a.m. " +
+    "Pacific for your Revenue Operating System weekly call. This is " +
+    "your time to go through our weekly process to make sure you are " +
+    "hitting your revenue goals, plus get direct coaching and tips on " +
+    "using your SAM Plan.",
+  yearly:
+    "Join Pete and Rachel every Monday at 2 pm Eastern/11 am Pacific for " +
+    "your Revenue Operating System weekly call. This is your time to go " +
+    "through our weekly process to make sure you are hitting your revenue " +
+    "goals plus get direct coaching and tips on using your SAM Plan!",
+};
+
 export function WelcomeClient({
-  intakeDone,
   awaitingCall,
   bookingUrl,
+  plan = "monthly",
 }: {
   firstName: string | null;
   planName: string | null;
@@ -104,7 +181,11 @@ export function WelcomeClient({
    * app_settings.onboarding_call_url) and validated as an https link.
    */
   bookingUrl: string | null;
+  /** Monthly or yearly purchase (paid yearly only; trials and comps are monthly). */
+  plan?: WelcomePlan;
 }) {
+  const perks = plan === "monthly" ? PERKS_MONTHLY : PERKS_YEARLY;
+  const copy = STEP_COPY[plan];
   return (
     <div className="relative min-h-dvh overflow-hidden bg-[#060b16] text-white">
       {/* Blue spotlight behind the hero, as in the mockup. */}
@@ -169,7 +250,7 @@ export function WelcomeClient({
           </p>
 
           <div className="mx-auto mt-10 grid max-w-4xl gap-6 sm:grid-cols-3">
-            {PERKS.map((perk) => (
+            {perks.map((perk) => (
               <div
                 key={perk.title}
                 className="rounded-2xl border border-teal-300/40 bg-gradient-to-b from-[#0f1a2e] to-[#0a1222] p-6 shadow-[0_0_30px_rgba(45,212,191,0.12)]"
@@ -197,14 +278,19 @@ export function WelcomeClient({
             Here Are Your Next Steps
           </h2>
 
-          {/* Step 1 — calendar left, copy right */}
-          <div className="mt-12 grid items-center gap-8 md:grid-cols-2">
+          {/*
+            Two steps for both plans: book the onboarding call, then add the
+            coaching calls. The intake step is gone (it opens after the call).
+            The booking calendar gets the wider column and enough height to
+            show a full GHL calendar without scrolling inside the frame.
+          */}
+          <div className="mt-12 grid items-start gap-8 md:grid-cols-[3fr_2fr]">
             <div className="order-2 md:order-1">
               {bookingUrl ? (
                 <iframe
                   src={bookingUrl}
                   title="Book your onboarding call"
-                  className="h-[520px] w-full rounded-xl bg-white"
+                  className="h-[900px] w-full rounded-xl bg-white"
                 />
               ) : (
                 <>
@@ -216,99 +302,41 @@ export function WelcomeClient({
               )}
             </div>
             <StepCopy
-              className="order-1 md:order-2"
+              className="order-1 md:order-2 md:pt-6"
               step={1}
-              title={<>Book your onboarding call<br />with a co-founder</>}
-              body={
-                "Pick a time to meet 1:1 with Pete or Rachel. Together you'll " +
-                "review your plan and get you up and running. This call is " +
-                "only available to Founding Members, so book it now while " +
-                "times are open."
-              }
+              title={copy.bookTitle}
+              body={copy.bookBody}
             />
           </div>
 
-          {/* Step 2 — copy left, illustration right */}
           <div className="mt-16 grid items-center gap-8 md:grid-cols-2">
-            <StepCopy
-              step={2}
-              title={
-                <>
-                  Complete your intake
-                  <br />
-                  <em className="font-semibold">(about 15 minutes)</em>
-                </>
-              }
-              body={
-                /*
-                 * The mockup's copy says to do the intake BEFORE the call,
-                 * which is true for an ungated customer and the opposite of
-                 * what a gated one can do — the intake is behind the gate. One
-                 * sentence either way rather than a contradiction sitting next
-                 * to the disabled action above.
-                 */
-                awaitingCall
-                  ? "We'll open this up right after your call. SAM Plan then " +
-                    "builds your first draft plan, so your time with Pete or " +
-                    "Rachel goes to refining your strategy, not filling out forms."
-                  : "Do this before your onboarding call. SAM Plan will build your " +
-                    "first draft plan, so your time with Pete or Rachel goes to " +
-                    "refining your strategy, not filling out forms."
-              }
-              action={
-                intakeDone ? (
-                  <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-300">
-                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                    Intake complete
-                  </span>
-                ) : awaitingCall ? (
-                  /*
-                   * NOT A LINK while they are awaiting their call. The intake
-                   * lives at /intake/start, which the gate blocks, so the
-                   * button would bounce straight back to this page — the same
-                   * dead-button problem PrimaryCta avoids for the dashboard,
-                   * one section further up the page.
-                   */
-                  <span className="inline-flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/70">
-                    Opens after your onboarding call
-                  </span>
-                ) : (
-                  <Link
-                    href="/intake/start"
-                    className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-400"
-                  >
-                    Click to complete
-                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                  </Link>
-                )
-              }
-            />
-            <Illustration src={ART.stepIntake} icon={ClipboardCheck} />
-          </div>
-
-          {/* Step 3 — illustration left, copy right */}
-          <div className="mt-16 grid items-center gap-8 md:grid-cols-2">
+            {/* Yearly: copy left, image right. Monthly: image left, copy right. */}
             <Illustration
               src={ART.stepCoaching}
               icon={CalendarCheck}
-              className="order-2 md:order-1"
+              className={copy.coachingImageRight ? "order-2" : "order-2 md:order-1"}
             />
             <StepCopy
-              className="order-1 md:order-2"
-              step={3}
+              className={copy.coachingImageRight ? "order-1" : "order-1 md:order-2"}
+              step={2}
               title={<>Add your Founding Member<br />coaching calls to your calendar</>}
-              body={
-                `Join Pete or Rachel every ${COACHING_DAY} at ${COACHING_TIME} ` +
-                "for weekly group coaching, a Founding Member exclusive for " +
-                `${COACHING_MONTHS} months.`
-              }
+              body={COACHING_BODY[plan]}
             />
           </div>
         </section>
 
         {/* CTA */}
         <section className="mt-20 text-center">
-          <PrimaryCta awaitingCall={awaitingCall} bookingUrl={bookingUrl} />
+          {awaitingCall && (
+            <p className="mx-auto mb-6 max-w-2xl text-sm leading-relaxed text-white/80 sm:text-base">
+              {copy.ctaIntro}
+            </p>
+          )}
+          <PrimaryCta
+            awaitingCall={awaitingCall}
+            bookingUrl={bookingUrl}
+            bookLabel={copy.bookLabel}
+          />
           <p className="mt-10 text-sm font-semibold text-white">
             Questions? Email{" "}
             <a href={`mailto:${SUPPORT_EMAIL}`} className="hover:underline">
@@ -363,9 +391,12 @@ const CTA_CLASS =
 function PrimaryCta({
   awaitingCall,
   bookingUrl,
+  bookLabel,
 }: {
   awaitingCall: boolean;
   bookingUrl: string | null;
+  /** The booking button's words; differs by plan. */
+  bookLabel: string;
 }) {
   if (!awaitingCall) {
     return (
@@ -400,7 +431,7 @@ function PrimaryCta({
       rel="noopener noreferrer"
       className={CTA_CLASS}
     >
-      Book a call with us
+      {bookLabel}
       <span className="sr-only"> (opens in a new tab)</span>
       <ArrowRight className="h-4 w-4" aria-hidden="true" />
     </a>

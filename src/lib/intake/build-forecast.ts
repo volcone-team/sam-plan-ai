@@ -174,6 +174,34 @@ export function scenariosFor(forecast: number | null): RevenueScenarios {
 }
 
 /**
+ * Scale a forecast to the runs that actually fit inside the plan.
+ *
+ * The forecast counts runs across the whole horizon (12 monthly runs on a
+ * 12-month plan), but sequencing can put the first run months after the plan
+ * starts, so only some of them happen before the plan ends. Keeping the
+ * per-run figure and counting only the runs that fit is the honest total;
+ * otherwise each run would silently claim more than the user's own funnel
+ * produces.
+ *
+ * `planned` and `fitting` are run counts (months, for ongoing work). Never
+ * scales up: a fitting count above planned keeps the forecast as it was.
+ */
+export function scaleToFittingRuns(
+  revenue: RevenueScenarios,
+  planned: number,
+  fitting: number
+): RevenueScenarios {
+  if (!Number.isFinite(planned) || planned <= 0) return revenue;
+  if (!Number.isFinite(fitting) || fitting >= planned) return revenue;
+  const ratio = Math.max(0, fitting) / planned;
+  return {
+    good: Math.round(revenue.good * ratio),
+    better: Math.round(revenue.better * ratio),
+    best: Math.round(revenue.best * ratio),
+  };
+}
+
+/**
  * The annual plan's targets.
  *
  * Baseline is what the user ASKED for — their revenue goal — not what we

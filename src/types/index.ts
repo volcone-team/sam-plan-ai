@@ -20,6 +20,7 @@ export type {
   Product,
   ProductTicketTier,
   RevenueType,
+  RecurringInterval,
   CreateProductDTO,
   UpdateProductDTO,
 } from './product.types';

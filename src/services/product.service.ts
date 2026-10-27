@@ -9,6 +9,7 @@
 import type { Product, CreateProductDTO, UpdateProductDTO } from '@/types';
 import { isSupabaseConfigured, getSupabase, camelToSnake } from '@/lib/supabase/db';
 import { limitNoticeFrom, LimitReachedError } from '@/lib/billing/limit-notice';
+import { intervalFor, isMissingIntervalColumn, readInterval, withoutInterval } from '@/lib/products/recurring-interval';
 
 export class ProductService {
   /**
@@ -163,6 +164,7 @@ export class ProductService {
         description: dto.description || '',
         price: dto.price,
         revenueType: dto.revenueType || 'one-time',
+        recurringInterval: intervalFor(dto.revenueType || 'one-time', dto.recurringInterval),
         ticketTier: dto.ticketTier || 'mid',
         displayOrder: dto.displayOrder ?? 0,
       }),
@@ -192,13 +194,18 @@ export class ProductService {
       try {
         const supabase = getSupabase();
         const updateData = camelToSnake(dto as unknown as Record<string, unknown>);
-
-        const { data, error } = await supabase
-          .from('products')
-          .update(updateData)
-          .eq('id', id)
-          .select()
-          .single();
+        // Switching to one-time clears the interval; recurring keeps month | year.
+        if (dto.revenueType !== undefined) {
+          updateData.recurring_interval = intervalFor(dto.revenueType, dto.recurringInterval);
+        }
+        const run = (payload: Record<string, unknown>) =>
+          supabase.from('products').update(payload).eq('id', id).select().single();
+        let { data, error } = await run(updateData);
+        // Migration 055 not applied yet: save everything else.
+        if (isMissingIntervalColumn(error)) {
+          const retry = withoutInterval(updateData);
+          if (retry) ({ data, error } = await run(retry));
+        }
 
         if (!error && data) {
           return this.mapRowToProduct(data);
@@ -273,6 +280,8 @@ export class ProductService {
       description: (row.description as string) || '',
       price: Number(row.price) || 0,
       revenueType: (row.revenue_type as Product['revenueType']) || 'one-time',
+      // Migration 055; absent or null on a recurring row reads as monthly.
+      recurringInterval: readInterval(row.revenue_type, row.recurring_interval),
       ticketTier: (row.ticket_tier as Product['ticketTier']) || 'mid',
       isActive: row.is_active as boolean ?? true,
       displayOrder: (row.display_order as number) ?? 0,

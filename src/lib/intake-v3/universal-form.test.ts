@@ -251,7 +251,7 @@ describe("draftWarnings", () => {
 describe("projectedScenarios", () => {
   it("reads the goal, and is null when it does not read", () => {
     const d = filled(initialDraft(item("webinars"), config()));
-    expect(projectedScenarios(d, config())).toEqual({ good: 1000, better: 1100, best: 1250 });
+    expect(projectedScenarios(d, config())).toEqual({ good: 1000, better: 1100, best: 1200 });
     expect(projectedScenarios({ ...d, revenue: { mode: "goal", goal: "x", lines: {} } }, config())).toBeNull();
   });
 });
@@ -336,7 +336,7 @@ describe("buildCreateRequest", () => {
     expect(buildCreateRequest(d, config(), PLAN).revenueScenarios).toEqual({
       good: 1005,
       better: Math.round(1005 * 1.1),
-      best: Math.round(1005 * 1.25),
+      best: Math.round(1005 * 1.2),
     });
   });
 
@@ -349,7 +349,7 @@ describe("buildCreateRequest", () => {
     });
     const d = filled(initialDraft(item("webinars"), cfg), { revenue: { mode: "lines", goal: null, lines: { main: 800, vip: "200" } } });
     const req = buildCreateRequest(d, cfg, PLAN);
-    expect(req.revenueScenarios).toEqual({ good: 1000, better: 1100, best: 1250 });
+    expect(req.revenueScenarios).toEqual({ good: 1000, better: 1100, best: 1200 });
     expect(req.attrs?.revenue_lines).toEqual({ main: 800, vip: 200 });
   });
 
@@ -560,12 +560,12 @@ describe("sales commission", () => {
   });
 
   it("computes percent commission per scenario with commissionForScenarios", () => {
-    // Good 1000 / Better 1100 / Best 1250 at 10%.
+    // Good 1000 / Better 1100 / Best 1200 at 10%.
     expect(commissionPreview(comm({ basis: "percent", rate: "10" }), FUNNEL)).toEqual({
       status: "ok",
       good: 100,
       better: 110,
-      best: 125,
+      best: 120,
     });
     expect(commissionRule(comm({ basis: "percent", rate: "7.5" }))).toEqual({ type: "percent", percent: 7.5 });
   });

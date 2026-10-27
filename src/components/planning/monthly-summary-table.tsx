@@ -1,11 +1,12 @@
 'use client';
-import { formatDate } from '@/lib/format-date';
+import { formatDateShort } from '@/lib/format-date';
 import { formatMoney } from '@/lib/format-money';
 
 import { useCompanyId } from '@/hooks/use-auth';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   ChevronDown,
   ChevronRight,
@@ -17,9 +18,10 @@ import { resultService } from '@/services/result.service';
 import { initiativeService } from '@/services/initiative.service';
 import type { Initiative } from '@/types';
 import { usePlanYears } from '@/hooks/use-plan-years';
-import { toDateOnly } from '@/lib/plan-dates';
-import { monthBuckets, sumBuckets } from '@/lib/planning/period-totals';
-import { loadMonthTargets } from '@/lib/planning/load-period-targets';
+import { REPEAT_FREQUENCY_LABELS, type RepeatFrequency } from '@/lib/intake-forecast';
+import { parseDateOnly, toDateOnly } from '@/lib/plan-dates';
+import { monthBuckets, sumBuckets, type BucketEntry } from '@/lib/planning/period-totals';
+import { loadPlanPeriod } from '@/lib/planning/load-period-targets';
 
 // Year comes from the shared PlanYearProvider, not a module-level constant.
 // The old `const YEAR = new Date().getFullYear()` was evaluated once when this
@@ -49,8 +51,10 @@ interface MonthData {
   actual: number;
   variance: number;
   variancePercent: number | null;
-  /** The initiatives whose revenue is counted in this month (event month). */
+  /** The initiatives with revenue in this month. */
   initiatives: Initiative[];
+  /** Each of them with its share of this month (a recurring one counts every run here). */
+  entries: BucketEntry<Initiative>[];
 }
 
 const STATUS_COLORS: Record<string, { dot: string; badge: string }> = {
@@ -98,9 +102,9 @@ export function MonthlySummaryTable() {
          * Each initiative's revenue is counted once, in its event month (see
          * lib/planning/period-totals), so a month equals the rows under it.
          */
-        const [initiatives, targets, results] = await Promise.all([
+        const [initiatives, period, results] = await Promise.all([
           initiativeService.getInitiativesByCompany(companyId),
-          loadMonthTargets(companyId, YEAR),
+          loadPlanPeriod(companyId, YEAR),
           resultService.getResultsByDateRange(
             new Date(YEAR, 0, 1),
             new Date(YEAR, 11, 31),
@@ -115,7 +119,8 @@ export function MonthlySummaryTable() {
           actualByMonth[Number(d.slice(5, 7)) - 1] += r.actualRevenue || 0;
         }
 
-        const buckets = monthBuckets(initiatives, YEAR);
+        const targets = period.monthTargets;
+        const buckets = monthBuckets(initiatives, YEAR, period.planEnd);
         setMonthsData(
           buckets.map((b, idx) => {
             const actual = actualByMonth[idx];
@@ -129,6 +134,7 @@ export function MonthlySummaryTable() {
               actual,
               ...variances(actual, b.better),
               initiatives: b.initiatives,
+              entries: b.entries,
             };
           })
         );
@@ -179,7 +185,7 @@ export function MonthlySummaryTable() {
       {/* Header row */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-[hsl(var(--foreground-muted))]">
-          All 12 months of {YEAR}. Each initiative&apos;s revenue counts in the month of its event date. Click a row to see its initiatives.
+          All 12 months of {YEAR}. One-time revenue counts in its event month; recurring revenue is spread across its runs. Click a row to see its initiatives.
         </p>
         <div className="flex items-center gap-2 shrink-0 ml-4">
           <Link
@@ -314,15 +320,15 @@ function MonthRow({ data, year, isCurrent, isExpanded, onToggle }: MonthRowProps
       {/* Expanded initiative rows */}
       {isExpanded && initiatives.length > 0 && (
         <>
-          {initiatives.map((initiative) => (
-            <InitiativeChildRow key={initiative.id} initiative={initiative} />
+          {data.entries.map((entry) => (
+            <InitiativeChildRow key={entry.initiative.id} entry={entry} />
           ))}
         </>
       )}
       {isExpanded && initiatives.length === 0 && (
         <tr>
           <td colSpan={10} className="py-3 px-4 pl-12 text-sm text-[hsl(var(--foreground-muted))] italic">
-            No initiatives have their event in this month.
+            No initiative revenue falls in this month.
           </td>
         </tr>
       )}
@@ -333,44 +339,65 @@ function MonthRow({ data, year, isCurrent, isExpanded, onToggle }: MonthRowProps
 /* --- Initiative child row --- */
 
 interface InitiativeChildRowProps {
-  initiative: Initiative;
+  /** The initiative and its share of this period. */
+  entry: BucketEntry<Initiative>;
 }
 
-function InitiativeChildRow({ initiative }: InitiativeChildRowProps) {
-  const { revenueScenarios, status } = initiative;
+function InitiativeChildRow({ entry }: InitiativeChildRowProps) {
+  const { initiative } = entry;
+  const { status } = initiative;
+  // A recurring initiative shows how often it runs and how many runs fall here.
+  const frequency = initiative.kind === 'recurring' && initiative.repeatFrequency
+    ? REPEAT_FREQUENCY_LABELS[initiative.repeatFrequency as RepeatFrequency] ?? initiative.repeatFrequency
+    : null;
   const statusColor = STATUS_COLORS[status] || STATUS_COLORS.planned;
+  const router = useRouter();
 
-  const eventDate = initiative.eventDate || initiative.activationDate;
+  /*
+   * The dates that put revenue in THIS period: each run here, or the event
+   * date. It used to print the initiative's first event, so a January row
+   * read "10/27/2026". Ongoing work has no single date and shows none.
+   */
+  const dates = entry.dates.map((d) => formatDateShort(parseDateOnly(d)));
+  const shownDates = dates.length > 3 ? `${dates.slice(0, 3).join(', ')} +${dates.length - 3} more` : dates.join(', ');
+  const href = `/initiatives/${initiative.id}`;
 
   return (
-    <tr className="bg-[hsl(var(--muted))]/20">
+    <tr
+      className="cursor-pointer bg-[hsl(var(--muted))]/20 hover:bg-[hsl(var(--muted))]/40"
+      onClick={() => router.push(href)}
+    >
       <td className="py-2.5 px-4 pl-12">
-        <div className="flex items-center gap-2">
-          <span className={`h-2 w-2 rounded-full shrink-0 ${statusColor.dot}`} />
-          <Link
-            href={`/initiatives/${initiative.id}`}
-            className="text-sm text-[hsl(var(--foreground))] hover:text-[hsl(var(--primary))] hover:underline truncate max-w-[200px]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {initiative.name}
-          </Link>
-          <span className="text-xs text-[hsl(var(--foreground-muted))] capitalize shrink-0">
-            {initiative.kind.replace('-', ' ')}
-          </span>
-          <span className="text-xs text-[hsl(var(--foreground-muted))] shrink-0">
-            {eventDate ? formatDate(eventDate) : ''}
-          </span>
+        {/* Name on its own line so it is never squeezed out; the whole row opens the initiative. */}
+        <div className="flex items-start gap-2 min-w-[220px]">
+          <span className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${statusColor.dot}`} />
+          <div className="min-w-0">
+            <Link
+              href={href}
+              title={initiative.name}
+              className="block text-sm font-medium text-[hsl(var(--foreground))] hover:text-[hsl(var(--primary))] hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {initiative.name}
+            </Link>
+            <span className="block text-xs text-[hsl(var(--foreground-muted))]">
+              <span className="capitalize">{initiative.kind.replace('-', ' ')}</span>
+              {frequency && ` · ${frequency}`}
+              {entry.runs > 0 && ` · ${entry.runs} run${entry.runs !== 1 ? 's' : ''} here`}
+              {shownDates && ` · ${shownDates}`}
+            </span>
+          </div>
         </div>
       </td>
       <td className="text-right py-2.5 px-3 text-sm text-[hsl(var(--foreground-muted))]">—</td>
       <td className="text-right py-2.5 px-3 text-sm text-[hsl(var(--foreground-muted))]">
-        {formatCurrency(revenueScenarios.good)}
+        {formatCurrency(entry.good)}
       </td>
       <td className="text-right py-2.5 px-3 text-sm font-medium text-[hsl(var(--foreground))]">
-        {formatCurrency(revenueScenarios.better)}
+        {formatCurrency(entry.better)}
       </td>
       <td className="text-right py-2.5 px-3 text-sm text-[hsl(var(--foreground-muted))]">
-        {formatCurrency(revenueScenarios.best)}
+        {formatCurrency(entry.best)}
       </td>
       <td className="text-right py-2.5 px-3 text-sm text-[hsl(var(--foreground-muted))]">—</td>
       <td className="text-right py-2.5 px-3 text-sm text-[hsl(var(--foreground-muted))]">—</td>

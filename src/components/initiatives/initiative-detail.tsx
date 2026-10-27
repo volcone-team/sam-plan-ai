@@ -21,6 +21,9 @@ import { RecurringPrompts } from './recurring-prompts';
 import { LeadHandoffCard } from './lead-handoff-card';
 import { usePermissions } from '@/hooks/use-permission';
 
+/** The "Why This Initiative" heading and "When to use" card on the Overview tab. Hidden for now (client request, Oct 2026); Difficulty Dimensions stays. */
+const SHOW_WHY_CARD = false;
+
 export interface InitiativeDetailProps {
   initiativeId: string;
   onBack: () => void;
@@ -242,10 +245,13 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
               products={products}
               onSaved={handleSaved}
             />
+            {/* Difficulty Dimensions always shows; the "Why This Initiative" / "When to use"
+                part is hidden at the client's request (SHOW_WHY_CARD brings it back). */}
             <InitiativeWhy
               initiativeId={initiative.id}
               libraryKey={initiative.libraryKey}
               initiativeType={initiativeType}
+              showWhy={SHOW_WHY_CARD}
             />
           </div>
         )}

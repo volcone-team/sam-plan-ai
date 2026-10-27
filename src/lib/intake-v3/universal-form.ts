@@ -89,6 +89,12 @@ export interface DraftRevenue {
   goal: number | string | null;
   /** Good per revenue line id (IMPLICIT_LINE_ID when the record declares none). */
   lines: Readonly<Record<string, number | string | null>>;
+  /**
+   * The user's own Better / Best, when they typed over the suggestion.
+   * Absent, null or blank means "use the suggestion" (Good +10% / +20%).
+   */
+  better?: number | string | null;
+  best?: number | string | null;
 }
 
 /** A typed-in number: a number, the raw input string, or nothing yet. */
@@ -568,6 +574,26 @@ function readRevenue(draft: IntakeDraft, config: LibraryRecordConfig, layout: Fo
   if (isLeadsPath(layout.effectivePath)) {
     return { ok: true, scenarios: { good: 0, better: 0, best: 0 }, lines: null };
   }
+  const base = readRevenueBase(draft, config);
+  if (!base.ok) return base;
+  // Better and Best are suggestions the user may type over (Good +10% / +20%).
+  const errors: Record<string, string> = {};
+  const scenarios = { ...base.scenarios };
+  for (const key of ["better", "best"] as const) {
+    const typed = draft.revenue[key];
+    if (typed === null || typed === undefined || (typeof typed === "string" && typed.trim() === "")) continue;
+    const value = typeof typed === "string" ? Number(typed) : typed;
+    if (!Number.isFinite(value) || value < 0) {
+      errors[`revenue.${key}`] = `Enter a ${key === "better" ? "Better" : "Best"} figure of 0 or more.`;
+    } else {
+      scenarios[key] = value;
+    }
+  }
+  if (Object.keys(errors).length > 0) return { ok: false, errors };
+  return { ok: true, scenarios, lines: base.lines };
+}
+
+function readRevenueBase(draft: IntakeDraft, config: LibraryRecordConfig): RevenueRead {
   if (draft.revenue.mode === "goal") {
     const goal = goalScenarios(draft.revenue.goal);
     return goal.ok ? { ok: true, scenarios: goal.scenarios, lines: null } : { ok: false, errors: { "revenue.goal": goal.message } };

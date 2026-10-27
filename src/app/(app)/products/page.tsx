@@ -18,7 +18,8 @@ import { PageContainer, PageHeader } from '@/components/layout';
 import { productService } from '@/services/product.service';
 import { projectionService } from '@/services/projection.service';
 import { initiativeService } from '@/services/initiative.service';
-import type { Product, CreateProductDTO, UpdateProductDTO, RevenueType, ProductTicketTier } from '@/types';
+import type { Product, CreateProductDTO, UpdateProductDTO, RevenueType, ProductTicketTier, RecurringInterval } from '@/types';
+import { intervalSuffix } from '@/lib/products/recurring-interval';
 import { NumberInputRaw } from '@/components/ui/number-input';
 import { formatMoney } from '@/lib/format-money';
 import { LimitReachedError, type LimitNotice as LimitNoticeData } from '@/lib/billing/limit-notice';
@@ -72,6 +73,8 @@ interface ProductFormData {
   price: string;
   type: ProductType;
   revenueType: RevenueType;
+  /** Billed per month or per year; only used while recurring. */
+  recurringInterval: RecurringInterval;
   ticketTier: ProductTicketTier;
 }
 
@@ -80,6 +83,7 @@ const emptyForm: ProductFormData = {
   price: '',
   type: 'Service',
   revenueType: 'one-time',
+  recurringInterval: 'month',
   ticketTier: 'mid',
 };
 
@@ -166,6 +170,7 @@ export default function ProductsPage() {
         name: addForm.name.trim(),
         price: parseFloat(addForm.price),
         revenueType: addForm.revenueType,
+        recurringInterval: addForm.revenueType === 'recurring' ? addForm.recurringInterval : null,
         ticketTier: addForm.ticketTier,
       };
       const newProduct = await productService.createProduct(dto);
@@ -193,6 +198,7 @@ export default function ProductsPage() {
       price: String(product.price),
       type: inferProductType(product),
       revenueType: product.revenueType,
+      recurringInterval: product.recurringInterval ?? 'month',
       ticketTier: product.ticketTier,
     });
   };
@@ -205,6 +211,7 @@ export default function ProductsPage() {
         name: editForm.name.trim(),
         price: parseFloat(editForm.price),
         revenueType: editForm.revenueType,
+        recurringInterval: editForm.revenueType === 'recurring' ? editForm.recurringInterval : null,
         ticketTier: editForm.ticketTier,
       };
       const updated = await productService.updateProduct(editingId, dto);
@@ -348,6 +355,23 @@ export default function ProductsPage() {
                 Recurring
               </label>
             </div>
+            {/* Same question the intake asks: billed per month or per year. */}
+            {addForm.revenueType === 'recurring' && (
+              <div>
+                <label htmlFor="add-product-interval" className="mb-1 block text-xs font-medium text-[hsl(var(--foreground-muted))]">
+                  Billed
+                </label>
+                <select
+                  id="add-product-interval"
+                  value={addForm.recurringInterval}
+                  onChange={(e) => setAddForm((f) => ({ ...f, recurringInterval: e.target.value as RecurringInterval }))}
+                  className="w-full rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background))] px-3 py-2 text-sm text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+                >
+                  <option value="month">Per month</option>
+                  <option value="year">Per year</option>
+                </select>
+              </div>
+            )}
           </div>
           {addError && (
             <p role="alert" className="mt-4 rounded-[var(--radius-md)] border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -486,6 +510,22 @@ export default function ProductsPage() {
                       />
                       Recurring
                     </label>
+                    {editForm.revenueType === 'recurring' && (
+                      <div>
+                        <label htmlFor="edit-product-interval" className="mb-1 block text-xs font-medium text-[hsl(var(--foreground-muted))]">
+                          Billed
+                        </label>
+                        <select
+                          id="edit-product-interval"
+                          value={editForm.recurringInterval}
+                          onChange={(e) => setEditForm((f) => ({ ...f, recurringInterval: e.target.value as RecurringInterval }))}
+                          className="w-full rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background))] px-3 py-2 text-sm text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
+                        >
+                          <option value="month">Per month</option>
+                          <option value="year">Per year</option>
+                        </select>
+                      </div>
+                    )}
                     <div className="flex gap-2 pt-2">
                       <button
                         onClick={handleSaveEdit}
@@ -583,7 +623,7 @@ export default function ProductsPage() {
                   {formatMoney(product.price)}
                   {product.revenueType === 'recurring' && (
                     <span className="ml-1 text-xs font-normal text-[hsl(var(--foreground-muted))]">
-                      /mo
+                      {intervalSuffix(product.recurringInterval)}
                     </span>
                   )}
                 </p>
@@ -602,7 +642,9 @@ export default function ProductsPage() {
                         : 'bg-gray-100 text-gray-700'
                     }`}
                   >
-                    {product.revenueType === 'recurring' ? 'Recurring' : 'One-time'}
+                    {product.revenueType === 'recurring'
+                      ? product.recurringInterval === 'year' ? 'Recurring · Yearly' : 'Recurring · Monthly'
+                      : 'One-time'}
                   </span>
                   <span
                     className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TIER_COLORS[product.ticketTier]}`}

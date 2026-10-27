@@ -582,7 +582,9 @@ export function IntakeForm({
             <h3 id={`${base}-revenue`} className={SECTION_HEADING_CLASS}>
               Revenue goal
             </h3>
-            <p className={HINT_CLASS}>Enter your Good target. Better and Best are calculated for you.</p>
+            <p className={HINT_CLASS}>
+              Enter your Good target. Better (+10%) and Best (+20%) fill in for you; change them if you like.
+            </p>
           </div>
           {revenue.lines === null ? (
             <MoneyField
@@ -616,12 +618,41 @@ export function IntakeForm({
               })}
             </div>
           )}
-          <dl className="grid grid-cols-3 gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--background-muted))] px-3 py-2">
-            {revenue.lines !== null && <Figure label="Total Good" value={moneyOrDash(revenue.good)} />}
-            {revenue.lines === null && <Figure label="Good" value={moneyOrDash(revenue.good)} />}
-            <Figure label="Better" value={moneyOrDash(revenue.better)} />
-            <Figure label="Best" value={moneyOrDash(revenue.best)} />
-          </dl>
+          {revenue.lines !== null && (
+            <dl className="grid grid-cols-3 gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--background-muted))] px-3 py-2">
+              <Figure label="Total Good" value={moneyOrDash(revenue.good)} />
+            </dl>
+          )}
+          {/*
+           * Better and Best fill in from Good (+10% / +20%) but stay editable.
+           * Typing stores the user's own figure; a field left blank saves the
+           * suggestion.
+           */}
+          <div className="grid grid-cols-2 gap-3">
+            {(['better', 'best'] as const).map(key => {
+              const typed = draft.revenue[key];
+              const suggested = revenue[key];
+              // null/undefined: untouched, show the suggestion. '' : the user
+              // cleared it to type their own (saved as the suggestion if left blank).
+              const value =
+                typed !== null && typed !== undefined
+                  ? String(typed)
+                  : suggested === null
+                    ? ''
+                    : String(suggested);
+              return (
+                <MoneyField
+                  key={key}
+                  id={fieldDomId(base, `revenue.${key}`)}
+                  label={key === 'better' ? 'Better (+10%)' : 'Best (+20%)'}
+                  value={value}
+                  onChange={v => setDraft(d => ({ ...d, revenue: { ...d.revenue, [key]: v } }))}
+                  errorId={errorDomId(base, `revenue.${key}`)}
+                  error={shown[`revenue.${key}`]}
+                />
+              );
+            })}
+          </div>
         </section>
       )}
 

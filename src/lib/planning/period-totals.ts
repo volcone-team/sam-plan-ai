@@ -10,9 +10,11 @@
  * initiatives shown under it.
  *
  * RULES (owner decision, Oct 2026)
- *   - An initiative's whole Good/Better/Best lands in the month of its EVENT
- *     date. With no event date (ongoing work), its launch month is used, so it
- *     still counts somewhere instead of vanishing.
+ *   - A one-time initiative's whole Good/Better/Best lands in the month of
+ *     its EVENT date (else its launch month).
+ *   - A recurring initiative is split evenly across its run dates, and an
+ *     ongoing one across its active months (revenue-spread.ts), so a weekly
+ *     webinar earns every month instead of once.
  *   - The month target is the year's plan goal (annual_plans.baseline_revenue)
  *     spread evenly over the months of that year the plan horizon covers. With
  *     no horizon on record, all twelve months share it.
@@ -22,22 +24,30 @@
  *
  * Pure: no React, no database, no clock.
  */
-import { daysInMonth, toDateOnly } from '@/lib/plan-dates';
+import { daysInMonth, toDateOnly, type DateOnly } from '@/lib/plan-dates';
 import { launchDate, type ScheduleFields } from '@/lib/initiatives/schedule';
 import { horizonYears } from '@/lib/intake/plan-years';
+import { monthShares, type Scenarios, type SpreadRow } from '@/lib/planning/revenue-spread';
 
-export interface Scenarios {
-  good: number;
-  better: number;
-  best: number;
+export type { Scenarios };
+
+export interface RevenueRow extends SpreadRow {
+  id?: string;
 }
 
-export interface RevenueRow extends ScheduleFields {
-  revenueScenarios?: Partial<Scenarios> | null;
+/** One initiative's share of a period. */
+export interface BucketEntry<T> extends Scenarios {
+  initiative: T;
+  /** Recurring runs in the period (0 for one-time and ongoing work). */
+  runs: number;
+  /** The dates that put revenue in this period (run dates, or the event date); empty for ongoing work. */
+  dates: DateOnly[];
 }
 
 export interface PeriodBucket<T> extends Scenarios {
-  /** The initiatives whose revenue lands in this period. */
+  /** Each initiative with revenue in this period, once, with its share. */
+  entries: BucketEntry<T>[];
+  /** The same initiatives, for counting and listing. */
   initiatives: T[];
 }
 
@@ -50,8 +60,9 @@ export interface YearMonth {
 const YEAR_MONTH = /^(\d{4})-(\d{2})/;
 
 /**
- * The month an initiative's revenue is counted in: its event date's month,
- * else its launch month, else null (undated, counted nowhere).
+ * The month a ONE-TIME initiative's revenue is counted in: its event date's
+ * month, else its launch month, else null (undated, counted nowhere).
+ * Recurring and ongoing work spreads over several months; see monthShares.
  */
 export function revenueMonth(i: ScheduleFields): YearMonth | null {
   const event = i.eventDate ? toDateOnly(i.eventDate) : '';
@@ -69,20 +80,33 @@ function amount(value: unknown): number {
 }
 
 function emptyBucket<T>(): PeriodBucket<T> {
-  return { good: 0, better: 0, best: 0, initiatives: [] };
+  return { good: 0, better: 0, best: 0, entries: [], initiatives: [] };
 }
 
-/** Twelve buckets (index 0 = January) for `year`. */
-export function monthBuckets<T extends RevenueRow>(list: readonly T[], year: number): PeriodBucket<T>[] {
+/**
+ * Twelve buckets (index 0 = January) for `year`.
+ *
+ * Revenue is placed by monthShares: one-time work in its event month,
+ * recurring work across its run dates, ongoing work across its active months.
+ * `planEnd` (last day of the plan horizon) bounds recurring and ongoing
+ * spreads; null means twelve months from the first run.
+ */
+export function monthBuckets<T extends RevenueRow>(
+  list: readonly T[],
+  year: number,
+  planEnd: DateOnly | null = null
+): PeriodBucket<T>[] {
   const months = Array.from({ length: 12 }, () => emptyBucket<T>());
   for (const i of list) {
-    const at = revenueMonth(i);
-    if (!at || at.year !== year) continue;
-    const bucket = months[at.month - 1];
-    bucket.good += amount(i.revenueScenarios?.good);
-    bucket.better += amount(i.revenueScenarios?.better);
-    bucket.best += amount(i.revenueScenarios?.best);
-    bucket.initiatives.push(i);
+    for (const s of monthShares(i, planEnd)) {
+      if (s.year !== year) continue;
+      const bucket = months[s.month - 1];
+      bucket.good += s.good;
+      bucket.better += s.better;
+      bucket.best += s.best;
+      bucket.entries.push({ initiative: i, good: s.good, better: s.better, best: s.best, runs: s.runs, dates: s.dates });
+      bucket.initiatives.push(i);
+    }
   }
   return months;
 }
@@ -92,15 +116,32 @@ export function quarterBuckets<T>(months: readonly PeriodBucket<T>[]): PeriodBuc
   return [0, 1, 2, 3].map((q) => sumBuckets(months.slice(q * 3, q * 3 + 3)));
 }
 
-/** One bucket holding the sum of `buckets`. Each initiative appears once. */
-export function sumBuckets<T>(buckets: readonly PeriodBucket<T>[]): PeriodBucket<T> {
+/**
+ * One bucket holding the sum of `buckets`. An initiative spread over several
+ * of them appears ONCE, carrying its combined share.
+ */
+export function sumBuckets<T>(buckets: readonly Pick<PeriodBucket<T>, 'good' | 'better' | 'best' | 'entries'>[]): PeriodBucket<T> {
   const out = emptyBucket<T>();
+  const byInitiative = new Map<T, BucketEntry<T>>();
   for (const b of buckets) {
     out.good += b.good;
     out.better += b.better;
     out.best += b.best;
-    out.initiatives.push(...b.initiatives);
+    for (const e of b.entries) {
+      const seen = byInitiative.get(e.initiative);
+      if (seen) {
+        seen.good += e.good;
+        seen.better += e.better;
+        seen.best += e.best;
+        seen.runs += e.runs;
+        seen.dates = [...seen.dates, ...e.dates];
+      } else {
+        byInitiative.set(e.initiative, { ...e, dates: [...e.dates] });
+      }
+    }
   }
+  out.entries = [...byInitiative.values()];
+  out.initiatives = out.entries.map((e) => e.initiative);
   return out;
 }
 

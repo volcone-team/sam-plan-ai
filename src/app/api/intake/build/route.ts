@@ -16,15 +16,19 @@ import {
 } from "@/lib/billing/live-limits";
 import { statusUpdate, timestampColumnFor } from "@/lib/intake/draft";
 import { toRevenueType, toTicketTier } from "@/lib/intake/product-mapping";
+import { intervalFor, isMissingIntervalColumn, withoutInterval } from "@/lib/products/recurring-interval";
 import {
   forecastForStoredInitiative,
   scenariosFor,
   planTargets,
   initiativeKindForCadence,
   toFrequency,
+  scaleToFittingRuns,
   type RevenueScenarios,
 } from "@/lib/intake/build-forecast";
 import type { RepeatFrequency } from "@/lib/intake-forecast";
+import { runsInPeriod } from "@/lib/intake-forecast";
+import { horizonEnd, monthShares, runDates } from "@/lib/planning/revenue-spread";
 import type { InitiativeKind } from "@/types";
 import { productGoal } from "@/lib/intake-forecast";
 import { MAX_RECOMMENDED_INITIATIVES } from "@/lib/recommend/sizing";
@@ -678,6 +682,8 @@ export async function POST(request: NextRequest) {
         // CHECK constraints from migration 001 with a different vocabulary to
         // the intake's, so a raw value is rejected by the database.
         revenue_type: toRevenueType(product.payment_type),
+        // The intake's "per month / per year" answer (migration 055).
+        recurring_interval: intervalFor(toRevenueType(product.payment_type), product.recurring_interval),
         ticket_tier: toTicketTier(product.price_level),
         display_order: index,
         is_active: true,
@@ -687,11 +693,11 @@ export async function POST(request: NextRequest) {
       let liveId: string | null = null;
 
       if (existingId) {
-        const { error } = await db
-          .from("products")
-          .update(fields)
-          .eq("id", existingId)
-          .eq("company_id", companyId);
+        const update = (payload: Record<string, unknown>) =>
+          db.from("products").update(payload).eq("id", existingId).eq("company_id", companyId);
+        let { error } = await update(fields);
+        // Migration 055 not applied yet: keep the product without the interval.
+        if (isMissingIntervalColumn(error)) ({ error } = await update(withoutInterval(fields) ?? fields));
 
         if (error) {
           console.error("[intake/build] product update failed:", error.message);
@@ -702,11 +708,10 @@ export async function POST(request: NextRequest) {
         }
         liveId = existingId;
       } else {
-        const { data: created, error } = await db
-          .from("products")
-          .insert({ company_id: companyId, ...fields })
-          .select("id")
-          .single();
+        const insert = (payload: Record<string, unknown>) =>
+          db.from("products").insert({ company_id: companyId, ...payload }).select("id").single();
+        let { data: created, error } = await insert(fields);
+        if (isMissingIntervalColumn(error)) ({ data: created, error } = await insert(withoutInterval(fields) ?? fields));
 
         if (error || !created) {
           console.error("[intake/build] product insert failed:", error?.message);
@@ -735,9 +740,37 @@ export async function POST(request: NextRequest) {
     const floor = toDateOnly(new Date());
     let initiativeCount = 0;
 
+    // Last day of the plan: runs after it are not counted (see below).
+    const planEnd = horizonEnd(planStart, horizonMonths);
     for (const [index, item] of pending.entries()) {
       const slot = scheduled[index];
       const resolved = templatesByKey.get(item.libraryKey);
+      /*
+       * Revenue for the runs that FIT. The forecast counted runs across the
+       * whole horizon, but sequencing can start a recurring or ongoing
+       * initiative months in, so some runs fall after the plan ends. Keep the
+       * per-run figure and count only the runs inside the plan.
+       */
+      const placed = {
+        kind: item.kind,
+        repeatFrequency: item.repeatFrequency,
+        activationDate: toDateOnly(slot.activationDate),
+        eventDate: toDateOnly(slot.eventDate),
+      };
+      const revenue =
+        item.kind === "recurring" && item.repeatFrequency
+          ? scaleToFittingRuns(
+              item.revenue,
+              runsInPeriod("repeat", item.repeatFrequency, horizonMonths),
+              runDates(placed, planEnd).length
+            )
+          : item.kind === "evergreen"
+            ? scaleToFittingRuns(
+                item.revenue,
+                runsInPeriod("always-on", null, horizonMonths),
+                monthShares({ ...placed, eventDate: null }, planEnd).length
+              )
+            : item.revenue;
 
       const ok = await insertInitiative(db, {
         companyId,
@@ -747,7 +780,7 @@ export async function POST(request: NextRequest) {
         eventDate: toDateOnly(slot.eventDate),
         productIds: liveProductIds(item.intakeProductIds),
         displayOrder: item.displayOrder,
-        revenue: item.revenue,
+        revenue,
         kind: item.kind,
         repeatFrequency: item.repeatFrequency,
         typeSource: typeSourceFor(item.libraryKey),

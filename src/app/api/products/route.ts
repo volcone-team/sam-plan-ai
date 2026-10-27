@@ -5,6 +5,7 @@ import { LIMIT_KEYS } from "@/lib/billing/limits";
 import { checkLiveLimit, liveLimitResponse } from "@/lib/billing/live-limits";
 import { requirePermission } from "@/lib/require-permission";
 import { parseCreateProductRequest } from "@/lib/products/create-request";
+import { isMissingIntervalColumn, withoutInterval } from "@/lib/products/recurring-interval";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,20 +50,24 @@ export async function POST(request: NextRequest) {
     const limit = await checkLiveLimit(db, companyId, LIMIT_KEYS.MAX_PRODUCTS, 1);
     if (!limit.ok) return liveLimitResponse(limit);
 
-    const { data, error } = await db
-      .from("products")
-      .insert({
-        company_id: companyId,
-        name: req.name,
-        description: req.description,
-        price: req.price,
-        revenue_type: req.revenueType,
-        ticket_tier: req.ticketTier,
-        is_active: true,
-        display_order: req.displayOrder,
-      })
-      .select("*")
-      .single();
+    const row = {
+      company_id: companyId,
+      name: req.name,
+      description: req.description,
+      price: req.price,
+      revenue_type: req.revenueType,
+      recurring_interval: req.recurringInterval,
+      ticket_tier: req.ticketTier,
+      is_active: true,
+      display_order: req.displayOrder,
+    };
+    const insert = (payload: Record<string, unknown>) => db.from("products").insert(payload).select("*").single();
+    let { data, error } = await insert(row);
+    // Migration 055 not applied yet: create the product without the interval.
+    if (isMissingIntervalColumn(error)) {
+      const retry = withoutInterval(row);
+      if (retry) ({ data, error } = await insert(retry));
+    }
 
     if (error || !data) {
       console.error("[products/create] insert failed:", error?.message);

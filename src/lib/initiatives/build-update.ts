@@ -60,6 +60,9 @@ export function buildInitiativeUpdate(dto: UpdateInitiativeDTO): Record<string, 
   if (d.eventDate !== undefined) row.event_date = dateOrNull(d.eventDate as DateValue);
   if (isPrecision(d.activationDatePrecision)) row.activation_date_precision = d.activationDatePrecision;
   if (isPrecision(d.eventDatePrecision)) row.event_date_precision = d.eventDatePrecision;
+  // Nullable (036 / 045): blank clears.
+  if (d.repeatFrequency !== undefined) row.repeat_frequency = blankToNull(d.repeatFrequency);
+  if (d.revenueCloseDate !== undefined) row.revenue_close_date = dateOrNull(d.revenueCloseDate as DateValue);
 
   if (d.trafficInput !== undefined) row.traffic_input = d.trafficInput;
   if (d.plannedBudget !== undefined) row.planned_budget = d.plannedBudget;

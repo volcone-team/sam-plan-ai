@@ -53,14 +53,23 @@ export type ScenarioValue =
  * ------------------------------------------------------------------ */
 
 /**
- * The panel's multipliers. Written as the panel writes them (1.1, 1.25) and
- * applied as the same expression — `Math.round(good * 1.1)` — rather than an
- * algebraically equal one, so float rounding at the half (e.g. 1005 -> 1106,
- * 1002 -> 1253) cannot drift from the panel. The tests compare against the
- * panel's expressions directly.
+ * Better = Good + 10%, Best = Good + 20% (client, Oct 2026; Best was +25%).
+ * Applied as `Math.round(good * 1.1)` everywhere, so every form rounds the
+ * same way. These are suggestions: the forms fill them in and the user may
+ * overwrite either.
  */
 export const BETTER_MULTIPLIER = 1.1;
-export const BEST_MULTIPLIER = 1.25;
+export const BEST_MULTIPLIER = 1.2;
+
+/** The suggested Better figure for a Good figure. */
+export function autoBetter(good: number): number {
+  return Math.round(good * BETTER_MULTIPLIER);
+}
+
+/** The suggested Best figure for a Good figure. */
+export function autoBest(good: number): number {
+  return Math.round(good * BEST_MULTIPLIER);
+}
 
 export type GoalScenariosResult =
   | { ok: true; scenarios: ScenarioTriple }
@@ -68,7 +77,7 @@ export type GoalScenariosResult =
 
 /**
  * Good = the entered figure, unrounded (the panel does not round it);
- * Better = Math.round(good * 1.1); Best = Math.round(good * 1.25).
+ * Better = Math.round(good * 1.1); Best = Math.round(good * 1.2).
  *
  * Strings are read with `parseFloat`, as the panel reads its input. Blank or
  * absent is `missing`; non-numeric or negative is `invalid`. Zero is a valid

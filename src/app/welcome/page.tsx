@@ -13,6 +13,7 @@ import { isMissingColumnError } from "@/lib/supabase/missing-column";
 import {
   resolveOnboardingBookingUrl,
   onboardingBookingCycle,
+  isYearlyCycle,
 } from "@/lib/billing/booking";
 import { WelcomeClient } from "./welcome-client";
 import { ConfirmPayment } from "./confirm-payment";
@@ -235,13 +236,14 @@ export default async function WelcomePage({
    * billing_cycle default says — and a yearly customer with no yearly link
    * set falls back to the monthly one.
    */
+  const bookingCycle = onboardingBookingCycle({
+    accessReason: access.reason,
+    billingCycle: sub?.billing_cycle ?? null,
+  });
   const bookingUrl = resolveOnboardingBookingUrl({
     monthlyUrl: callSettings.bookingUrl,
     yearlyUrl: callSettings.bookingUrlYearly,
-    billingCycle: onboardingBookingCycle({
-      accessReason: access.reason,
-      billingCycle: sub?.billing_cycle ?? null,
-    }),
+    billingCycle: bookingCycle,
   });
 
   const { data: plan } = sub?.plan_id
@@ -275,6 +277,9 @@ export default async function WelcomePage({
       trialDaysRemaining={access.daysRemaining}
       awaitingCall={awaitingCall}
       bookingUrl={bookingUrl}
+      // Same rule as the calendar: only a PAID yearly plan reads as yearly;
+      // trials and comps get the monthly copy.
+      plan={isYearlyCycle(bookingCycle) ? "yearly" : "monthly"}
     />
   );
 }

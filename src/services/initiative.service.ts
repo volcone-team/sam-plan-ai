@@ -16,8 +16,21 @@ import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
 import { toDateOnly, parseDateOnly } from '@/lib/plan-dates';
 import { readMetricSet } from '@/lib/metrics/metric-set';
 import { overlapsPeriod } from '@/lib/initiatives/schedule';
+import { isRepeatFrequency } from '@/lib/intake-forecast';
+
+/** repeat_frequency column, else attrs.repeat_frequency; null when neither is a known slug. */
+function readRepeatFrequency(row: Record<string, unknown>): string | null {
+  if (isRepeatFrequency(row.repeat_frequency)) return row.repeat_frequency;
+  const attrs = row.attrs;
+  if (typeof attrs === 'object' && attrs !== null && !Array.isArray(attrs)) {
+    const value = (attrs as Record<string, unknown>).repeat_frequency;
+    if (isRepeatFrequency(value)) return value;
+  }
+  return null;
+}
 import { LEAD_HANDOFF_ATTR, handoffCleanup } from '@/lib/initiatives/lead-handoff';
 import { buildInitiativeUpdate } from '@/lib/initiatives/build-update';
+import { initiativeFrequencyFallback, isCheckViolation } from '@/lib/initiatives/frequency-fallback';
 
 export class InitiativeService {
   /**
@@ -299,12 +312,16 @@ export class InitiativeService {
         // Never "" into a uuid/date column; see build-update.ts.
         const updateData = buildInitiativeUpdate(dto);
 
-        const { data, error } = await supabase
-          .from('initiatives')
-          .update(updateData)
-          .eq('id', id)
-          .select()
-          .single();
+        const run = (payload: Record<string, unknown>) =>
+          supabase.from('initiatives').update(payload).eq('id', id).select().single();
+        let { data, error } = await run(updateData);
+        // A frequency the CHECK does not accept yet (migration 051 not applied):
+        // keep it in attrs instead, merged over the row's current attrs.
+        if (isCheckViolation(error)) {
+          const { data: current } = await supabase.from('initiatives').select('attrs').eq('id', id).maybeSingle();
+          const retry = initiativeFrequencyFallback(updateData, (current?.attrs as Record<string, unknown> | null) ?? null);
+          if (retry) ({ data, error } = await run(retry));
+        }
 
         if (error) console.error("[Supabase initiatives]", (error as any).message, "|details:", (error as any).details, "|hint:", (error as any).hint, "|code:", (error as any).code);
 
@@ -426,6 +443,9 @@ export class InitiativeService {
         typeof row.attrs === 'object' && row.attrs !== null && !Array.isArray(row.attrs)
           ? (row.attrs as Record<string, unknown>)
           : {},
+      // Migration 036 column first, then attrs (where POST /api/initiatives
+      // writes it) — the same order as frequencyOf in recurring-state.ts.
+      repeatFrequency: readRepeatFrequency(row),
       trafficInput: row.traffic_input as number | undefined,
       revenueScenarios: {
         good: Number(row.revenue_good) || 0,

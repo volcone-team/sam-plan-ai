@@ -21,26 +21,26 @@ import {
 const panel = (initiativeTarget: string) => ({
   good: initiativeTarget ? parseFloat(initiativeTarget) : 0,
   better: initiativeTarget ? Math.round(parseFloat(initiativeTarget) * 1.1) : 0,
-  best: initiativeTarget ? Math.round(parseFloat(initiativeTarget) * 1.25) : 0,
+  best: initiativeTarget ? Math.round(parseFloat(initiativeTarget) * 1.2) : 0,
 });
 
 describe("goal mode", () => {
   it("exports the panel's multipliers", () => {
     expect(BETTER_MULTIPLIER).toBe(1.1);
-    expect(BEST_MULTIPLIER).toBe(1.25);
+    expect(BEST_MULTIPLIER).toBe(1.2);
   });
 
   it("computes good/better/best", () => {
     expect(goalScenarios(100000)).toEqual({
       ok: true,
-      scenarios: { good: 100000, better: 110000, best: 125000 },
+      scenarios: { good: 100000, better: 110000, best: 120000 },
     });
   });
 
   it("rounds exactly like the panel at float half-points", () => {
-    // 1005 * 1.1 = 1105.5 -> 1106; 1002 * 1.25 = 1252.5 -> 1253 (Math.round rounds half up).
+    // 1005 * 1.1 = 1105.5 -> 1106; 1002.5 * 1.2 = 1203 (Math.round rounds half up).
     expect(goalScenarios(1005)).toMatchObject({ scenarios: { better: 1106 } });
-    expect(goalScenarios(1002)).toMatchObject({ scenarios: { best: 1253 } });
+    expect(goalScenarios(1002.5)).toMatchObject({ scenarios: { best: 1203 } });
   });
 
   it("matches the panel for every target 0..20000 and decimal strings", () => {
@@ -135,7 +135,7 @@ describe("revenue lines", () => {
     expect(r.complete).toBe(true);
     expect(r.lines.map((l) => (l.status === "resolved" ? l.target : null))).toEqual([9400, 5910, 9970]);
     expect(r.total).toBe(25280);
-    expect(r.scenarios).toEqual({ good: 25280, better: 27808, best: 31600 });
+    expect(r.scenarios).toEqual({ good: 25280, better: 27808, best: 30336 });
     const offer = r.lines[2];
     expect(offer.condition).toBe("path=offer");
     expect(offer.status === "resolved" && offer.window).toEqual({
@@ -198,7 +198,7 @@ describe("revenue lines", () => {
         closes: { name: "close_date", date: "2027-06-30" },
       },
     });
-    expect(r.scenarios).toEqual({ good: 6000, better: 6600, best: 7500 });
+    expect(r.scenarios).toEqual({ good: 6000, better: 6600, best: 7200 });
 
     const missing = resolveRevenueLines([], { product: { price: 500 }, units: { implicit: 1 } });
     expect(missing.lines[0]).toMatchObject({ status: "unresolved", implicit: true, reason: "missing_window_opens" });
@@ -237,7 +237,7 @@ describe("commission", () => {
       ok: true,
       good: { commission: 2000, sales: null },
       better: { commission: 2200 },
-      best: { commission: 2500 },
+      best: { commission: 2400 },
     });
   });
 

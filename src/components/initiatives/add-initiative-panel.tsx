@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 import { DateInput } from '@/components/ui/date-input';
 import { NumberInputRaw } from '@/components/ui/number-input';
-import { formatNumber } from '@/lib/format-money';
 import { toDateOnly } from '@/lib/plan-dates';
 import type { CreateInitiativeRequest } from '@/lib/initiatives/create-request';
 import type { InitiativeKind } from '@/types';
@@ -23,6 +22,7 @@ import { LimitNotice } from '@/components/billing/limit-notice';
 import type { PickerItem } from '@/lib/intake-v3/picker';
 import { IntakePicker } from './intake-picker';
 import { IntakeForm } from './intake-form';
+import { autoBest, autoBetter } from '@/lib/intake-v3/revenue';
 import { useIntakePickerLoad } from './use-intake-picker-load';
 import { chooseAddFlow } from './add-initiative-flow';
 import type { HandoffInitiative } from '@/lib/initiatives/lead-handoff';
@@ -111,6 +111,17 @@ export function AddInitiativePanel({
   const [otherExpenses, setOtherExpenses] = useState<Array<{ description: string; amount: string }>>([]);
   const [revenueGoalMode, setRevenueGoalMode] = useState<'enter' | 'metrics'>('enter');
   const [initiativeTarget, setInitiativeTarget] = useState('');
+  /** The user's own Better / Best; '' or null follows the suggestion (Good +10% / +20%). */
+  const [betterOverride, setBetterOverride] = useState<string | null>(null);
+  const [bestOverride, setBestOverride] = useState<string | null>(null);
+  const targetGood = initiativeTarget ? parseFloat(initiativeTarget) : NaN;
+  const suggestedBetter = Number.isFinite(targetGood) ? autoBetter(targetGood) : null;
+  const suggestedBest = Number.isFinite(targetGood) ? autoBest(targetGood) : null;
+  /** What is saved: the typed figure when there is one, else the suggestion. */
+  const chosen = (override: string | null, suggested: number | null) =>
+    override !== null && override.trim() !== '' && Number.isFinite(Number(override))
+      ? Number(override)
+      : suggested ?? 0;
   const [rationale, setRationale] = useState('');
   const [trackingMetrics, setTrackingMetrics] = useState<Array<{ name: string; target: string }>>([
     { name: 'Registrants', target: '' },
@@ -150,6 +161,8 @@ export function AddInitiativePanel({
     setOtherExpenses([]);
     setRevenueGoalMode('enter');
     setInitiativeTarget('');
+    setBetterOverride(null);
+    setBestOverride(null);
     setRationale('');
     setTrackingMetrics([
       { name: 'Registrants', target: '' },
@@ -222,8 +235,8 @@ export function AddInitiativePanel({
         plannedBudget: plannedBudget ? parseFloat(plannedBudget) : 0,
         revenueScenarios: {
           good: initiativeTarget ? parseFloat(initiativeTarget) : 0,
-          better: initiativeTarget ? Math.round(parseFloat(initiativeTarget) * 1.1) : 0,
-          best: initiativeTarget ? Math.round(parseFloat(initiativeTarget) * 1.25) : 0,
+          better: chosen(betterOverride, suggestedBetter),
+          best: chosen(bestOverride, suggestedBest),
         },
         // Choices only: the server builds the metric set from the library row.
         ...(selectedType.kind === 'library'
@@ -920,7 +933,7 @@ export function AddInitiativePanel({
               <div className="space-y-3 border-t border-border pt-4">
                 <h3 className="text-sm font-semibold text-[hsl(var(--foreground))]">Revenue goals</h3>
                 <p className="text-xs text-[hsl(var(--foreground-muted))]">
-                  Enter your target revenue. Better and Best are calculated automatically (+10% and +25%).
+                  Enter your target revenue. Better (+10%) and Best (+20%) fill in automatically; you can change them.
                 </p>
                 <div className="flex gap-2 mb-2">
                   <button
@@ -957,28 +970,21 @@ export function AddInitiativePanel({
                       className="w-full rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 text-sm outline-none transition-colors focus:border-[hsl(var(--primary))]"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-[hsl(var(--foreground-muted))]">Better ($)</label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={initiativeTarget ? formatNumber(Math.round(parseFloat(initiativeTarget) * 1.1)) : ''}
-                      placeholder="—"
-                      className="w-full rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))] px-2 py-1.5 text-sm text-[hsl(var(--foreground-muted))] outline-none cursor-not-allowed"
-                    />
-                    <p className="text-[10px] text-[hsl(var(--foreground-muted))]">+10% above target</p>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-[hsl(var(--foreground-muted))]">Best ($)</label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={initiativeTarget ? formatNumber(Math.round(parseFloat(initiativeTarget) * 1.25)) : ''}
-                      placeholder="—"
-                      className="w-full rounded-[var(--radius-md)] border border-border bg-[hsl(var(--background-muted))] px-2 py-1.5 text-sm text-[hsl(var(--foreground-muted))] outline-none cursor-not-allowed"
-                    />
-                    <p className="text-[10px] text-[hsl(var(--foreground-muted))]">+25% above target</p>
-                  </div>
+                  {([
+                    ['better', 'Better (+10%)', betterOverride, setBetterOverride, suggestedBetter],
+                    ['best', 'Best (+20%)', bestOverride, setBestOverride, suggestedBest],
+                  ] as const).map(([key, label, override, setOverride, suggested]) => (
+                    <div key={key} className="space-y-1">
+                      <label htmlFor={`init-${key}-revenue`} className="text-[11px] font-medium text-[hsl(var(--foreground))]">{label}</label>
+                      <NumberInputRaw
+                        id={`init-${key}-revenue`}
+                        value={override !== null ? override : suggested === null ? '' : String(suggested)}
+                        onValueChange={setOverride}
+                        placeholder="—"
+                        className="w-full rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 text-sm outline-none transition-colors focus:border-[hsl(var(--primary))]"
+                      />
+                    </div>
+                  ))}
                 </div>
               </div>
 

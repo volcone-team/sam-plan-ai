@@ -184,7 +184,7 @@ describe('revenue', () => {
 
   it('computes Better/Best from the goal', () => {
     const d: IntakeDraft = { ...initialDraft(item, config()), revenue: { mode: 'goal', goal: '1000', lines: {} } };
-    expect(revenueView(d, config())).toEqual({ lines: null, good: 1000, better: 1100, best: 1250 });
+    expect(revenueView(d, config())).toEqual({ lines: null, good: 1000, better: 1100, best: 1200 });
     expect(revenueView({ ...d, revenue: { ...d.revenue, goal: null } }, config()).good).toBeNull();
   });
 
@@ -197,7 +197,7 @@ describe('revenue', () => {
     ]);
     expect(partial.good).toBe(1000);
     const full = revenueView({ ...d, revenue: { ...d.revenue, lines: { core: '1000', vip_tier: 1000 } } }, TWO_LINES);
-    expect(full).toMatchObject({ good: 2000, better: 2200, best: 2500 });
+    expect(full).toMatchObject({ good: 2000, better: 2200, best: 2400 });
     expect(revenueView(d, TWO_LINES).good).toBeNull();
   });
 });

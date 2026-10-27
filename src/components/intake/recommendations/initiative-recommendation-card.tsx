@@ -1,10 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { Check, X, Shuffle, Info, Undo2, ChevronDown } from "lucide-react";
+import { Check, X, Shuffle, Undo2, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatMoney } from "@/lib/format-money";
-import { BENCHMARK_NOTICE } from "@/lib/intake/schema";
 import type { ScoreBreakdown, ScoreLetter } from "@/lib/recommend/score";
 import type { RecommendationExplanation } from "@/lib/recommend/explain";
 import { ScoreBreakdownView } from "@/components/recommend/score-breakdown";
@@ -173,13 +172,11 @@ export function RecommendationCard({
 
       {data.explanation && <ExplanationDetails explanation={data.explanation} />}
 
-      {/* REQ-13.6 — only when the figure is ours, not theirs. */}
-      {data.fromBenchmarks && (
-        <p className="flex items-start gap-1.5 text-xs italic text-[hsl(var(--foreground-muted))]">
-          <Info className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-          {BENCHMARK_NOTICE}
-        </p>
-      )}
+      {/*
+        REQ-13.6's "Based on industry averages. Add your real numbers to
+        sharpen this." notice was removed at the client's request: there is
+        nowhere on this screen to add real numbers, so it read as a dead end.
+      */}
 
       <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
         <button
@@ -229,8 +226,11 @@ export function RecommendationCard({
 }
 
 /**
- * "Why this?" — what to track, what to watch out for, and a readiness
- * checklist, collapsed so the card stays compact.
+ * The readiness checklist ("Before you start"), always visible, then
+ * "More about the initiative" — what to track and what to watch out for,
+ * collapsed so the card stays compact. (Was "Why
+ * this?"; the client renamed it because it describes the initiative rather
+ * than justifying the pick, and dropped the "Written by AI" note.)
  *
  * The checklist is LOCAL state only: it is there to make the user think, not
  * to gate anything, and it is not saved.
@@ -241,19 +241,48 @@ function ExplanationDetails({ explanation }: { explanation: RecommendationExplan
   const panelId = React.useId();
   const baseId = React.useId();
 
-  const hasDetails =
-    explanation.whatToTrack.length > 0 ||
-    Boolean(explanation.watchOutFor) ||
-    explanation.readinessQuestions.length > 0;
+  // The readiness questions sit ABOVE the toggle, always visible (client
+  // request); the collapsed section holds what to track and what to watch.
+  const hasDetails = explanation.whatToTrack.length > 0 || Boolean(explanation.watchOutFor);
+  const hasQuestions = explanation.readinessQuestions.length > 0;
 
-  const sourceNote = explanation.source === "ai" ? "Written by AI" : "Based on our scoring";
-
-  if (!hasDetails) {
-    return <p className="text-[11px] text-[hsl(var(--foreground-muted))]">{sourceNote}</p>;
-  }
+  if (!hasDetails && !hasQuestions) return null;
 
   return (
     <div className="space-y-2">
+      {explanation.readinessQuestions.length > 0 && (
+        <fieldset className="space-y-1 px-1.5 text-xs text-foreground">
+          <legend className="mb-1 font-semibold">Before you start</legend>
+          {explanation.readinessQuestions.map((question, index) => {
+            const id = `${baseId}-ready-${index}`;
+            return (
+              <div key={question} className="flex items-start gap-2">
+                <input
+                  id={id}
+                  type="checkbox"
+                  checked={ready.has(index)}
+                  onChange={() =>
+                    setReady((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(index)) next.delete(index);
+                      else next.add(index);
+                      return next;
+                    })
+                  }
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]"
+                />
+                <label htmlFor={id} className="text-[hsl(var(--foreground-muted))]">
+                  {question}{" "}
+                  <span className="font-medium text-foreground">
+                    {ready.has(index) ? "Yes" : "Not yet"}
+                  </span>
+                </label>
+              </div>
+            );
+          })}
+        </fieldset>
+      )}
+      {hasDetails && (
       <div className="flex items-center justify-between gap-2">
         <button
           type="button"
@@ -266,11 +295,12 @@ function ExplanationDetails({ explanation }: { explanation: RecommendationExplan
             className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")}
             aria-hidden="true"
           />
-          Why this?
+          More about the initiative
         </button>
-        <p className="text-[11px] text-[hsl(var(--foreground-muted))]">{sourceNote}</p>
       </div>
+      )}
 
+      {hasDetails && (
       <div id={panelId} hidden={!open} className="space-y-3 px-1.5 text-xs text-foreground">
         {explanation.whatToTrack.length > 0 && (
           <div className="space-y-1">
@@ -289,40 +319,8 @@ function ExplanationDetails({ explanation }: { explanation: RecommendationExplan
             <p className="text-[hsl(var(--foreground-muted))]">{explanation.watchOutFor}</p>
           </div>
         )}
-
-        {explanation.readinessQuestions.length > 0 && (
-          <fieldset className="space-y-1">
-            <legend className="mb-1 font-semibold">Before you start</legend>
-            {explanation.readinessQuestions.map((question, index) => {
-              const id = `${baseId}-ready-${index}`;
-              return (
-                <div key={question} className="flex items-start gap-2">
-                  <input
-                    id={id}
-                    type="checkbox"
-                    checked={ready.has(index)}
-                    onChange={() =>
-                      setReady((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(index)) next.delete(index);
-                        else next.add(index);
-                        return next;
-                      })
-                    }
-                    className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]"
-                  />
-                  <label htmlFor={id} className="text-[hsl(var(--foreground-muted))]">
-                    {question}{" "}
-                    <span className="font-medium text-foreground">
-                      {ready.has(index) ? "Yes" : "Not yet"}
-                    </span>
-                  </label>
-                </div>
-              );
-            })}
-          </fieldset>
-        )}
       </div>
+      )}
     </div>
   );
 }

@@ -12,6 +12,11 @@ export interface InitiativeWhyProps {
   /** The initiative's workbook library key; no key means no workbook lookup. */
   libraryKey?: string | null;
   initiativeType: InitiativeType | null;
+  /**
+   * Show the "Why This Initiative" heading and its "When to use" card.
+   * False leaves only the Difficulty Dimensions card. Default true.
+   */
+  showWhy?: boolean;
 }
 const FIT_SCORE_NOTE =
   "FIT: initiatives that don't match your industry, your product's price, or need a team you don't have are filtered out. " +
@@ -90,22 +95,24 @@ function WhyField({ section, first }: { section: WhySection; first: boolean }) {
  * from the workbook library row. Either card hides when it has nothing to
  * show; a lone card takes the full width.
  */
-export function InitiativeWhy({ initiativeId, libraryKey, initiativeType }: InitiativeWhyProps) {
+export function InitiativeWhy({ initiativeId, libraryKey, initiativeType, showWhy = true }: InitiativeWhyProps) {
   const data = useWhyData(initiativeId, libraryKey);
   // Render nothing until the lookup settles, so the old description does not
   // flash before the workbook text replaces it.
   if (data === undefined) return null;
-  const sections = whySections(data.entry, initiativeType?.aiContext?.description);
+  const sections = showWhy ? whySections(data.entry, initiativeType?.aiContext?.description) : [];
   const score = data.score;
   if (sections.length === 0 && !score) return null;
   const both = sections.length > 0 && score !== null;
   return (
-    <section aria-labelledby="why-heading">
-      <h2 id="why-heading" className="text-lg font-semibold text-[hsl(var(--foreground))] flex items-center gap-2">
-        <Lightbulb className="h-5 w-5 text-[hsl(var(--warning))]" />
-        Why This Initiative
-      </h2>
-      <div className={`mt-4 grid gap-6 ${both ? 'md:grid-cols-2' : ''}`}>
+    <section aria-labelledby={showWhy ? 'why-heading' : undefined} aria-label={showWhy ? undefined : 'Difficulty Dimensions'}>
+      {showWhy && (
+        <h2 id="why-heading" className="text-lg font-semibold text-[hsl(var(--foreground))] flex items-center gap-2">
+          <Lightbulb className="h-5 w-5 text-[hsl(var(--warning))]" />
+          Why This Initiative
+        </h2>
+      )}
+      <div className={`${showWhy ? 'mt-4 ' : ''}grid gap-6 ${both ? 'md:grid-cols-2' : ''}`}>
         {sections.length > 0 && (
           <div className="space-y-4 rounded-[var(--radius-lg)] border border-border bg-card p-5">
             {sections.map((s, i) => (

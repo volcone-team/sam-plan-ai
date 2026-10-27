@@ -705,7 +705,7 @@ export function YearAtAGlance() {
           <p className="mt-2 max-w-3xl text-sm text-[hsl(var(--foreground-muted))]">
             This page is your whole year in one view. From top to bottom: your revenue goals,
             how you&apos;re tracking against them, whether your initiatives add up to your goals,
-            the strategy behind the plan, and the initiatives that will get you there.
+            and the initiatives that will get you there.
           </p>
           {/*
             "Got it" is the ONLY action. The second button ("Enter your first
@@ -971,39 +971,9 @@ export function YearAtAGlance() {
         </div>
       </section>
 
-      {/* YOUR ANNUAL STRATEGY — the reasoning behind the plan. Stored on the
-          annual plan (same field the future-year draft editor writes to). */}
-      {annualPlan?.notes ? (
-        <section className="rounded-[var(--radius-lg)] border border-border bg-[hsl(var(--background-muted)/0.4)] p-6">
-          <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
-            Your annual strategy
-          </p>
-          <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">
-            The reasoning behind your plan, based on what you told us about your business.
-          </p>
-          <p className="mt-4 whitespace-pre-line text-lg leading-relaxed text-[hsl(var(--foreground))]">
-            {annualPlan.notes}
-          </p>
-        </section>
-      ) : (
-        /*
-          COLLAPSED empty state. With no strategy this was a full-width band
-          with a heading, a description and an italic apology — the largest
-          thing on the page was the absence of content. One row with the action
-          that fills it.
-        */
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-border bg-[hsl(var(--background-muted)/0.4)] px-5 py-3">
-          <p className="text-sm text-[hsl(var(--foreground-muted))]">
-            No strategy captured for {selectedYear} yet
-          </p>
-          <button
-            onClick={() => setShowRegenConfirm(true)}
-            className="shrink-0 rounded-[var(--radius-md)] border border-border bg-background px-3 py-1.5 text-sm font-medium transition-colors hover:bg-[hsl(var(--background-muted))]"
-          >
-            Add your strategy
-          </button>
-        </section>
-      )}
+      {/* The "Your annual strategy" section (and its "Add your strategy"
+          empty state) was removed at the client's request. The strategy is
+          still stored on annual_plans.notes by the future-year draft editor. */}
 
       {/* ACTIVE INITIATIVES — the projects that produce the revenue */}
       <section>

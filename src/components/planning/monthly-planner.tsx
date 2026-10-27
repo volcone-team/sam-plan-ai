@@ -24,7 +24,7 @@ import { resultService } from '@/services/result.service';
 import { MonthlySummaryTable } from './monthly-summary-table';
 import type { MonthlyPlan, Initiative, Result } from '@/types';
 import { monthBuckets } from '@/lib/planning/period-totals';
-import { loadMonthTargets } from '@/lib/planning/load-period-targets';
+import { loadPlanPeriod } from '@/lib/planning/load-period-targets';
 import { usePlanYears } from '@/hooks/use-plan-years';
 import { PlanYearTabs } from '@/components/planning/plan-year-tabs';
 
@@ -134,10 +134,10 @@ export function MonthlyPlanner() {
         // initiatives and the annual plan (lib/planning/period-totals): the
         // projections and monthly_plans tables are not written by the current
         // intake, so reading them showed $0 for every month.
-        const [monthlyPlans, allInitiatives, monthTargets, results, monthInitiatives] = await Promise.all([
+        const [monthlyPlans, allInitiatives, period, results, monthInitiatives] = await Promise.all([
           planService.getMonthlyPlans(companyId, YEAR, quarter),
           initiativeService.getInitiativesByCompany(companyId),
-          loadMonthTargets(companyId, YEAR),
+          loadPlanPeriod(companyId, YEAR),
           resultService.getResultsByMonth(companyId, YEAR, selectedMonth),
           initiativeService.getInitiativesByDateRange(companyId, monthStart, monthEnd),
         ]);
@@ -145,10 +145,10 @@ export function MonthlyPlanner() {
         // Notes, if a monthly plan row exists.
         const plan = monthlyPlans.find(p => p.month === selectedMonth) || null;
         setMonthlyPlan(plan);
-        setMonthTarget(monthTargets[selectedMonth - 1] ?? 0);
+        setMonthTarget(period.monthTargets[selectedMonth - 1] ?? 0);
 
-        // Each initiative's revenue counts in its event month.
-        const bucket = monthBuckets(allInitiatives, YEAR)[selectedMonth - 1];
+        // One-time revenue in its event month; recurring spread over its runs.
+        const bucket = monthBuckets(allInitiatives, YEAR, period.planEnd)[selectedMonth - 1];
         const monthGood = bucket.good;
         const monthBetter = bucket.better;
         const monthBest = bucket.best;
@@ -278,7 +278,7 @@ export function MonthlyPlanner() {
           <SummaryCard label="Actual" value={formatCurrency(actualRevenue)} variant="default" />
         </div>
         <p className="text-xs text-[hsl(var(--foreground-muted))]">
-          Target is this month&apos;s share of your {YEAR} goal. Good, Better and Best add up the initiatives whose event falls in {MONTH_NAMES[selectedMonth - 1]}.
+          Target is this month&apos;s share of your {YEAR} goal. Good, Better and Best add up what each initiative earns in {MONTH_NAMES[selectedMonth - 1]}: one-time work in its event month, recurring work for each run.
         </p>
 
         {/* Progress bar: actual vs moderate projection */}

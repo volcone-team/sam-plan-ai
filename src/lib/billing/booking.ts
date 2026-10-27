@@ -81,6 +81,11 @@ export function resolveBookingUrls(raw: {
  */
 const YEARLY_CYCLES = new Set(["annual", "yearly"]);
 
+/** True for a yearly billing cycle ("annual" or "yearly", any case). */
+export function isYearlyCycle(cycle: unknown): boolean {
+  return typeof cycle === "string" && YEARLY_CYCLES.has(cycle.trim().toLowerCase());
+}
+
 /**
  * Which onboarding booking link a customer should see.
  *

@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { SupportFooter } from "@/components/support-footer";
 
 export interface AppShellProps {
   sidebar: ReactNode;
@@ -35,6 +36,8 @@ export function AppShell({
 
         {/* Scrollable content area */}
         <div className="flex-1">{children}</div>
+        {/* Support contacts and feedback links, below every page */}
+        <SupportFooter />
       </div>
     </div>
   );
