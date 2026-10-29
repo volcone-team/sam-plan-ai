@@ -5,6 +5,7 @@ import { CheckCircle, Settings, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RoleManagement } from "./role-management";
 import { LegalLinksSettings } from './legal-links-settings';
+import { SupportContactSettings } from './support-contact-settings';
 import { GhlSettings } from './ghl-settings';
 
 /* ------------------------------------------------------------------
@@ -31,7 +32,6 @@ import { GhlSettings } from './ghl-settings';
 
 interface PlatformSettings {
   appName: string;
-  supportEmail: string;
   defaultTimezone: string;
   defaultCurrency: string;
   maxFileUploadSize: number;
@@ -46,7 +46,6 @@ const PLATFORM_SETTINGS_KEY = "sam-flow-admin-platform-settings";
 
 const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   appName: "SAM Flow AI",
-  supportEmail: "",
   defaultTimezone: "America/New_York",
   defaultCurrency: "USD",
   maxFileUploadSize: 10,
@@ -286,23 +285,7 @@ export function AdminSettings() {
               />
             </div>
 
-            {/* Support Email */}
-            <div>
-              <label
-                htmlFor="support-email"
-                className="mb-1 block text-sm font-medium text-[hsl(var(--foreground))]"
-              >
-                Support Email
-              </label>
-              <input
-                id="support-email"
-                type="email"
-                value={settings.supportEmail}
-                onChange={(e) => setSettings((s) => ({ ...s, supportEmail: e.target.value }))}
-                className="w-full rounded-[var(--radius-md)] border border-border bg-transparent px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--foreground-muted))] focus:border-[hsl(var(--primary))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--primary))]"
-                placeholder="support@samflow.ai"
-              />
-            </div>
+            {/* Support Email moved to <SupportContactSettings /> (server-saved, drives the footer). */}
 
             {/* Default Timezone */}
             <div>
@@ -410,6 +393,12 @@ export function AdminSettings() {
         folding it into handleSaveSettings would couple the signup checkbox's
         links to a form that also writes unrelated settings.
       */}
+      {activeSettingsTab === 'platform' && (
+      <section aria-label="Support contact" className="mt-6">
+        <SupportContactSettings />
+      </section>
+      )}
+
       {activeSettingsTab === 'platform' && (
       <section aria-label="Legal links" className="mt-6">
         <LegalLinksSettings />

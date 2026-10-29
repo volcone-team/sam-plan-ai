@@ -57,8 +57,17 @@ function formatValue(obj: Record<string, any>): string {
         return `${labelize(k)}: ${formatMoney(Number(v))}`;
       }
       if (k === "activationMonth") return `Month: ${v}`;
+      // Arrays (e.g. tasks: [{ name, ... }]) would print "[object Object]".
+      if (Array.isArray(v)) {
+        const items = v
+          .map((item) => (item && typeof item === "object" ? item.name ?? item.title ?? "" : String(item)))
+          .filter(Boolean);
+        return items.length ? `${labelize(k)}: ${items.join(", ")}` : null;
+      }
+      if (v && typeof v === "object") return null;
       return `${labelize(k)}: ${v}`;
     })
+    .filter(Boolean)
     .join(" · ");
 }
 

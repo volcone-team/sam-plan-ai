@@ -1,15 +1,18 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { Bug, ExternalLink, LifeBuoy, Lightbulb, Mail, MessageSquareText } from "lucide-react";
+import { resolveSupportContact, type SupportContact } from "@/lib/support-contact";
 
 /**
  * "Need Assistance?" footer: how to reach support, report an error or ask for
  * a feature. Shown at the bottom of every portal page (AppShell).
  *
- * Contact details live here as constants so a change is a one-line edit.
+ * The email and SMS number come from /admin/settings (app_settings, migration
+ * 059), read through /api/admin/settings like the devtools switch. It renders
+ * the defaults first, then swaps in the saved values.
  * The two forms are external Monday.com pages, so they open in a new tab.
  */
-const SUPPORT_SMS_DISPLAY = "(901) 612-8106";
-const SUPPORT_SMS_HREF = "sms:+19016128106";
-const SUPPORT_EMAIL = "support@samplanai.com";
 const ERROR_FORM_URL = "https://forms.monday.com/forms/21201c3b1b898a0e09c978aa4b844e99?r=use1";
 const FEATURE_REQUEST_URL = "https://ev-companies.monday.com/boards/18435280721/views/286248997";
 
@@ -17,6 +20,25 @@ const linkClass =
   "font-medium text-[hsl(var(--primary))] underline-offset-2 hover:underline focus-visible:underline outline-none";
 
 export function SupportFooter() {
+  const [contact, setContact] = useState<SupportContact>(() => resolveSupportContact(null));
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/settings", { credentials: "same-origin" });
+        if (!res.ok) return;
+        const body = (await res.json()) as { supportContact?: SupportContact };
+        if (active && body.supportContact) setContact(body.supportContact);
+      } catch {
+        // Keep the defaults: the footer must never go blank.
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <footer
       aria-labelledby="support-footer-heading"
@@ -38,14 +60,14 @@ export function SupportFooter() {
               Sammie the Planbot is always available to answer questions and provide guidance. If you&rsquo;d like
               to reach a team member, contact our Customer Experience team anytime via SMS (text only, cannot
               receive calls) at{" "}
-              <a href={SUPPORT_SMS_HREF} className={`${linkClass} inline-flex items-center gap-1 whitespace-nowrap`}>
+              <a href={contact.phoneHref} className={`${linkClass} inline-flex items-center gap-1 whitespace-nowrap`}>
                 <MessageSquareText aria-hidden="true" className="h-3.5 w-3.5" />
-                {SUPPORT_SMS_DISPLAY}
+                {contact.phoneDisplay}
               </a>{" "}
               or email{" "}
-              <a href={`mailto:${SUPPORT_EMAIL}`} className={`${linkClass} inline-flex items-center gap-1 whitespace-nowrap`}>
+              <a href={`mailto:${contact.email}`} className={`${linkClass} inline-flex items-center gap-1 whitespace-nowrap`}>
                 <Mail aria-hidden="true" className="h-3.5 w-3.5" />
-                {SUPPORT_EMAIL}
+                {contact.email}
               </a>
               . We&rsquo;re happy to help!
             </p>

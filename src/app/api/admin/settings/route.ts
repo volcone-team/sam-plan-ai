@@ -7,6 +7,11 @@ import {
   normaliseLegalUrl,
   describeLegalUrlProblem,
 } from "@/lib/legal-urls";
+import {
+  resolveSupportContact,
+  describeSupportEmailProblem,
+  describeSupportPhoneProblem,
+} from "@/lib/support-contact";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,6 +51,28 @@ function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * Support email / phone (migration 059), read in a SEPARATE query so a
+ * database without 059 still returns the other settings. The raw stored
+ * values go to the admin form; `supportContact` is what the footer renders
+ * (stored values when usable, the old hardcoded defaults otherwise).
+ */
+async function readSupportContact(db: ReturnType<typeof adminClient>) {
+  const { data, error } = await db
+    .from("app_settings")
+    .select("support_email, support_phone")
+    .eq("id", "global")
+    .maybeSingle();
+  const row = error
+    ? null
+    : (data as { support_email?: string | null; support_phone?: string | null } | null);
+  return {
+    supportEmail: row?.support_email ?? null,
+    supportPhone: row?.support_phone ?? null,
+    supportContact: resolveSupportContact(row),
+  };
+}
+
 export async function GET() {
   try {
     const db = adminClient();
@@ -64,6 +91,7 @@ export async function GET() {
     return NextResponse.json({
       deterDevtools: data?.deter_devtools ?? DEFAULTS.deterDevtools,
       ...resolveLegalUrls(data),
+      ...(await readSupportContact(db)),
     });
   } catch (err: unknown) {
     console.error("[admin/settings] GET error:", errMessage(err));
@@ -83,6 +111,8 @@ export async function PUT(req: Request) {
       deterDevtools?: unknown;
       privacyPolicyUrl?: unknown;
       termsUrl?: unknown;
+      supportEmail?: unknown;
+      supportPhone?: unknown;
     } = {};
     try {
       const parsed = await req.json();
@@ -135,6 +165,27 @@ export async function PUT(req: Request) {
       patch[column] = normaliseLegalUrl(supplied);
     }
 
+    /*
+     * Support contact (migration 059). Optional like the legal URLs, so other
+     * panels that save through this route never touch these columns — and so
+     * never fail on a database where 059 is not applied yet.
+     */
+    for (const [key, column, describe] of [
+      ["supportEmail", "support_email", describeSupportEmailProblem],
+      ["supportPhone", "support_phone", describeSupportPhoneProblem],
+    ] as const) {
+      const supplied = body[key];
+      if (supplied === undefined) continue;
+      if (typeof supplied !== "string") {
+        return NextResponse.json({ error: key }, { status: 400 });
+      }
+      const problem = describe(supplied);
+      if (problem) {
+        return NextResponse.json({ error: key, message: problem }, { status: 400 });
+      }
+      patch[column] = supplied.trim() || null;
+    }
+
     const db = adminClient();
     const { error } = await db
       .from("app_settings")
@@ -142,7 +193,16 @@ export async function PUT(req: Request) {
 
     if (error) {
       console.error("[admin/settings] PUT error:", error.message);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      const missing059 = /support_(email|phone)/.test(error.message);
+      return NextResponse.json(
+        {
+          error: error.message,
+          message: missing059
+            ? "Support contact columns are missing. Run migration 059 in the Supabase SQL editor."
+            : undefined,
+        },
+        { status: 500 }
+      );
     }
 
     // Audit trail — best-effort, never affects the response.
@@ -169,6 +229,8 @@ export async function PUT(req: Request) {
           deterDevtools: body.deterDevtools,
           privacyPolicyUrl: patch.privacy_policy_url ?? undefined,
           termsUrl: patch.terms_url ?? undefined,
+          supportEmail: patch.support_email ?? undefined,
+          supportPhone: patch.support_phone ?? undefined,
         },
       },
       db
