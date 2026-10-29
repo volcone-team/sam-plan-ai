@@ -479,6 +479,8 @@ export function BillingPanel() {
       }
     : null;
   const cancelState = canCancel(subState);
+  // A limit of 0 means the plan does not include the feature: hide the row.
+  const usageRows = me.usage.filter((u) => !u.notIncluded);
   const reactivateState = canReactivate(subState);
 
   /**
@@ -736,8 +738,8 @@ export function BillingPanel() {
         </div>
       )}
 
-      {/* Usage */}
-      {me.usage.length > 0 && (
+      {/* Usage. Features the plan sets to 0 (notIncluded) are not listed at all. */}
+      {usageRows.length > 0 && (
         <div className="rounded-[var(--radius-lg)] border border-border bg-card p-6">
           <div className="flex items-baseline justify-between">
             {/*
@@ -746,14 +748,14 @@ export function BillingPanel() {
               allowances carry the reset date.
             */}
             <h3 className="text-sm font-semibold">Plan usage</h3>
-            {me.usage.some((u) => (u.scope ?? 'period') === 'period') && (
+            {usageRows.some((u) => (u.scope ?? 'period') === 'period') && (
               <p className="text-xs text-[hsl(var(--foreground-muted))]">
                 Monthly allowances reset {shortDate(me.periodEnd)}
               </p>
             )}
           </div>
           <div className="mt-4 space-y-3">
-            {me.usage.map((u) => {
+            {usageRows.map((u) => {
               const pct = u.unlimited || u.limit <= 0
                 ? 0
                 : Math.min(100, Math.round((u.used / u.limit) * 100));
@@ -772,14 +774,12 @@ export function BillingPanel() {
                     >
                       {u.unlimited
                         ? 'Unlimited'
-                        : u.notIncluded
-                          ? 'Not in your plan'
-                          : u.overLimit
+                        : u.overLimit
                             ? `${u.used} of ${u.limit}, over your plan limit`
                             : `${u.used} of ${u.limit}${isPeriod ? ' this period' : ''}`}
                     </span>
                   </div>
-                  {!u.unlimited && !u.notIncluded && (
+                  {!u.unlimited && (
                     <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[hsl(var(--background-muted))]">
                       <div
                         className={cn(
