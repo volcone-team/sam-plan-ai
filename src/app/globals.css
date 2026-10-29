@@ -24,7 +24,8 @@
   /* --- Background --- */
   --background: 0 0% 100%;
   --background-subtle: 180 20% 98%;
-  --background-muted: 180 15% 96%;
+  /* #F1FAFB — the light-mode grey boxes (client, Oct 2026). Was 180 15% 96%. */
+  --background-muted: 186 56% 96.5%;
   --background-elevated: 0 0% 100%;
 
   /* --- Foreground --- */

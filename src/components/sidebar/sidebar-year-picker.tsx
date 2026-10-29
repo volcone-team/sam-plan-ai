@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCompanyId } from "@/hooks/use-auth";
@@ -244,14 +245,20 @@ export function SidebarYearPicker({ collapsed }: { collapsed: boolean }) {
         Switches the plan you&apos;re viewing.
       </p>
 
-      {deleting !== null && (
-        <DeleteYearModal
-          open
-          year={deleting}
-          onClose={() => setDeleting(null)}
-          onDeleted={handleDeleted}
-        />
-      )}
+      {/*
+        Portalled to <body>: the sidebar is now always dark-themed, and a
+        modal rendered inside it would inherit that in light mode too.
+      */}
+      {deleting !== null &&
+        createPortal(
+          <DeleteYearModal
+            open
+            year={deleting}
+            onClose={() => setDeleting(null)}
+            onDeleted={handleDeleted}
+          />,
+          document.body
+        )}
     </div>
   );
 }

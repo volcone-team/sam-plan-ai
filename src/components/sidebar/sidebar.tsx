@@ -51,8 +51,13 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "hidden lg:flex flex-col fixed inset-y-0 left-0 z-40",
-        "bg-[hsl(var(--sidebar))] border-r border-[hsl(var(--sidebar-border))]",
+        /*
+         * `dark` scopes the dark theme to the sidebar in BOTH modes (client,
+         * Oct 2026: same colour as dark mode). Every token inside, the logo
+         * swap and `dark:` utilities all resolve to their dark values.
+         */
+        "dark hidden lg:flex flex-col fixed inset-y-0 left-0 z-40",
+        "bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))] border-r border-[hsl(var(--sidebar-border))]",
         "transition-[width] duration-[var(--duration-slow)] ease-[var(--ease-default)]",
         collapsed
           ? "w-[var(--sidebar-width-collapsed)]"

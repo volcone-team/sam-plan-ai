@@ -49,7 +49,11 @@ export function MobileNav() {
             </button>
           </SheetTrigger>
 
-          <SheetContent side="left" className="w-72 p-0 overflow-y-auto">
+          {/* Dark in both modes, like the desktop sidebar. */}
+          <SheetContent
+            side="left"
+            className="dark w-72 p-0 overflow-y-auto bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))] border-[hsl(var(--sidebar-border))]"
+          >
             <SheetHeader className="border-b border-border px-4 py-4">
               <SheetTitle className="flex items-center gap-2">
                 <BrandLogo />
