@@ -11,6 +11,7 @@ import {
   Building2,
   Shield,
   Crown,
+  Mail,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -187,6 +188,28 @@ export function UserManagement({ filter = "all" }: { filter?: "all" | "internal"
     }
   }
 
+  /** User id whose invite is being resent, and the last result to show. */
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [resendNotice, setResendNotice] = useState<string | null>(null);
+
+  async function handleResendInvite(userId: string, email: string) {
+    setResendingId(userId);
+    setResendNotice(null);
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/resend-invite`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      setResendNotice(
+        res.ok
+          ? `Invite resent to ${email}. The new link is valid for 7 days; earlier invite links no longer work.`
+          : data.error || "Could not resend the invite."
+      );
+    } catch {
+      setResendNotice("Could not resend the invite.");
+    } finally {
+      setResendingId(null);
+    }
+  }
+
   async function handleDeletePermanently(userId: string) {
     setDeleting(true);
     console.log("[UserManagement] Permanently deleting user:", userId);
@@ -282,6 +305,14 @@ export function UserManagement({ filter = "all" }: { filter?: "all" | "internal"
         <button onClick={() => setShowAddForm(!showAddForm)} className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-white hover:opacity-90">+ Add User</button>
       </div>
 
+      {resendNotice && (
+        <div role="status" className="flex items-start justify-between gap-2 rounded-[var(--radius-md)] border border-border bg-card px-3 py-2 text-sm">
+          <span>{resendNotice}</span>
+          <button type="button" onClick={() => setResendNotice(null)} className="text-xs text-[hsl(var(--foreground-muted))] hover:underline">
+            Dismiss
+          </button>
+        </div>
+      )}
       {showAddForm && (
         <div className="mb-6 rounded-[var(--radius-lg)] border border-border bg-card p-5">
           <h4 className="text-sm font-semibold mb-4">Add User to Company</h4>
@@ -421,6 +452,17 @@ export function UserManagement({ filter = "all" }: { filter?: "all" | "internal"
                         >
                           <Eye className="h-3.5 w-3.5" />
                         </button>
+                        {u.status === "pending" && (
+                          <button
+                            onClick={() => handleResendInvite(u.id, u.email)}
+                            disabled={resendingId === u.id}
+                            className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                            title="Email a new invite link (valid for 7 days)"
+                          >
+                            {resendingId === u.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+                            Resend invite
+                          </button>
+                        )}
                         {isSuperAdmin && u.id !== currentUserId && (
                           <select
                             value={u.adminLevel || "none"}

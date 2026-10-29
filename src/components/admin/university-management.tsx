@@ -41,6 +41,7 @@ import {
   type UniversityResource,
   type UniversityResourceType,
   type UniversityStatus,
+  type UniversityBillingCycle,
 } from "@/types/university.types";
 
 /* ------------------------------------------------------------------
@@ -164,12 +165,20 @@ const byOrder = <T extends { displayOrder: number }>(key: (x: T) => string) => (
   a.displayOrder - b.displayOrder || key(a).localeCompare(key(b));
 
 function accessSummary(r: UniversityResource, plans: AdminPlan[]): string {
-  if (r.isFree) return "Free";
+  const cycle = r.billingCycle === "annual" ? " · Annual only" : r.billingCycle === "monthly" ? " · Monthly only" : "";
+  if (r.isFree) return `Free${cycle}`;
   const names = plans
     .filter((p) => r.planIds.includes(p.id))
     .map((p) => (p.isActive ? p.name : `${p.name} (retired)`));
-  return names.length > 0 ? names.join(", ") : "Admins only";
+  return names.length > 0 ? `${names.join(", ")}${cycle}` : "Admins only";
 }
+
+/** Who sees a resource by billing cycle, as offered in the form. */
+const BILLING_CYCLE_OPTIONS: { value: UniversityBillingCycle; label: string }[] = [
+  { value: "any", label: "Monthly and annual customers" },
+  { value: "annual", label: "Annual customers only" },
+  { value: "monthly", label: "Monthly customers only" },
+];
 
 /* ------------------------------------------------------------------
    Main component
@@ -181,6 +190,8 @@ export function UniversityManagement() {
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [addingCategory, setAddingCategory] = useState(false);
+  /** Resources ticked for bulk delete. Cleared after every bulk delete. */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 
   const load = useCallback(async () => {
     setState(await fetchCatalogue());
@@ -246,6 +257,35 @@ export function UniversityManagement() {
   const { data } = state;
   const categories = [...data.categories].sort(byOrder((c) => c.name));
   const categoryIds = categories.map((c) => c.id);
+  // Ticks for resources that no longer exist (deleted elsewhere) are ignored.
+  const liveIds = new Set(data.resources.map((r) => r.id));
+  const selectedIds = [...selected].filter((id) => liveIds.has(id));
+
+  const toggleSelected = (ids: readonly string[], checked: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+
+  async function bulkDelete(target: "selected" | "all") {
+    const count = target === "all" ? data.resources.length : selectedIds.length;
+    if (count === 0) return;
+    const message =
+      target === "all"
+        ? `Delete ALL ${count} resource${count === 1 ? "" : "s"} in SAM University? Categories are kept. This cannot be undone.`
+        : `Delete the ${count} selected resource${count === 1 ? "" : "s"}? This cannot be undone.`;
+    if (!window.confirm(message)) return;
+    const res = await mutate<{ deleted: number }>(
+      "/api/admin/university/resources/bulk-delete",
+      { method: "POST", body: JSON.stringify(target === "all" ? { all: true } : { ids: selectedIds }) },
+      `${count} resource${count === 1 ? "" : "s"} deleted.`
+    );
+    if (res.ok) setSelected(new Set());
+  }
 
   return (
     <div className="space-y-4">
@@ -254,12 +294,50 @@ export function UniversityManagement() {
           {categories.length} categor{categories.length === 1 ? "y" : "ies"} · {data.resources.length} resource
           {data.resources.length === 1 ? "" : "s"}
         </p>
-        {!addingCategory && (
-          <button type="button" onClick={() => setAddingCategory(true)} className={BTN_PRIMARY} disabled={busy}>
-            <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add category
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {data.resources.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void bulkDelete("all")}
+              className={cn(BTN_SECONDARY, "text-red-600 hover:text-red-700 dark:text-red-400")}
+              disabled={busy}
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" /> Delete all resources
+            </button>
+          )}
+          {!addingCategory && (
+            <button type="button" onClick={() => setAddingCategory(true)} className={BTN_PRIMARY} disabled={busy}>
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add category
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Bulk bar: appears once any resource is ticked */}
+      {selectedIds.length > 0 && (
+        <div
+          role="region"
+          aria-label="Selected resources"
+          className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-md)] border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
+        >
+          <span>
+            {selectedIds.length} resource{selectedIds.length === 1 ? "" : "s"} selected
+          </span>
+          <div className="flex items-center gap-2">
+            <button type="button" className={BTN_SECONDARY} onClick={() => setSelected(new Set())} disabled={busy}>
+              Clear selection
+            </button>
+            <button
+              type="button"
+              className={cn(BTN_PRIMARY, "bg-red-600 hover:bg-red-700")}
+              onClick={() => void bulkDelete("selected")}
+              disabled={busy}
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" /> Delete selected
+            </button>
+          </div>
+        </div>
+      )}
 
       <div aria-live="polite" className="sr-only">{notice ?? ""}</div>
       {notice && (
@@ -310,6 +388,8 @@ export function UniversityManagement() {
               isFirst={index === 0}
               isLast={index === categories.length - 1}
               mutate={mutate}
+              selected={selected}
+              onToggleSelected={toggleSelected}
               onMove={(delta) =>
                 void mutate(
                   "/api/admin/university/reorder",
@@ -340,6 +420,9 @@ interface CategorySectionProps {
   isFirst: boolean;
   isLast: boolean;
   mutate: Mutate;
+  /** Ticked resource ids, across every category. */
+  selected: ReadonlySet<string>;
+  onToggleSelected: (ids: readonly string[], checked: boolean) => void;
   onMove: (delta: -1 | 1) => void;
 }
 
@@ -352,6 +435,8 @@ function CategorySection({
   isFirst,
   isLast,
   mutate,
+  selected,
+  onToggleSelected,
   onMove,
 }: CategorySectionProps) {
   const [editing, setEditing] = useState(false);
@@ -459,6 +544,24 @@ function CategorySection({
         </div>
       )}
 
+      {resources.length > 0 && (
+        <label className="flex cursor-pointer items-center gap-2 border-t border-border bg-[hsl(var(--background))] px-4 py-1.5 text-xs text-[hsl(var(--foreground-muted))]">
+          <input
+            type="checkbox"
+            checked={resourceIds.every((rid) => selected.has(rid))}
+            ref={(el) => {
+              if (el) {
+                const some = resourceIds.some((rid) => selected.has(rid));
+                el.indeterminate = some && !resourceIds.every((rid) => selected.has(rid));
+              }
+            }}
+            onChange={(e) => onToggleSelected(resourceIds, e.target.checked)}
+            disabled={busy}
+            className="h-3.5 w-3.5 accent-[hsl(var(--primary))]"
+          />
+          Select all in {category.name}
+        </label>
+      )}
       <ul className="divide-y divide-border border-t border-border">
         {resources.map((resource, index) => (
           <li key={resource.id}>
@@ -487,6 +590,8 @@ function CategorySection({
                 resource={resource}
                 plans={plans}
                 busy={busy}
+                selected={selected.has(resource.id)}
+                onSelect={(checked) => onToggleSelected([resource.id], checked)}
                 isFirst={index === 0}
                 isLast={index === resources.length - 1}
                 onEdit={() => setEditingResourceId(resource.id)}
@@ -554,15 +659,26 @@ interface ResourceRowProps {
   busy: boolean;
   isFirst: boolean;
   isLast: boolean;
+  /** Ticked for bulk delete. */
+  selected: boolean;
+  onSelect: (checked: boolean) => void;
   onEdit: () => void;
   onDelete: () => Promise<void>;
   onMove: (delta: -1 | 1) => void;
 }
 
-function ResourceRow({ resource, plans, busy, isFirst, isLast, onEdit, onDelete, onMove }: ResourceRowProps) {
+function ResourceRow({ resource, plans, busy, isFirst, isLast, selected, onSelect, onEdit, onDelete, onMove }: ResourceRowProps) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
+    <div className={cn("flex flex-wrap items-center justify-between gap-3 px-4 py-2.5", selected && "bg-red-50/60 dark:bg-red-950/20")}>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={(e) => onSelect(e.target.checked)}
+          disabled={busy}
+          aria-label={`Select ${resource.title}`}
+          className="h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]"
+        />
         <span className="truncate text-sm text-[hsl(var(--foreground))]">{resource.title}</span>
         <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
           {TYPE_LABEL[resource.type]}
@@ -760,6 +876,7 @@ interface ResourceBody {
   status: UniversityStatus;
   isFree: boolean;
   planIds: string[];
+  billingCycle: UniversityBillingCycle;
   // No displayOrder: the server appends on create and keeps the order on edit
   // (appending when the category changes). Reordering uses the arrows.
 }
@@ -796,6 +913,7 @@ function ResourceForm({ initial, defaultCategoryId, categories, plans, busy, onC
   const [status, setStatus] = useState<UniversityStatus>(initial?.status ?? "draft");
   const [isFree, setIsFree] = useState(initial?.isFree ?? false);
   const [planIds, setPlanIds] = useState<string[]>(initial?.planIds ?? []);
+  const [billingCycle, setBillingCycle] = useState<UniversityBillingCycle>(initial?.billingCycle ?? "any");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -848,6 +966,7 @@ function ResourceForm({ initial, defaultCategoryId, categories, plans, busy, onC
       status,
       isFree,
       planIds: isFree ? [] : planIds,
+      billingCycle,
     };
     const res = await onSubmit(body);
     if (!res.ok) {
@@ -1051,6 +1170,26 @@ function ResourceForm({ initial, defaultCategoryId, categories, plans, busy, onC
         )}
         <FieldError id={`${id}-planIds-error`} message={errors.planIds} />
       </fieldset>
+
+      {/* Migration 056: on top of the plan rule; the other cycle does not see it at all. */}
+      <div>
+        <label htmlFor={`${id}-billingCycle`} className={LABEL}>Show to</label>
+        <select
+          id={`${id}-billingCycle`}
+          value={billingCycle}
+          onChange={(e) => setBillingCycle(e.target.value as UniversityBillingCycle)}
+          aria-describedby={`${id}-billingCycle-hint${errors.billingCycle ? ` ${id}-billingCycle-error` : ""}`}
+          className={INPUT}
+        >
+          {BILLING_CYCLE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+        <p id={`${id}-billingCycle-hint`} className="mt-1 text-xs text-[hsl(var(--foreground-muted))]">
+          Customers on the other billing cycle won&apos;t see this resource at all. Trials and free-access accounts count as monthly.
+        </p>
+        <FieldError id={`${id}-billingCycle-error`} message={errors.billingCycle} />
+      </div>
 
       <FormError message={formError} />
       <div className="flex items-center gap-2">

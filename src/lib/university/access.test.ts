@@ -12,6 +12,8 @@ import {
   categoryFromRow,
   resourceFromRow,
   groupPlanIds,
+  isVisibleForCycle,
+  readBillingCycle,
 } from "./access";
 import {
   UNIVERSITY_RESOURCE_TYPES,
@@ -66,6 +68,7 @@ function genResource(rand: () => number, i: number, categoryId = "cat-1"): Unive
     status,
     isFree: rand() < 0.3,
     planIds,
+    billingCycle: pick(rand, ["any", "any", "monthly", "annual"] as const),
     displayOrder: Math.floor(rand() * 5),
     createdAt: "2026-10-01T00:00:00Z",
     updatedAt: "2026-10-01T00:00:00Z",
@@ -79,6 +82,7 @@ function genViewer(rand: () => number): UniversityViewer {
     planId: rand() < 0.2 ? null : pick(rand, [...PLAN_IDS, "11111111-1111-4111-8111-111111111111"]),
     accessAllowed: rand() < 0.75,
     billingDisabled: rand() < 0.15,
+    billingCycle: rand() < 0.5 ? "monthly" : "annual",
   };
 }
 
@@ -95,6 +99,7 @@ function resource(over: Partial<UniversityResource> = {}): UniversityResource {
     status: "published",
     isFree: false,
     planIds: [PRO],
+    billingCycle: "any",
     displayOrder: 0,
     createdAt: "",
     updatedAt: "",
@@ -127,6 +132,50 @@ const BILLING_OFF: UniversityViewer = { isAdmin: false, planId: null, accessAllo
 
 // ─── Generated invariants ────────────────────────────────────────────────────
 
+describe("billing-cycle visibility (migration 056)", () => {
+  const viewer = (over: Partial<UniversityViewer> = {}): UniversityViewer => ({
+    isAdmin: false, planId: PRO, accessAllowed: true, billingDisabled: false, billingCycle: "monthly", ...over,
+  });
+
+  it("shows 'any' to everyone", () => {
+    expect(isVisibleForCycle(resource(), viewer())).toBe(true);
+    expect(isVisibleForCycle(resource(), viewer({ billingCycle: "annual" }))).toBe(true);
+  });
+
+  it("hides annual-only resources from monthly customers, and the reverse", () => {
+    expect(toResourceView(resource({ billingCycle: "annual" }), viewer(), new Map())).toBeNull();
+    expect(toResourceView(resource({ billingCycle: "annual" }), viewer({ billingCycle: "annual" }), new Map())).not.toBeNull();
+    expect(toResourceView(resource({ billingCycle: "monthly" }), viewer({ billingCycle: "annual" }), new Map())).toBeNull();
+  });
+
+  it("treats a viewer with no cycle as monthly", () => {
+    expect(isVisibleForCycle(resource({ billingCycle: "annual" }), viewer({ billingCycle: undefined }))).toBe(false);
+    expect(isVisibleForCycle(resource({ billingCycle: "monthly" }), viewer({ billingCycle: undefined }))).toBe(true);
+  });
+
+  it("shows everything to super admins and when billing is off", () => {
+    expect(isVisibleForCycle(resource({ billingCycle: "annual" }), viewer({ isAdmin: true }))).toBe(true);
+    expect(isVisibleForCycle(resource({ billingCycle: "annual" }), viewer({ billingDisabled: true }))).toBe(true);
+  });
+
+  it("still applies the plan rule to an annual customer", () => {
+    const view = toResourceView(resource({ billingCycle: "annual", planIds: ["other"] }), viewer({ billingCycle: "annual" }), new Map());
+    expect(view?.locked).toBe(true);
+  });
+
+  it("reads unknown stored values as 'any' and validates input", () => {
+    expect(readBillingCycle(null)).toBe("any");
+    expect(readBillingCycle("annual")).toBe("annual");
+    expect(readBillingCycle("weekly")).toBe("any");
+    const base = { categoryId: "11111111-1111-4111-8111-111111111111", title: "T", type: "video", status: "draft", isFree: true };
+    const ok = normaliseResourceInput({ ...base, billingCycle: "annual" });
+    expect(ok.ok && ok.value.billingCycle).toBe("annual");
+    const dflt = normaliseResourceInput(base);
+    expect(dflt.ok && dflt.value.billingCycle).toBe("any");
+    expect(normaliseResourceInput({ ...base, billingCycle: "weekly" }).ok).toBe(false);
+  });
+});
+
 describe("university access — generated invariants", () => {
   it("a locked view never has a url, and only published+unlocked views do", () => {
     const rand = mulberry32(0x5a11);
@@ -144,15 +193,15 @@ describe("university access — generated invariants", () => {
     }
   });
 
-  it("draft is never returned, and coming_soon never carries a url", () => {
+  it("draft and other-cycle resources are never returned, and coming_soon never carries a url", () => {
     const rand = mulberry32(0xd4af7);
     for (let i = 0; i < ITERATIONS; i++) {
       const r = genResource(rand, i);
       const v = genViewer(rand);
       const view = toResourceView(r, v, PLAN_NAMES);
-      if (r.status === "draft") expect(view).toBeNull();
+      if (r.status === "draft" || !isVisibleForCycle(r, v)) expect(view).toBeNull();
       else expect(view).not.toBeNull();
-      if (r.status === "coming_soon") expect(view?.url).toBeNull();
+      if (r.status === "coming_soon" && view) expect(view.url).toBeNull();
     }
   });
 

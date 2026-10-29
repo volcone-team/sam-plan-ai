@@ -181,9 +181,19 @@ export async function sendWeeklySummaryEmail(
 
 export async function sendMemberInviteEmail(
   to: string,
-  opts: { inviterName?: string | null; companyName?: string | null; inviteUrl: string; role?: string | null }
+  opts: {
+    inviterName?: string | null;
+    companyName?: string | null;
+    inviteUrl: string;
+    role?: string | null;
+    /** How long the link works; null = the short-lived legacy link. */
+    validDays?: number | null;
+  }
 ): Promise<string | null> {
   const inviter = opts.inviterName || "Your team";
+  const expiryLine = opts.validDays
+    ? `This invite link is valid for ${opts.validDays} days. If it has expired, ask for it to be resent.`
+    : "This invite link expires soon — please accept it as soon as you can.";
   const company = opts.companyName || "their company";
   const companyForSubject = opts.companyName || "SAM Plan AI";
 
@@ -221,12 +231,12 @@ export async function sendMemberInviteEmail(
           <a href="${opts.inviteUrl}" style="color: #2563eb; word-break: break-all;">${opts.inviteUrl}</a>
         </p>
         <p style="font-size: 13px; color: #999; margin-top: 24px;">
-          This invite link expires soon — please accept it as soon as you can.
+          ${expiryLine}
         </p>
         <p style="font-size: 14px; color: #666; margin-top: 32px;">— The SAM Plan AI Team</p>
       </div>
     `,
-    text: `You're invited!\n\n${inviter} invited you to join ${company} on SAM Plan AI.${roleText}\n\nAccept your invite and set your password:\n${opts.inviteUrl}\n\nThis invite link expires soon — please accept it as soon as you can.\n\n— The SAM Plan AI Team`,
+    text: `You're invited!\n\n${inviter} invited you to join ${company} on SAM Plan AI.${roleText}\n\nAccept your invite and set your password:\n${opts.inviteUrl}\n\n${expiryLine}\n\n— The SAM Plan AI Team`,
     tags: ["member-invite"],
   });
 }

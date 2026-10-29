@@ -26,35 +26,27 @@ const open: PortalAccessCompany = {
 };
 
 describe("derivePortalAccessState", () => {
-  it("is not_gated for every company the gate never applied to", () => {
-    // Including the shape a row has before migration 043 is applied, where the
-    // columns are simply absent from the select.
-    expect(derivePortalAccessState({})).toBe("not_gated");
-    expect(derivePortalAccessState({ requires_call_unlock: false })).toBe("not_gated");
-    expect(derivePortalAccessState({ requires_call_unlock: null })).toBe("not_gated");
+  it("is not_gated only when there is no company", () => {
     expect(derivePortalAccessState(null)).toBe("not_gated");
     expect(derivePortalAccessState(undefined)).toBe("not_gated");
   });
-
-  it("is waiting only when the flag is set and there is no grant", () => {
+  it("is waiting when the flag is set and there is no grant", () => {
     expect(derivePortalAccessState(waiting)).toBe("waiting");
     expect(derivePortalAccessState({ requires_call_unlock: true })).toBe("waiting");
   });
-
-  it("is open once a grant exists", () => {
+  it("is open once a grant exists, flagged or not", () => {
     expect(derivePortalAccessState(open)).toBe("open");
-  });
-
-  it("reports a grant without the flag as not_gated, not open", () => {
-    // Nothing can create this row — granting an ungated company is refused —
-    // so if a hand-written UPDATE produces one, the honest reading is the one
-    // the customer experiences: no gate at all.
+    // Admin-created with full access: decided open, so admin can close it.
     expect(
-      derivePortalAccessState({
-        requires_call_unlock: false,
-        portal_access_granted_at: GRANTED_AT,
-      })
-    ).toBe("not_gated");
+      derivePortalAccessState({ requires_call_unlock: false, portal_access_granted_at: GRANTED_AT })
+    ).toBe("open");
+  });
+  it("reads an undecided company by the global switch (Oct 2026: every company gets Open / Close)", () => {
+    // Switch on: the next page view stamps it, whatever its age.
+    expect(derivePortalAccessState({})).toBe("waiting");
+    expect(derivePortalAccessState({ requires_call_unlock: false }, { requireCall: true })).toBe("waiting");
+    // Switch off: nothing gates it, but admin may still close it.
+    expect(derivePortalAccessState({ requires_call_unlock: null }, { requireCall: false })).toBe("open");
   });
 });
 
@@ -66,20 +58,20 @@ describe("decidePortalAccessChange", () => {
     }
   });
 
-  it("refuses to grant or revoke a company that was never gated", () => {
-    // The majority of companies. Stamping a grant on one would record a pass
-    // through a gate that never existed.
+  it("refuses only when there is no company", () => {
     for (const action of ["grant", "revoke"] as const) {
-      for (const company of [
-        {},
-        { requires_call_unlock: false },
-        { requires_call_unlock: null },
-        null,
-      ]) {
-        const d = decidePortalAccessChange({ action, company });
-        expect(d).toMatchObject({ ok: false, status: 409, error: "not_gated" });
-      }
+      expect(decidePortalAccessChange({ action, company: null })).toMatchObject({ ok: false, status: 409 });
     }
+  });
+  it("lets admin open an undecided company (switch on) and close one (switch off)", () => {
+    expect(decidePortalAccessChange({ action: "grant", company: {}, requireCall: true })).toMatchObject({
+      ok: true,
+      outcome: "granted",
+    });
+    expect(decidePortalAccessChange({ action: "revoke", company: {}, requireCall: false })).toMatchObject({
+      ok: true,
+      outcome: "revoked",
+    });
   });
 
   it("grants a waiting company, and says to email them", () => {
@@ -131,22 +123,22 @@ describe("decidePortalAccessChange", () => {
 });
 
 describe("portalAccessPatch", () => {
-  it("stamps both columns on a grant", () => {
+  it("stamps the grant and sets the flag", () => {
     expect(portalAccessPatch("granted", ADMIN_ID, GRANTED_AT)).toEqual({
+      requires_call_unlock: true,
       portal_access_granted_at: GRANTED_AT,
       portal_access_granted_by: ADMIN_ID,
     });
   });
 
-  it("clears both columns on a revoke and leaves the flag alone", () => {
+  it("clears the grant on a revoke and sets the flag, so a never-flagged company really closes", () => {
     const patch = portalAccessPatch("revoked", ADMIN_ID, GRANTED_AT);
     expect(patch).toEqual({
+      requires_call_unlock: true,
       portal_access_granted_at: null,
       portal_access_granted_by: null,
     });
-    // Clearing the FLAG instead would open the portal permanently, which is
-    // the opposite of a revoke: an unflagged company is never gated.
-    expect(patch).not.toHaveProperty("requires_call_unlock");
+    expect(needsCallUnlock({ ...patch })).toBe(true);
   });
 
   it("puts a revoked company back into the waiting state", () => {
@@ -180,9 +172,9 @@ describe("newCompanyGateAction (admin create company)", () => {
     if (action.kind !== "record_grant") throw new Error("unreachable");
     expect(Object.keys(action.patch)).not.toContain("requires_call_unlock");
 
-    // The resulting row is decided, not gated, and never waiting.
+    // The resulting row is decided and open (admin may close it), never waiting.
     const row = { requires_call_unlock: false, ...action.patch };
     expect(needsCallUnlock(row)).toBe(false);
-    expect(derivePortalAccessState(row)).toBe("not_gated");
+    expect(derivePortalAccessState(row)).toBe("open");
   });
 });

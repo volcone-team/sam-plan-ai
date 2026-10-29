@@ -332,6 +332,7 @@ export async function POST(request: Request) {
       );
 
       invited = await sendMemberInvite(adminClient, {
+        createdBy: user.id,
         email: ownerEmail,
         inviterName,
         companyName: contextCompanyName ?? company.name,

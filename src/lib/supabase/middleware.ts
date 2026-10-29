@@ -14,7 +14,6 @@ import {
   type CallGateCompany,
 } from '@/lib/access/call-gate';
 import {
-  NEW_COMPANY_STAMP_GRACE_MS,
   stampCallUnlockForNewCompany,
 } from '@/lib/access/call-gate-settings';
 import {
@@ -158,27 +157,6 @@ async function loadGateSettings(
   } catch {
     return { stripeEnabled: false, trialEnabled: true, trialDays: 14, dunningGraceDays: 7 };
   }
-}
-
-/**
- * Does this company look new enough that the backstop stamp may apply?
- *
- * The cheap half of the backstop's precondition, answered from the
- * `created_at` the call gate's select already returns, so the global switch is
- * only ever read for a company that could actually be stamped.
- *
- * An unparseable or missing timestamp is NOT new. Both failure directions
- * matter and they are not symmetric: declining to stamp leaves a company
- * ungated, which is the same as the feature being off, whereas treating an
- * unknown age as new would let the gate catch an existing paying customer.
- * `stampCallUnlockForNewCompany` makes the same judgement independently — this
- * is a filter, not the authority.
- */
-function isWithinStampGrace(createdAt: string | null, now: number = Date.now()): boolean {
-  if (!createdAt) return false;
-  const created = Date.parse(createdAt);
-  if (!Number.isFinite(created)) return false;
-  return now - created <= NEW_COMPANY_STAMP_GRACE_MS;
 }
 
 /**
@@ -426,6 +404,9 @@ export async function updateSession(request: NextRequest) {
   //    would make an expired impersonation impossible to escape.
   const isAuthFlowRoute =
     request.nextUrl.pathname.startsWith('/auth/set-password') ||
+    // The 7-day invite link (migration 057): it forwards to /auth/set-password,
+    // and must work even if the browser already holds someone's session.
+    request.nextUrl.pathname.startsWith('/auth/invite') ||
     request.nextUrl.pathname.startsWith('/auth/reset-password') ||
     request.nextUrl.pathname.startsWith('/auth/verify-code') ||
     request.nextUrl.pathname.startsWith('/auth/impersonation-ended');
@@ -787,7 +768,7 @@ export async function updateSession(request: NextRequest) {
   ) {
     const { data: gateProfile } = await supabase
       .from('profiles')
-      .select('company_id, is_admin')
+      .select('company_id, is_admin, role')
       .eq('id', userId)
       .maybeSingle();
 
@@ -863,7 +844,6 @@ export async function updateSession(request: NextRequest) {
        * `loadCallGateSettings` follow.
        */
       let gateCompany: CallGateCompany | null = null;
-      let companyCreatedAt: string | null = null;
 
       if (companyResult.error) {
         if (!isMissingColumnError(companyResult.error)) {
@@ -884,7 +864,6 @@ export async function updateSession(request: NextRequest) {
           requires_call_unlock: row.requires_call_unlock ?? null,
           portal_access_granted_at: row.portal_access_granted_at ?? null,
         };
-        companyCreatedAt = row.created_at ?? null;
       }
 
       /**
@@ -907,6 +886,13 @@ export async function updateSession(request: NextRequest) {
        * An onboarding page asks ONLY the call gate (see the note at the top of
        * this block), so it does not pay for the billing settings read either.
        */
+      /*
+       * THE GATE IS THE COMPANY'S; THE STAMP IS THE OWNER'S. While the portal
+       * is closed nobody in the company gets in, teammates included (client,
+       * Oct 2026). But only the owner's visit may flag an undecided company:
+       * a teammate logging in must never close a company's portal (below).
+       */
+      const isCompanyOwner = (gateProfile as { role?: string | null }).role === 'owner';
       const gate: AccessGateDecision = isOnboardingRoute
         ? decideCallGate({
             isAdmin: false,
@@ -1042,9 +1028,8 @@ export async function updateSession(request: NextRequest) {
        *     never reach this block);
        *   - the company carries NO DECISION yet — flag false, no grant — so a
        *     gated or an unlocked company is never reconsidered;
-       *   - `created_at` is INSIDE the grace window, which is what makes this
-       *     a signup rather than an existing customer. The column came free
-       *     with the select the call gate already needs;
+       *   - (the old ten-minute age limit is gone, Oct 2026: every company
+       *     without a decision is gated while the switch is on);
        *   - and only then is the global switch read.
        *
        * So the extra cost is confined to page requests from a company less
@@ -1053,23 +1038,18 @@ export async function updateSession(request: NextRequest) {
        * UPDATE that `stampCallUnlockForNewCompany` performs. Every long-lived
        * customer pays nothing.
        *
-       * NEVER THROWS, never un-stamps, never re-locks a granted company, and
-       * never gates a company older than the window — all guaranteed by
-       * `stampCallUnlockForNewCompany`, not by this call site.
+       * NEVER THROWS, never un-stamps and never re-locks a granted company —
+       * guaranteed by `stampCallUnlockForNewCompany`, not by this call site.
        *
-       * ONE KNOWN LIMIT: this writes through the SESSION client, and the
-       * `companies` UPDATE policy admits only owner/operator roles. The person
-       * making a brand-new company's first request is its owner, so the case
-       * this exists for works; an invited viewer arriving first would simply
-       * not stamp, and the thank-you page's service-role stamp covers the paid
-       * flow regardless.
+       * OWNER ONLY: a teammate's visit never stamps, so logging in as an
+       * invited operator or viewer can never close a company's portal.
        */
       if (
         !isApiRoute &&
+        isCompanyOwner &&
         gateCompany &&
         gateCompany.requires_call_unlock !== true &&
-        !gateCompany.portal_access_granted_at &&
-        isWithinStampGrace(companyCreatedAt)
+        !gateCompany.portal_access_granted_at
       ) {
         const stamp = await stampCallUnlockForNewCompany(supabase, gateProfile.company_id);
 

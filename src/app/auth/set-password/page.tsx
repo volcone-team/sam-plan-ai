@@ -21,6 +21,8 @@ export default function SetPasswordPage() {
   // friendly recovery message instead of the form.
   const [checkingSession, setCheckingSession] = useState(true);
   const [hasSession, setHasSession] = useState(false);
+  /** Why /auth/invite sent us here: invite_expired | invite_replaced | invite_invalid. */
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -49,6 +51,7 @@ export default function SetPasswordPage() {
       // 1. Explicit error in query or hash → link is invalid/expired.
       if (url.searchParams.get('error') || hash.get('error')) {
         if (!mounted) return;
+        setInviteError(url.searchParams.get('error'));
         setHasSession(false);
         setCheckingSession(false);
         return;
@@ -193,8 +196,11 @@ export default function SetPasswordPage() {
           <div className="space-y-3">
             <h1 className="text-2xl font-bold tracking-tight">Invite link expired</h1>
             <p className="text-sm text-[hsl(var(--foreground-muted))]">
-              This link is invalid, already used, or has expired. Ask your team
-              owner to resend the invite, or use Forgot Password.
+              {inviteError === 'invite_expired'
+                ? 'This invite was valid for 7 days and has expired. Ask whoever invited you to resend it, or use Forgot Password.'
+                : inviteError === 'invite_replaced'
+                  ? 'A newer invite has been sent to you, so this one no longer works. Use the link in the latest invite email.'
+                  : 'This link is invalid, already used, or has expired. Ask your team owner to resend the invite, or use Forgot Password.'}
             </p>
           </div>
           <div className="space-y-3">

@@ -11,6 +11,8 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadCompanyAccess } from "@/lib/billing/company-access";
+import { isYearlyCycle, onboardingBookingCycle } from "@/lib/billing/booking";
+import { isMissingColumnError } from "@/lib/supabase/missing-column";
 import { isMissingTableError } from "./admin-repo";
 import {
   buildCustomerCatalogue,
@@ -62,9 +64,11 @@ export { isMissingTableError };
 /** Columns read from each table — exactly what the row mappers need. */
 const CATEGORY_COLUMNS =
   "id, slug, name, description, icon, display_order, is_published, created_at, updated_at";
-const RESOURCE_COLUMNS =
+const RESOURCE_COLUMNS_BASE =
   "id, slug, category_id, title, description, resource_type, url, duration_minutes, " +
   "status, is_free, display_order, created_at, updated_at, updated_by";
+/** With migration 056's billing_cycle; RESOURCE_COLUMNS_BASE is the fallback until it is applied. */
+const RESOURCE_COLUMNS = `${RESOURCE_COLUMNS_BASE}, billing_cycle`;
 const RESOURCE_PLAN_COLUMNS = "resource_id, plan_id";
 const PLAN_COLUMNS = "id, name, is_active, display_order";
 
@@ -97,15 +101,25 @@ export async function loadCatalogueForUser(
   db: SupabaseClient,
   { companyId, isAdmin }: { companyId: string | null; isAdmin: boolean }
 ): Promise<UniversityCatalogueResponse> {
-  const [companyAccess, categoriesRes, resourcesRes, linksRes, plansRes] = await Promise.all([
+  // Drafts are filtered in SQL too, so their urls never even reach this
+  // process. buildCustomerCatalogue drops them again regardless.
+  const loadResources = (columns: string) =>
+    db.from("university_resources").select(columns).neq("status", "draft");
+  const [companyAccess, cycleRes, categoriesRes, firstResourcesRes, linksRes, plansRes] = await Promise.all([
     loadCompanyAccess(db, companyId),
+    // Separate from loadCompanyAccess so its shared select stays unchanged.
+    companyId
+      ? db.from("subscriptions").select("billing_cycle").eq("company_id", companyId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
     db.from("university_categories").select(CATEGORY_COLUMNS).eq("is_published", true),
-    // Drafts are filtered in SQL too, so their urls never even reach this
-    // process. buildCustomerCatalogue drops them again regardless.
-    db.from("university_resources").select(RESOURCE_COLUMNS).neq("status", "draft"),
+    loadResources(RESOURCE_COLUMNS),
     db.from("university_resource_plans").select(RESOURCE_PLAN_COLUMNS),
     db.from("subscription_plans").select(PLAN_COLUMNS).order("display_order", { ascending: true }),
   ]);
+  // Migration 056 not applied yet: read without billing_cycle (every resource is 'any').
+  const resourcesRes = isMissingColumnError(firstResourcesRes.error)
+    ? await loadResources(RESOURCE_COLUMNS_BASE)
+    : firstResourcesRes;
 
   check("university_categories", categoriesRes.error);
   check("university_resources", resourcesRes.error);
@@ -132,11 +146,18 @@ export async function loadCatalogueForUser(
     .map((p) => ({ id: p.id, name: p.name }));
 
   const { planId, access } = companyAccess;
+  // Only a PAID subscription's cycle is real (trial and comp rows carry the
+  // column's 'monthly' default), the same rule as the welcome page.
+  const paidCycle = onboardingBookingCycle({
+    accessReason: access.reason,
+    billingCycle: (cycleRes.data as { billing_cycle?: string | null } | null)?.billing_cycle ?? null,
+  });
   const viewer: UniversityViewer = {
     isAdmin,
     planId,
     accessAllowed: access.allowed,
     billingDisabled: access.reason === "billing_disabled",
+    billingCycle: isYearlyCycle(paidCycle) ? "annual" : "monthly",
   };
 
   // The company's own plan is named even if retired (existing subscribers keep it).

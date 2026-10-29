@@ -5,6 +5,7 @@ import {
   assertPlansExist,
   createResource,
   deleteCategory,
+  deleteResources,
   isMissingTableError,
   loadAdminCatalogue,
   normaliseReorderInput,
@@ -89,7 +90,7 @@ function input(over: Partial<UniversityResourceInput> = {}): UniversityResourceI
   return {
     categoryId: CAT, title: "Intro", description: null, type: "video",
     url: "https://youtu.be/dQw4w9WgXcQ", durationMinutes: 5, status: "published",
-    isFree: false, planIds: [PRO], displayOrder: 0, ...over,
+    isFree: false, planIds: [PRO], billingCycle: "any", displayOrder: 0, ...over,
   };
 }
 
@@ -338,5 +339,80 @@ describe("isMissingTableError", () => {
       status: 503,
       code: "migration_not_applied",
     });
+  });
+});
+
+// ── Billing cycle (migration 056) and bulk delete ───────────────────────────
+
+describe("billing_cycle column fallback", () => {
+  beforeEach(() => { queries = []; });
+
+  it("reads without billing_cycle when migration 056 is not applied", async () => {
+    respond = (q) => {
+      const select = String(arg(q, "select")?.[0] ?? "");
+      if (q.table === "university_resources" && select.includes("billing_cycle")) {
+        return { error: { code: "42703", message: 'column university_resources.billing_cycle does not exist' } };
+      }
+      if (q.table === "university_resources") return { data: [resourceRow()] };
+      return { data: [] };
+    };
+    const cat = await loadAdminCatalogue(makeDb());
+    expect(cat.resources).toHaveLength(1);
+    expect(cat.resources[0].billingCycle).toBe("any");
+  });
+
+  it("refuses an annual-only resource until migration 056 is applied", async () => {
+    respond = (q) => {
+      const select = String(arg(q, "select")?.[0] ?? "");
+      if (q.table === "university_categories") return { data: { id: CAT } };
+      if (q.table === "subscription_plans") return { data: [{ id: PRO }] };
+      if (q.table === "university_resources" && has(q, "insert") && select.includes("billing_cycle")) {
+        return { error: { code: "PGRST204", message: "Could not find the 'billing_cycle' column" } };
+      }
+      if (q.table === "university_resources" && !has(q, "insert")) return { data: [] };
+      return { data: resourceRow() };
+    };
+    await expect(
+      createResource(makeDb(), input({ billingCycle: "annual" }), ADMIN, { hasDisplayOrder: true })
+    ).rejects.toMatchObject({ status: 503, code: "migration_not_applied" });
+  });
+
+  it("writes billing_cycle when the column exists", async () => {
+    respond = (q) => {
+      if (q.table === "university_categories") return { data: { id: CAT } };
+      if (q.table === "subscription_plans") return { data: [{ id: PRO }] };
+      if (q.table === "university_resources" && has(q, "insert")) return { data: resourceRow({ billing_cycle: "annual" }) };
+      return { data: [] };
+    };
+    const created = await createResource(makeDb(), input({ billingCycle: "annual" }), ADMIN, { hasDisplayOrder: true });
+    const insert = writes("university_resources")[0];
+    expect((arg(insert, "insert")?.[0] as Record<string, unknown>).billing_cycle).toBe("annual");
+    expect(created.billingCycle).toBe("annual");
+  });
+});
+
+describe("deleteResources", () => {
+  beforeEach(() => { queries = []; });
+
+  it("deletes the given ids that still exist, in one statement", async () => {
+    respond = (q) => (has(q, "select") ? { data: [resourceRow(), resourceRow({ id: RES2, title: "Two" })] } : { data: null });
+    const deleted = await deleteResources(makeDb(), [RES, RES2]);
+    expect(deleted.map((r) => r.id)).toEqual([RES, RES2]);
+    const del = writes("university_resources");
+    expect(del).toHaveLength(1);
+    expect(arg(del[0], "in")).toEqual(["id", [RES, RES2]]);
+  });
+
+  it('"all" reads every resource with no id filter', async () => {
+    respond = (q) => (has(q, "select") ? { data: [resourceRow()] } : { data: null });
+    await deleteResources(makeDb(), "all");
+    const read = queries.find((q) => q.table === "university_resources" && has(q, "select"))!;
+    expect(has(read, "in")).toBe(false);
+  });
+
+  it("does nothing when none of the ids exist", async () => {
+    respond = () => ({ data: [] });
+    expect(await deleteResources(makeDb(), [RES])).toEqual([]);
+    expect(writes("university_resources")).toHaveLength(0);
   });
 });

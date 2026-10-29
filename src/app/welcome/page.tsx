@@ -75,7 +75,7 @@ export default async function WelcomePage({
 
   const { data: profile } = await db
     .from("profiles")
-    .select("company_id, first_name")
+    .select("company_id, first_name, role")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -83,6 +83,11 @@ export default async function WelcomePage({
     (profile as { company_id?: string | null } | null)?.company_id ?? null;
   const firstName =
     (profile as { first_name?: string | null } | null)?.first_name ?? null;
+  // A closed portal holds the whole company here, teammates included, but
+  // only the owner's visit may stamp an undecided company (same rule as the
+  // middleware).
+  const isCompanyOwner =
+    (profile as { role?: string | null } | null)?.role === "owner";
 
   const { data: subRaw } = companyId
     ? await db
@@ -214,6 +219,7 @@ export default async function WelcomePage({
        */
       if (
         callSettings.requireCall &&
+        isCompanyOwner &&
         callGateCompany.requires_call_unlock !== true &&
         !callGateCompany.portal_access_granted_at
       ) {

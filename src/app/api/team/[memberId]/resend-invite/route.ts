@@ -88,6 +88,7 @@ export async function POST(
     );
 
     const sent = await sendMemberInvite(adminClient, {
+      createdBy: user.id,
       email: memberProfile.email,
       inviterName,
       companyName,

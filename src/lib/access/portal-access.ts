@@ -40,22 +40,29 @@ export type PortalAccessState =
   | "open";
 
 /**
- * Which of the three states a company is in.
+ * Which state a company is in, as admin shows it.
  *
- * `open` requires the FLAG as well as the timestamp. A grant without the flag
- * means "decided: never gated". The admin create route writes exactly that
- * when the company is created with full access (newCompanyGateAction), so the
- * backstop stamps treat it as decided. Granting an existing ungated company is
- * still refused below. Calling such a row "open" would advertise a gate that
- * was never there, so it reads as `not_gated`, which is what the customer
- * experiences.
+ * EVERY COMPANY GETS OPEN / CLOSE (Oct 2026). Before, a company with no flag
+ * read as `not_gated` and admin had no control over it — the case of a
+ * customer who paid more than ten minutes after registering.
+ *
+ *   flagged, no grant            -> waiting (on the thank-you page)
+ *   any grant                    -> open    (admin may close it again)
+ *   no flag, no grant (undecided):
+ *       switch on  -> waiting: the next page view stamps it (no age limit)
+ *       switch off -> open: nothing gates it, but admin may still close it
+ *
+ * `requireCall` is the global switch; omitted reads as on. `not_gated` is now
+ * returned only when there is no company at all.
  */
 export function derivePortalAccessState(
-  company: PortalAccessCompany | null | undefined
+  company: PortalAccessCompany | null | undefined,
+  opts: { requireCall?: boolean } = {}
 ): PortalAccessState {
   if (!company) return "not_gated";
-  if (company.requires_call_unlock !== true) return "not_gated";
-  return needsCallUnlock(company) ? "waiting" : "open";
+  if (company.portal_access_granted_at) return "open";
+  if (company.requires_call_unlock === true) return "waiting";
+  return opts.requireCall === false ? "open" : "waiting";
 }
 
 export type PortalAccessAction = "grant" | "revoke";
@@ -112,6 +119,8 @@ export type PortalAccessDecision =
 export function decidePortalAccessChange(args: {
   action: PortalAccessAction | string;
   company: PortalAccessCompany | null | undefined;
+  /** The global switch; see derivePortalAccessState. */
+  requireCall?: boolean;
 }): PortalAccessDecision {
   if (args.action !== "grant" && args.action !== "revoke") {
     return {
@@ -122,7 +131,7 @@ export function decidePortalAccessChange(args: {
     };
   }
 
-  const state = derivePortalAccessState(args.company);
+  const state = derivePortalAccessState(args.company, { requireCall: args.requireCall });
 
   if (state === "not_gated") {
     return {
@@ -163,10 +172,17 @@ export function portalAccessPatch(
   outcome: PortalAccessOutcome,
   grantedBy: string | null,
   now: string
-): { portal_access_granted_at: string | null; portal_access_granted_by: string | null } {
+): {
+  requires_call_unlock: true;
+  portal_access_granted_at: string | null;
+  portal_access_granted_by: string | null;
+} {
+  // The flag is set on BOTH: an admin decision puts the company under the
+  // gate's control, so a close on a never-flagged company really closes it
+  // (needsCallUnlock reads an unflagged company as open).
   return outcome === "granted"
-    ? { portal_access_granted_at: now, portal_access_granted_by: grantedBy }
-    : { portal_access_granted_at: null, portal_access_granted_by: null };
+    ? { requires_call_unlock: true, portal_access_granted_at: now, portal_access_granted_by: grantedBy }
+    : { requires_call_unlock: true, portal_access_granted_at: null, portal_access_granted_by: null };
 }
 
 export type NewCompanyGateAction =

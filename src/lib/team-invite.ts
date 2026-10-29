@@ -1,6 +1,52 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAppUrl } from "./app-url";
 import { sendMemberInviteEmail } from "./mailgun";
+import { INVITE_TTL_DAYS, inviteExpiry, newInviteToken } from "./invite-token";
+import { isMissingTableError } from "./db-errors";
+
+/**
+ * The link to email: OUR 7-day invite (migration 057), or — until that
+ * migration is applied — a direct Supabase link, which expires with the
+ * project's Email OTP setting (1 hour by default, 24 hours at most).
+ *
+ * A new invite REPLACES any earlier unused one for the same address, so after
+ * a resend only the latest email works.
+ */
+export async function createInviteLink(
+  adminClient: SupabaseClient,
+  email: string,
+  createdBy: string | null = null
+): Promise<{ url: string; validDays: number | null } | null> {
+  const legacy = async () => {
+    const url = await generateMemberInviteLink(adminClient, address);
+    return url ? { url, validDays: null } : null;
+  };
+  const address = email.trim().toLowerCase();
+  const now = new Date().toISOString();
+  const { error: revokeError } = await adminClient
+    .from("account_invites")
+    .update({ revoked_at: now })
+    .eq("email", address)
+    .is("accepted_at", null)
+    .is("revoked_at", null);
+  if (revokeError) {
+    if (isMissingTableError(revokeError)) return legacy();
+    console.error("[team-invite] could not replace earlier invites:", revokeError.message);
+  }
+  const { token, hash } = newInviteToken();
+  const { error } = await adminClient.from("account_invites").insert({
+    email: address,
+    token_hash: hash,
+    expires_at: inviteExpiry(),
+    created_by: createdBy,
+  });
+  if (error) {
+    if (isMissingTableError(error)) return legacy();
+    console.error("[team-invite] could not store the invite:", error.message);
+    return null;
+  }
+  return { url: `${getAppUrl()}/auth/invite?token=${encodeURIComponent(token)}`, validDays: INVITE_TTL_DAYS };
+}
 
 /**
  * Generate a password-set link for an invited member.
@@ -74,10 +120,12 @@ export async function sendMemberInvite(
     inviterName?: string | null;
     companyName?: string | null;
     role?: string | null;
+    /** profiles.id of whoever sent it, for the invite record. */
+    createdBy?: string | null;
   }
 ): Promise<boolean> {
-  const actionLink = await generateMemberInviteLink(adminClient, params.email);
-  if (!actionLink) {
+  const link = await createInviteLink(adminClient, params.email, params.createdBy ?? null);
+  if (!link) {
     console.error("[team-invite] Could not generate invite link for", params.email);
     return false;
   }
@@ -85,7 +133,8 @@ export async function sendMemberInvite(
   const messageId = await sendMemberInviteEmail(params.email, {
     inviterName: params.inviterName,
     companyName: params.companyName,
-    inviteUrl: actionLink,
+    inviteUrl: link.url,
+    validDays: link.validDays,
     role: params.role,
   });
 

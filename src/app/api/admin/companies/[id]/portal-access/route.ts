@@ -4,6 +4,7 @@ import { requireSuperAdmin } from "@/lib/require-admin";
 import { logActivity } from "@/lib/activity-log";
 import { isMissingColumnError } from "@/lib/supabase/missing-column";
 import { sendPortalUnlockedEmail } from "@/lib/access/portal-unlock-email";
+import { loadCallGateSettings } from "@/lib/access/call-gate-settings";
 import {
   decidePortalAccessChange,
   derivePortalAccessState,
@@ -117,9 +118,12 @@ export async function POST(
 
     const company = data as PortalAccessCompany & { id: string; name: string | null };
 
+    // The global switch decides how an undecided company reads (waiting / open).
+    const { requireCall } = await loadCallGateSettings(db);
     const decision = decidePortalAccessChange({
       action: typeof body.action === "string" ? body.action : "",
       company,
+      requireCall,
     });
 
     if (!decision.ok) {
@@ -136,7 +140,7 @@ export async function POST(
       return NextResponse.json({
         ok: true,
         outcome: decision.outcome,
-        state: derivePortalAccessState(company),
+        state: derivePortalAccessState(company, { requireCall }),
         grantedAt: company.portal_access_granted_at ?? null,
       });
     }

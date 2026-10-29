@@ -175,9 +175,10 @@ export async function readCallGateSettings(db: SupabaseClient): Promise<CallGate
  * request, and the owner's rule is that switching the gate on only affects
  * companies that sign up afterwards.
  *
- * Ten minutes, following the 5-minute grace `/api/billing/reconcile` uses for
- * the same kind of "is this the same event" judgement, with headroom for an
- * email-confirmation link opened a few minutes after registering.
+ * NO LONGER APPLIED BY DEFAULT (Oct 2026). A customer who registered and
+ * paid more than ten minutes later was never gated, so admin had no Open /
+ * Close portal for them. Stamping now has no age limit; this constant is kept
+ * only for a caller that explicitly asks for a window.
  */
 export const NEW_COMPANY_STAMP_GRACE_MS = 10 * 60 * 1000;
 
@@ -242,7 +243,10 @@ export async function stampCallUnlockForNewCompany(
     return { stamped: false, requireCall: false, reason: "switch_off" };
   }
 
-  const maxAgeMs = options?.maxAgeMs === undefined ? NEW_COMPANY_STAMP_GRACE_MS : options.maxAgeMs;
+  // No age limit by default (owner decision, Oct 2026): every company without
+  // a decision is gated when the switch is on, however long ago it signed up
+  // or paid. A caller may still pass maxAgeMs to restrict it.
+  const maxAgeMs = options?.maxAgeMs === undefined ? null : options.maxAgeMs;
   const now = options?.now ?? Date.now();
 
   try {

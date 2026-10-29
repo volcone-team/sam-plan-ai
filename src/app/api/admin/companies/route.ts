@@ -12,6 +12,7 @@ import {
   derivePortalAccessState,
   type PortalAccessCompany,
 } from "@/lib/access/portal-access";
+import { loadCallGateSettings } from "@/lib/access/call-gate-settings";
 
 /**
  * GET /api/admin/companies
@@ -278,6 +279,8 @@ export async function GET(request: Request) {
     const callGateAvailable =
       (companies || []).length === 0 ||
       Object.prototype.hasOwnProperty.call(companies![0], "requires_call_unlock");
+    // The global switch: an undecided company reads as waiting while it is on.
+    const callRequireSwitch = (await loadCallGateSettings(adminClient)).requireCall;
 
     // Group profiles and plans by company
     const profilesByCompany = new Map<string, typeof profiles>();
@@ -430,7 +433,7 @@ export async function GET(request: Request) {
          * that function reads as "never gated" — the whole page keeps working.
          */
         portalAccess: {
-          state: derivePortalAccessState(company as PortalAccessCompany),
+          state: derivePortalAccessState(company as PortalAccessCompany, { requireCall: callRequireSwitch }),
           grantedAt: (company as { portal_access_granted_at?: string | null })
             .portal_access_granted_at ?? null,
           /** Name or email of the admin who opened it; the raw id if they are gone. */

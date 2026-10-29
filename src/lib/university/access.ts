@@ -14,9 +14,11 @@
  * items only.
  */
 import {
+  UNIVERSITY_BILLING_CYCLES,
   UNIVERSITY_ICONS,
   UNIVERSITY_RESOURCE_TYPES,
   UNIVERSITY_STATUSES,
+  type UniversityBillingCycle,
   type UniversityCategory,
   type UniversityCategoryInput,
   type UniversityCategoryRow,
@@ -98,11 +100,17 @@ export function resourceFromRow(row: UniversityResourceRow, planIds: readonly st
     status: row.status,
     isFree: row.is_free,
     planIds: [...planIds],
+    billingCycle: readBillingCycle(row.billing_cycle),
     displayOrder: row.display_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
   };
+}
+
+/** A stored billing_cycle; anything unknown or absent (pre-056) is 'any'. */
+export function readBillingCycle(value: unknown): UniversityBillingCycle {
+  return value === "monthly" || value === "annual" ? value : "any";
 }
 
 /** Group `university_resource_plans` rows by resource id. */
@@ -138,7 +146,25 @@ export function canAccessResource(
 }
 
 /**
- * Build the customer-facing view of one resource, or `null` for a draft.
+ * Does this viewer's billing cycle see this resource at all (migration 056)?
+ *
+ * A VISIBILITY rule, on top of canAccessResource: a resource for the other
+ * cycle is hidden, not shown locked. Super admins and billing-disabled see
+ * everything; a viewer with no cycle reads as monthly.
+ */
+export function isVisibleForCycle(
+  resource: Pick<UniversityResource, "billingCycle">,
+  viewer: UniversityViewer
+): boolean {
+  if (viewer.isAdmin || viewer.billingDisabled) return true;
+  const cycle = resource.billingCycle ?? "any";
+  if (cycle === "any") return true;
+  return (viewer.billingCycle ?? "monthly") === cycle;
+}
+
+/**
+ * Build the customer-facing view of one resource, or `null` for a draft or a
+ * resource for the other billing cycle.
  *
  * The url is included only when the resource is published AND unlocked.
  * `planNameById` supplies teaser names in its iteration order; plan ids not in
@@ -150,6 +176,7 @@ export function toResourceView(
   planNameById: ReadonlyMap<string, string>
 ): UniversityResourceView | null {
   if (resource.status === "draft") return null;
+  if (!isVisibleForCycle(resource, viewer)) return null;
 
   const locked = !canAccessResource(resource, viewer);
   const url = !locked && resource.status === "published" ? resource.url : null;
@@ -342,6 +369,13 @@ export function normaliseResourceInput(raw: unknown): UniversityValidationResult
     }
   }
 
+  let billingCycle: UniversityBillingCycle = "any";
+  if (r.billingCycle !== undefined && r.billingCycle !== null) {
+    if (typeof r.billingCycle !== "string" || !(UNIVERSITY_BILLING_CYCLES as readonly string[]).includes(r.billingCycle))
+      errors.billingCycle = "Billing cycle must be any, monthly or annual.";
+    else billingCycle = r.billingCycle as UniversityBillingCycle;
+  }
+
   if (Object.keys(errors).length > 0) return { ok: false, errors };
 
   return {
@@ -356,6 +390,7 @@ export function normaliseResourceInput(raw: unknown): UniversityValidationResult
       status: status as UniversityStatus,
       isFree,
       planIds,
+      billingCycle,
       displayOrder: displayOrder ?? 0,
     },
   };

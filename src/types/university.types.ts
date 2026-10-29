@@ -32,6 +32,10 @@ export type UniversityResourceType = (typeof UNIVERSITY_RESOURCE_TYPES)[number];
 export const UNIVERSITY_STATUSES = ["draft", "coming_soon", "published"] as const;
 export type UniversityStatus = (typeof UNIVERSITY_STATUSES)[number];
 
+/** Who sees a resource by billing cycle (migration 056). */
+export type UniversityBillingCycle = "any" | "monthly" | "annual";
+export const UNIVERSITY_BILLING_CYCLES: readonly UniversityBillingCycle[] = ["any", "monthly", "annual"];
+
 /** The statuses a customer can ever see. */
 export type UniversityCustomerStatus = Exclude<UniversityStatus, "draft">;
 
@@ -81,6 +85,8 @@ export interface UniversityResourceRow {
   duration_minutes: number | null;
   status: UniversityStatus;
   is_free: boolean;
+  /** Migration 056; absent before it is applied (reads as 'any'). */
+  billing_cycle?: string | null;
   display_order: number;
   created_at: string;
   updated_at: string;
@@ -125,6 +131,8 @@ export interface UniversityResource {
    * means admins only.
    */
   planIds: string[];
+  /** Who sees it by billing cycle (migration 056). 'any' = no restriction. */
+  billingCycle: UniversityBillingCycle;
   displayOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -183,6 +191,11 @@ export interface UniversityViewer {
   accessAllowed: boolean;
   /** `AccessDecision.reason === "billing_disabled"` — everything unlocked. */
   billingDisabled: boolean;
+  /**
+   * How the company pays: 'annual' only for a PAID annual subscription;
+   * trials, comps and everyone else read as 'monthly'. Omitted = 'monthly'.
+   */
+  billingCycle?: "monthly" | "annual";
 }
 
 /** Minimal plan shape the catalogue builder needs, in display order. */
@@ -203,6 +216,7 @@ export interface UniversityResourceInput {
   isFree: boolean;
   /** Always `[]` when `isFree`; otherwise non-empty, de-duplicated, lower-case. */
   planIds: string[];
+  billingCycle: UniversityBillingCycle;
   displayOrder: number;
 }
 

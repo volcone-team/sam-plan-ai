@@ -354,11 +354,24 @@ describe("stampCallUnlockForNewCompany", () => {
    * is written by a database trigger, so the stamp happens on the account's
    * first server-side request — which an ESTABLISHED customer also makes.
    */
-  it("leaves a company older than the grace window alone", async () => {
+  it("stamps a company of any age by default (no ten-minute window, Oct 2026)", async () => {
+    // A customer who registered and paid later must still be gated.
+    switchOn();
+    company({ created_at: new Date(NOW - 36 * 60 * 1000).toISOString() });
+
+    const out = await stampCallUnlockForNewCompany(makeDb(), "co-1", { now: NOW });
+
+    expect(out).toEqual({ stamped: true, requireCall: true, reason: "stamped" });
+  });
+
+  it("still honours an explicit age window from a caller", async () => {
     switchOn();
     company({ created_at: new Date(NOW - NEW_COMPANY_STAMP_GRACE_MS - 1).toISOString() });
 
-    const out = await stampCallUnlockForNewCompany(makeDb(), "co-1", { now: NOW });
+    const out = await stampCallUnlockForNewCompany(makeDb(), "co-1", {
+      now: NOW,
+      maxAgeMs: NEW_COMPANY_STAMP_GRACE_MS,
+    });
 
     expect(out).toEqual({ stamped: false, requireCall: true, reason: "too_old" });
     expect(updates).toEqual([]);
@@ -371,13 +384,13 @@ describe("stampCallUnlockForNewCompany", () => {
     expect((await stampCallUnlockForNewCompany(makeDb(), "co-1", { now: NOW })).stamped).toBe(true);
   });
 
-  it("refuses to gate a company whose created_at cannot be read", async () => {
+  it("with an explicit window, refuses a company whose created_at cannot be read", async () => {
     switchOn();
     company({ created_at: null });
 
-    expect((await stampCallUnlockForNewCompany(makeDb(), "co-1", { now: NOW })).reason).toBe(
-      "too_old"
-    );
+    expect(
+      (await stampCallUnlockForNewCompany(makeDb(), "co-1", { now: NOW, maxAgeMs: NEW_COMPANY_STAMP_GRACE_MS })).reason
+    ).toBe("too_old");
   });
 
   it("skips the age check for a caller that just created the row", async () => {

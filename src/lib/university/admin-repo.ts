@@ -17,6 +17,7 @@
  * means fewer people can open it — admins only at worst — never more. The
  * caller gets a 500 `plan_links_failed` and can simply save again.
  */
+import { isMissingColumnError } from "@/lib/supabase/missing-column";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isMissingTableError } from "@/lib/db-errors";
 import {
@@ -95,6 +96,24 @@ export const CATEGORY_SELECT =
 
 export const RESOURCE_SELECT =
   "id, slug, category_id, title, description, resource_type, url, duration_minutes, status, is_free, display_order, created_at, updated_at, updated_by";
+/** RESOURCE_SELECT plus migration 056's billing_cycle. Reads fall back to RESOURCE_SELECT until it is applied. */
+export const RESOURCE_SELECT_WITH_CYCLE = `${RESOURCE_SELECT}, billing_cycle`;
+
+export const CYCLE_MIGRATION_MESSAGE =
+  "Showing a resource only to monthly or annual customers needs migration 056. Apply supabase/migrations/056_university_billing_cycle.sql in the Supabase SQL editor, then save again.";
+
+/**
+ * Run a resources query with the billing_cycle column, and once more without
+ * it when migration 056 is not applied yet. `withCycle` tells a write whether
+ * it may include the column.
+ */
+async function withCycleColumn<R extends { error: DbError | null }>(
+  run: (select: string, withCycle: boolean) => PromiseLike<R>
+): Promise<R> {
+  const first = await run(RESOURCE_SELECT_WITH_CYCLE, true);
+  if (!isMissingColumnError(first.error)) return first;
+  return run(RESOURCE_SELECT, false);
+}
 
 /** Gap between consecutive display_order values written by reorder/append. */
 export const ORDER_STEP = 10;
@@ -148,7 +167,9 @@ export async function loadAdminPlans(db: SupabaseClient): Promise<UniversityAdmi
 export async function loadAdminCatalogue(db: SupabaseClient): Promise<UniversityAdminCatalogue> {
   const [cats, res, links, plans] = await Promise.all([
     db.from("university_categories").select(CATEGORY_SELECT).order("display_order").order("name"),
-    db.from("university_resources").select(RESOURCE_SELECT).order("display_order").order("title"),
+    withCycleColumn((select) =>
+      db.from("university_resources").select(select).order("display_order").order("title")
+    ),
     db.from("university_resource_plans").select("resource_id, plan_id"),
     loadAdminPlans(db),
   ]);
@@ -159,7 +180,7 @@ export async function loadAdminCatalogue(db: SupabaseClient): Promise<University
   const planIds = groupPlanIds((links.data ?? []) as UniversityResourcePlanRow[]);
   return {
     categories: ((cats.data ?? []) as UniversityCategoryRow[]).map(categoryFromRow),
-    resources: ((res.data ?? []) as UniversityResourceRow[]).map((r) =>
+    resources: ((res.data ?? []) as unknown as UniversityResourceRow[]).map((r) =>
       resourceFromRow(r, planIds.get(r.id) ?? [])
     ),
     plans,
@@ -177,11 +198,9 @@ async function loadCategoryRow(db: SupabaseClient, id: string): Promise<Universi
 }
 
 async function loadResourceRow(db: SupabaseClient, id: string): Promise<UniversityResourceRow | null> {
-  const { data, error } = await db
-    .from("university_resources")
-    .select(RESOURCE_SELECT)
-    .eq("id", id)
-    .maybeSingle();
+  const { data, error } = await withCycleColumn((select) =>
+    db.from("university_resources").select(select).eq("id", id).maybeSingle()
+  );
   if (error) fail(error, "Resource read failed");
   return (data as UniversityResourceRow | null) ?? null;
 }
@@ -358,8 +377,17 @@ function linkFail(err: DbError, resourceId: string): never {
   );
 }
 
-function resourceColumns(input: UniversityResourceInput, userId: string) {
+/**
+ * The row columns for a resource. `withCycle` false (migration 056 not
+ * applied) leaves billing_cycle out — and refuses a monthly/annual choice
+ * rather than silently showing the resource to everyone.
+ */
+function resourceColumns(input: UniversityResourceInput, userId: string, withCycle: boolean) {
+  if (!withCycle && input.billingCycle !== "any") {
+    throw new UniversityAdminError(503, "migration_not_applied", CYCLE_MIGRATION_MESSAGE);
+  }
   return {
+    ...(withCycle ? { billing_cycle: input.billingCycle } : {}),
     category_id: input.categoryId,
     title: input.title,
     description: input.description,
@@ -390,13 +418,15 @@ export async function createResource(
     ? input.displayOrder
     : await nextOrder(db, "university_resources", { column: "category_id", value: input.categoryId });
 
-  const { data, error } = await db
-    .from("university_resources")
-    .insert({ ...resourceColumns(input, userId), slug, display_order: displayOrder })
-    .select(RESOURCE_SELECT)
-    .single();
+  const { data, error } = await withCycleColumn((select, withCycle) =>
+    db
+      .from("university_resources")
+      .insert({ ...resourceColumns(input, userId, withCycle), slug, display_order: displayOrder })
+      .select(select)
+      .single()
+  );
   if (error) fail(error, "Resource create failed");
-  const row = data as UniversityResourceRow;
+  const row = data as unknown as UniversityResourceRow;
 
   await replacePlanLinks(db, row.id, input.isFree, input.planIds);
   return resourceFromRow(row, input.isFree ? [] : input.planIds);
@@ -429,16 +459,42 @@ export async function updateResource(
     });
   }
 
-  const { data, error } = await db
-    .from("university_resources")
-    .update({ ...resourceColumns(input, userId), display_order: displayOrder })
-    .eq("id", id)
-    .select(RESOURCE_SELECT)
-    .single();
+  const { data, error } = await withCycleColumn((select, withCycle) =>
+    db
+      .from("university_resources")
+      .update({ ...resourceColumns(input, userId, withCycle), display_order: displayOrder })
+      .eq("id", id)
+      .select(select)
+      .single()
+  );
   if (error) fail(error, "Resource update failed");
 
   await replacePlanLinks(db, id, input.isFree, input.planIds);
-  return resourceFromRow(data as UniversityResourceRow, input.isFree ? [] : input.planIds);
+  return resourceFromRow(data as unknown as UniversityResourceRow, input.isFree ? [] : input.planIds);
+}
+
+/**
+ * Delete many resources at once (their plan links cascade). `ids` is a list
+ * of resource ids, or "all" for every resource in the catalogue. Returns the
+ * deleted resources, for the log; ids that no longer exist are ignored.
+ */
+export async function deleteResources(
+  db: SupabaseClient,
+  ids: readonly string[] | "all"
+): Promise<UniversityResource[]> {
+  const read = await withCycleColumn((select) => {
+    const q = db.from("university_resources").select(select);
+    return ids === "all" ? q : q.in("id", [...ids]);
+  });
+  if (read.error) fail(read.error, "Resource read failed");
+  const rows = (read.data ?? []) as unknown as UniversityResourceRow[];
+  if (rows.length === 0) return [];
+  const { error } = await db
+    .from("university_resources")
+    .delete()
+    .in("id", rows.map((r) => r.id));
+  if (error) fail(error, "Resource delete failed");
+  return rows.map((r) => resourceFromRow(r, []));
 }
 
 /** Delete a resource (its plan links cascade). Returns it, for the log. */
