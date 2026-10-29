@@ -367,7 +367,7 @@ const WEBINARS: CategorySchema = {
       title: "Core",
       fields: [
         { key: "sessionLength", label: "Session length", type: "text", placeholder: "60 minutes" },
-        { key: "platform", label: "Where will it run?", type: "text", placeholder: "Zoom, WebinarJam, EverWebinar..." },
+        { key: "platform", label: "Where will it take place?", type: "text", placeholder: "Zoom, WebinarJam, EverWebinar..." },
         {
           key: "guests",
           label: "Will you have guest speakers or a co-host?",
@@ -412,7 +412,7 @@ const WEBINARS: CategorySchema = {
         { key: "offerTested", label: "Offer tested and converting?", type: "yesno", tag: "EVERGREEN", gate: { kind: "ongoing" } },
         {
           key: "runCadence",
-          label: "How often does it run?",
+          label: "How often does it happen?",
           type: "single",
           options: ["Always-on", "Set times"],
           tag: "EVERGREEN",
@@ -563,7 +563,7 @@ const OWN_EVENT_VIRTUAL: CategorySchema = {
       title: "Core",
       fields: [
         { key: "ask", label: "What's the ask?", type: "single", options: ASK, binds: "conversionPath" },
-        { key: "platform", label: "Where will it run?", type: "text", placeholder: "Zoom, Skool, YouTube Live..." },
+        { key: "platform", label: "Where will it take place?", type: "text", placeholder: "Zoom, Skool, YouTube Live..." },
         { key: "guests", label: "Guests or co-hosts?", type: "single", options: YES_CONFIRMED_INVITING_NO },
       ],
     },
@@ -600,7 +600,7 @@ const OWN_EVENT_VIRTUAL: CategorySchema = {
     },
     {
       id: "shows",
-      title: "Shows that keep running",
+      title: "Ongoing shows",
       gate: { records: ["Podcast / Vodcast", "Your Own YouTube Channel", "Social Media Lives"] },
       fields: [
         {
@@ -908,7 +908,7 @@ const EMAIL_TEXT_MAIL: CategorySchema = {
       title: "SMS only — compliance gate",
       gate: { records: SMS_RECORDS },
       note:
-        "These are blocking, not informational. A2P verification takes real time and varies by state — Texas is the strictest. An SMS initiative dated before verification clears cannot run.",
+        "These are blocking, not informational. A2P verification takes real time and varies by state — Texas is the strictest. An SMS initiative dated before verification clears cannot go ahead.",
       fields: [
         { key: "textingService", label: "Do you have a texting service?", type: "single", options: ["Skipio", "Twilio", "Other", "None yet"] },
         { key: "textConsent", label: "Has your list explicitly agreed to texts?", type: "yesno" },
@@ -1016,7 +1016,7 @@ const CONTENT_MEDIA: CategorySchema = {
           type: "yesno",
           tag: "LOCAL PR",
           gate: { records: LOCAL_PR_RECORDS },
-          hint: "Press kit means bio, headshots, boilerplate and past coverage. Local outlets want all four before they will run anything.",
+          hint: "Press kit means bio, headshots, boilerplate and past coverage. Local outlets want all four before they will publish anything.",
         },
       ],
     },

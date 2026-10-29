@@ -10,10 +10,8 @@ import {
   DELIVERY_OPTIONS,
   FIELD_COPY,
   PRICE_TIER_OPTIONS,
-  PRICING_MODEL_OPTIONS,
-  PRICING_MODEL_RECURRING,
   PRODUCT_TYPE_OPTIONS,
-  RECURRING_INTERVAL_OPTIONS,
+  unitsGoalHelper,
   unitsGoalLabel,
 } from "@/lib/intake/schema";
 import type { ProductDraft } from "@/lib/intake/draft";
@@ -48,7 +46,6 @@ export function ProductCard({
 }) {
   const id = (field: string) => `product-${index}-${field}`;
   const pricingModel = asString(product.payment_type);
-  const isRecurring = pricingModel === PRICING_MODEL_RECURRING;
 
   const goal = productGoal(
     asNumber(product.average_price),
@@ -138,40 +135,12 @@ export function ProductCard({
         />
       </Field>
 
-      <Field label={FIELD_COPY.payment_type.label} error={errors.payment_type}>
-        <PillSelect
-          name={id("payment-type")}
-          options={PRICING_MODEL_OPTIONS}
-          value={pricingModel}
-          onChange={(value) =>
-            onChange({
-              payment_type: value,
-              // Clearing the interval when leaving Recurring keeps the card
-              // from holding an answer its own question no longer asks.
-              recurring_interval:
-                value === PRICING_MODEL_RECURRING ? product.recurring_interval : null,
-            })
-          }
-        />
-      </Field>
-
-      {/* REQ-6.6 — revealed by Recurring only. */}
-      {isRecurring && (
-        <Field
-          label="Billed"
-          required
-          error={errors.recurring_interval}
-          className="pl-4 border-l-2 border-[hsl(var(--primary)_/_0.3)]"
-        >
-          <PillSelect
-            name={id("interval")}
-            options={RECURRING_INTERVAL_OPTIONS}
-            value={asString(product.recurring_interval)}
-            onChange={(value) => onChange({ recurring_interval: value })}
-            error={Boolean(errors.recurring_interval)}
-          />
-        </Field>
-      )}
+      {/*
+        "How is it paid?" and "Billed" were removed (client, Oct 2026): the
+        average-revenue helper asks for the lifetime total of a recurring
+        client instead. A payment_type already saved on older drafts is kept,
+        so their units label still reads as subscribers.
+      */}
 
       <div className="grid gap-5 sm:grid-cols-2">
         <Field
@@ -199,6 +168,7 @@ export function ProductCard({
         <Field
           htmlFor={id("units")}
           label={unitsGoalLabel(periodMonths, pricingModel)}
+          helper={unitsGoalHelper(pricingModel) ?? undefined}
           required
           error={errors.units_in_period}
         >

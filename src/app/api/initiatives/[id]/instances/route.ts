@@ -46,7 +46,7 @@ export async function GET(_request: NextRequest, ctx: { params: Promise<{ id: st
       return NextResponse.json(RECURRING_DISABLED);
     }
     if (materialised.kind !== "ok" || lastActual.kind !== "ok") {
-      return NextResponse.json({ error: "Could not load the initiative's runs." }, { status: 500 });
+      return NextResponse.json({ error: "Could not load the initiative's occurrences." }, { status: 500 });
     }
 
     const state = buildRecurringState({
@@ -65,7 +65,7 @@ export async function GET(_request: NextRequest, ctx: { params: Promise<{ id: st
     });
   } catch (err: unknown) {
     console.error("[initiatives/instances] GET failed:", err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error: "Could not load the initiative's runs." }, { status: 500 });
+    return NextResponse.json({ error: "Could not load the initiative's occurrences." }, { status: 500 });
   }
 }
 

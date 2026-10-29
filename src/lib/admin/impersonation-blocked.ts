@@ -51,6 +51,8 @@ const BLOCKED_PREFIXES: readonly string[] = [
   '/admin',
   '/api/admin',
   '/api/auth/2fa',
+  // Consent belongs to the person. An admin viewing as them must not give it.
+  '/api/auth/invite-consent',
   '/api/me/password',
   '/auth/set-password',
   '/auth/reset-password',

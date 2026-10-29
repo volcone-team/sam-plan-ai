@@ -38,10 +38,14 @@ import { NumberInputRaw } from '@/components/ui/number-input';
 import { formatMoney } from '@/lib/format-money';
 import { sumInitiatives, goalProgress, goalCoverage, shouldTrackPace, trackingStartsLabel } from '@/lib/plan-totals';
 import { usePlanYears } from '@/hooks/use-plan-years';
+import { defaultDashboardYear } from '@/lib/planning/default-year';
 import { launchDate, needsDates, needsDatesNotice } from '@/lib/initiatives/schedule';
 import { parseDateOnly } from '@/lib/plan-dates';
 
 const CURRENT_YEAR = new Date().getFullYear();
+
+/** Set once the default-year rule has run in this page load. Reset by a refresh. */
+let defaultYearChecked = false;
 
 /** localStorage key for dismissing the page explainer. */
 const EXPLAINER_KEY = 'sam-yag-explainer-dismissed';
@@ -77,7 +81,36 @@ export function YearAtAGlance() {
   const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   /** Year currently being viewed. Users can review past years or plan ahead. */
   // Shared across screens: selecting 2027 here keeps 2027 on Monthly/Quarterly.
-  const { selectedYear, setSelectedYear } = usePlanYears(companyId);
+  const { selectedYear, setSelectedYear, loading: yearsLoading } = usePlanYears(companyId);
+
+  /*
+   * Open on next year when this year has no base or stretch goal and next year
+   * does (client rule, Oct 2026).
+   *
+   * Checked once per PAGE LOAD, not once per session: the remembered year
+   * survives a refresh, so a session-wide rule left anyone who had ever
+   * clicked the current year stuck on an empty year. Moving between screens
+   * without reloading keeps whatever year the user picked.
+   */
+  useEffect(() => {
+    if (!companyId || yearsLoading || defaultYearChecked) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [currentPlan, nextPlan] = await Promise.all([
+          planService.getAnnualPlan(companyId, CURRENT_YEAR),
+          planService.getAnnualPlan(companyId, CURRENT_YEAR + 1),
+        ]);
+        if (cancelled) return;
+        defaultYearChecked = true;
+        const year = defaultDashboardYear(CURRENT_YEAR, currentPlan, nextPlan);
+        if (year !== CURRENT_YEAR && selectedYear === CURRENT_YEAR) setSelectedYear(year);
+      } catch {
+        /* non-fatal: stay on the year already selected */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [companyId, yearsLoading, selectedYear, setSelectedYear]);
   /**
    * Every calendar year the plan's initiatives touch. A 12-month plan generated
    * in September spans two years but is ONE annual_plans row, so this is the only

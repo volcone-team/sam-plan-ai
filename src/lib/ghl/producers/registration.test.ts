@@ -13,7 +13,7 @@ import { firstLoginDedupeKey } from "./first-login";
 import { milestoneDedupeKey } from "./milestone";
 import { founderDedupeKey } from "./founder";
 import type { GhlConfig } from "../config";
-import { TAG_OPTED_DND, TAG_REGISTERED_NOT_PAID } from "../tags";
+import { TAG_OPTED_COMMUNICATION, TAG_OPTED_DND, TAG_REGISTERED_NOT_PAID } from "../tags";
 
 /* ── Mocked Supabase ─────────────────────────────────────────────────────── */
 
@@ -167,6 +167,8 @@ describe("shouldFireRegistration", () => {
     ["no company", { companyId: null }, false, "no_company"],
     ["admin-created (no terms stamp)", { termsAcceptedAt: null }, false, "not_public_signup"],
     ["blank terms stamp", { termsAcceptedAt: "  " }, false, "not_public_signup"],
+    ["terms accepted on an invite", { termsAcceptedVia: "invite" }, false, "not_public_signup"],
+    ["terms accepted at signup (058)", { termsAcceptedVia: "signup" }, true, "registered"],
   ];
 
   for (const [name, over, fire, reason] of cases) {
@@ -177,9 +179,9 @@ describe("shouldFireRegistration", () => {
 });
 
 describe("registrationTags", () => {
-  it("adds DND only when promotional consent is explicitly false", () => {
+  it("adds DND when unticked, communication when ticked, neither when never asked", () => {
     expect(registrationTags(false)).toEqual([TAG_REGISTERED_NOT_PAID, TAG_OPTED_DND]);
-    expect(registrationTags(true)).toEqual([TAG_REGISTERED_NOT_PAID]);
+    expect(registrationTags(true)).toEqual([TAG_REGISTERED_NOT_PAID, TAG_OPTED_COMMUNICATION]);
     expect(registrationTags(null)).toEqual([TAG_REGISTERED_NOT_PAID]);
     expect(registrationTags(undefined)).toEqual([TAG_REGISTERED_NOT_PAID]);
   });
@@ -238,7 +240,12 @@ const run = (over: Record<string, unknown> = {}) =>
 describe("enqueueRegisteredEvent — when it fires", () => {
   it("enqueues one row for the owner with the tag, names and phone", async () => {
     const result = await run();
-    expect(result).toEqual({ ok: true, outcome: "enqueued", tags: [TAG_REGISTERED_NOT_PAID] });
+    // The fixture owner ticked the promotional box.
+    expect(result).toEqual({
+      ok: true,
+      outcome: "enqueued",
+      tags: [TAG_REGISTERED_NOT_PAID, TAG_OPTED_COMMUNICATION],
+    });
     expect(inserts).toHaveLength(1);
     expect(inserts[0].table).toBe("ghl_events");
     expect(inserts[0].values).toMatchObject({
@@ -246,7 +253,7 @@ describe("enqueueRegisteredEvent — when it fires", () => {
       user_id: OWNER,
       contact_email: "owner@example.com",
       event_type: "registered",
-      tags_add: [TAG_REGISTERED_NOT_PAID],
+      tags_add: [TAG_REGISTERED_NOT_PAID, TAG_OPTED_COMMUNICATION],
       tags_remove: [],
       dedupe_key: "company:comp-1:registered",
       payload: {
@@ -282,7 +289,7 @@ describe("enqueueRegisteredEvent — when it fires", () => {
     expect(await run({ source: "api_me" })).toEqual({
       ok: true,
       outcome: "duplicate",
-      tags: [TAG_REGISTERED_NOT_PAID],
+      tags: [TAG_REGISTERED_NOT_PAID, TAG_OPTED_COMMUNICATION],
     });
   });
 });
@@ -311,6 +318,15 @@ describe("enqueueRegisteredEvent — when it does nothing", () => {
     expect(await run()).toMatchObject({ reason: "not_eligible", detail: "admin" });
     setOwner({ admin_level: "super_admin" });
     expect(await run()).toMatchObject({ reason: "not_eligible", detail: "admin" });
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("skips an owner who accepted the terms on an invite, not at signup", async () => {
+    setOwner({ terms_accepted_via: "invite" });
+    expect(await run({ source: "api_me" })).toMatchObject({
+      reason: "not_eligible",
+      detail: "not_public_signup",
+    });
     expect(inserts).toHaveLength(0);
   });
 

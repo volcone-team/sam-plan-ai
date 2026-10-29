@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { logActivity } from "@/lib/activity-log";
 import { cancelSubscriptionsForCompany } from "@/lib/billing/cancel-on-delete";
+import { isMissingColumnError } from "@/lib/supabase/missing-column";
 
 /**
  * GET /api/admin/companies/[id]
@@ -45,7 +46,7 @@ export async function GET(
     // 2. Verify admin
     const { data: profile } = await supabase
       .from("profiles")
-      .select("is_admin")
+      .select("is_admin, admin_level")
       .eq("id", user.id)
       .single();
 
@@ -79,6 +80,27 @@ export async function GET(
       .select("id, email, first_name, last_name, role, is_active, is_admin, created_at")
       .eq("company_id", id)
       .order("created_at", { ascending: true });
+
+    /**
+     * Each member's answers to the two signup checkboxes, SUPER ADMINS ONLY
+     * (client, Oct 2026). Null for anyone else, so the page shows nothing.
+     * A separate read so a database without 037/058 still returns the page:
+     * it retries without terms_accepted_via, then gives up quietly.
+     */
+    let consent: Record<string, unknown>[] | null = null;
+    if (profile.admin_level === "super_admin") {
+      const read = (columns: string) =>
+        adminClient.from("profiles").select(columns).eq("company_id", id);
+      const BASE = "id, terms_accepted_at, promotional_consent, promotional_consent_at";
+      let res = await read(`${BASE}, terms_accepted_via`);
+      if (res.error && isMissingColumnError(res.error)) res = await read(BASE);
+      if (res.error) {
+        console.error("[admin/companies/id] Consent read failed:", res.error.message);
+      } else {
+        consent = (res.data ?? []) as unknown as Record<string, unknown>[];
+      }
+    }
+    const consentById = new Map((consent ?? []).map((c) => [c.id as string, c]));
 
     console.log("[admin/companies/id] Members:", members?.length || 0);
 
@@ -139,6 +161,20 @@ export async function GET(
         isAdmin: m.is_admin,
         createdAt: m.created_at,
       })),
+      // Null when the caller is not a super admin (or the read failed).
+      consent: consent
+        ? (members || []).map((m) => {
+            const c = consentById.get(m.id) ?? {};
+            return {
+              memberId: m.id,
+              termsAcceptedAt: (c.terms_accepted_at as string | null) ?? null,
+              termsAcceptedVia: (c.terms_accepted_via as string | null) ?? null,
+              promotionalConsent:
+                typeof c.promotional_consent === "boolean" ? c.promotional_consent : null,
+              promotionalConsentAt: (c.promotional_consent_at as string | null) ?? null,
+            };
+          })
+        : null,
       products: (products || []).map((p) => ({
         id: p.id,
         name: p.name,

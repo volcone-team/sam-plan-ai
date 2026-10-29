@@ -26,8 +26,8 @@ type PromptsResponse =
     };
 
 const OUTCOME_BUTTONS: ReadonlyArray<{ outcome: InstanceOutcome; label: string }> = [
-  { outcome: 'ran', label: 'It ran' },
-  { outcome: 'skipped', label: "It didn't run" },
+  { outcome: 'ran', label: 'It happened' },
+  { outcome: 'skipped', label: "It didn't happen" },
   { outcome: 'not-yet', label: 'Not yet' },
 ];
 
@@ -191,12 +191,12 @@ export function RecurringPrompts({ initiativeId, onInitiativeChanged }: Recurrin
         return (
           <section
             key={p.date}
-            aria-label={`Did the ${label} run happen?`}
+            aria-label={`Did the ${label} occurrence happen?`}
             className="rounded-[var(--radius-lg)] border border-border bg-card p-4 sm:p-5"
           >
             <div className="flex items-center gap-2">
               <CalendarCheck className="h-4 w-4 text-[hsl(var(--primary))]" aria-hidden="true" />
-              <h3 className="text-sm font-semibold text-[hsl(var(--foreground))]">Did this run?</h3>
+              <h3 className="text-sm font-semibold text-[hsl(var(--foreground))]">Did this occurrence happen?</h3>
             </div>
             <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">{label}</p>
             <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label={`Outcome for ${label}`}>

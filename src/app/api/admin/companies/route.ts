@@ -138,11 +138,11 @@ export async function GET(request: Request) {
             .in("company_id", companyIds)
         : Promise.resolve({ data: [] }),
       // Unfiltered by `is_active`: a subscriber on a RETIRED plan must still be
-      // nameable. The active filter applies only to the grant-access dropdown
-      // below, which offers plans to assign.
+      // nameable, and admins may grant retired plans (see the plan list below).
       adminClient
         .from("subscription_plans")
-        .select("id, name, monthly_price, annual_price, is_active"),
+        .select("id, name, monthly_price, annual_price, is_active")
+        .order("display_order"),
       // Lifetime paid per company. Unattributed invoices are excluded: they are
       // not any company's spend.
       companyIds.length
@@ -455,8 +455,9 @@ export async function GET(request: Request) {
       offset,
       // The comp controls need the plan list to offer a choice, and whether
       // Stripe is on at all changes what the subscription columns mean.
-      // ACTIVE ONLY: granting someone a retired plan would put them on
-      // something that cannot be bought or upgraded from.
+      // RETIRED PLANS INCLUDED (client request, Oct 2026): admins may grant a
+      // retired plan on purpose. This list is admin-only; customers never see
+      // retired plans on /get-started or /choose-plan.
       stripeEnabled: config.stripeEnabled,
       /**
        * False → migration 043 is missing, so the portal-access control is not
@@ -466,8 +467,9 @@ export async function GET(request: Request) {
        */
       callGateAvailable,
       plans: [...planById.values()]
-        .filter((p) => p.is_active)
-        .map((p) => ({ id: p.id, name: p.name })),
+        // Active first, so "the first plan" (the default pick) is never retired.
+        .sort((a, b) => Number(b.is_active) - Number(a.is_active))
+        .map((p) => ({ id: p.id, name: p.name, retired: !p.is_active })),
     });
   } catch (err: any) {
     console.error("[admin/companies] Error:", err?.message || err);

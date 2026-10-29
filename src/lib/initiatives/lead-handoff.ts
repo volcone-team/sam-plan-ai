@@ -22,7 +22,7 @@ export const LEAD_HANDOFF_ATTR = 'lead_handoff_to';
 export const LEAD_GOAL_ATTR = 'lead_goal';
 
 /** The warning for a lead-gen initiative with nowhere to send its leads. */
-export const NO_HANDOFF_WARNING = 'No initiative is set to convert these leads. It will run at $0 revenue.';
+export const NO_HANDOFF_WARNING = 'No initiative is set to convert these leads. Its revenue will be $0.';
 
 /** The fields these helpers read. A full Initiative satisfies it. */
 export interface HandoffInitiative extends ScheduleFields {

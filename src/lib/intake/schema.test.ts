@@ -35,6 +35,7 @@ import {
   SCREEN_COPY,
   FIELD_COPY,
   subtitleFor,
+  unitsGoalHelper,
   unitsGoalLabel,
   showsCustomerIndustries,
   valuesOf,
@@ -387,7 +388,11 @@ describe("unitsGoalLabel", () => {
   });
 
   it("asks about subscribers for a recurring product instead", () => {
-    expect(unitsGoalLabel(12, "recurring")).toBe("How many active subscribers by the end?");
+    expect(unitsGoalLabel(12, "recurring")).toBe(
+      "What is your subscriber goal by the end of the planning period?"
+    );
+    expect(unitsGoalHelper("recurring")).toBe("Either 3, 6, 12 or 18 months, as you chose above.");
+    expect(unitsGoalHelper("one_time")).toBeNull();
   });
 
   it("falls back to the default period when none is chosen yet", () => {

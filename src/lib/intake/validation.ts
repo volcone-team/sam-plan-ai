@@ -29,7 +29,6 @@ import {
   MIN_PLANNED_INITIATIVES,
   MAX_OBSTACLES,
   CADENCE_REPEAT,
-  PRICING_MODEL_RECURRING,
   INDUSTRY_OTHER,
   SOMETHING_ELSE_KEY,
   CUSTOMER_INDUSTRIES_OTHER_MAX_LENGTH,
@@ -344,11 +343,9 @@ function validateProductRow(product: ProductRow): FieldErrors {
     else if (units <= 0) errors.units_in_period = "Enter how many you want to sell.";
   }
 
-  // REQ-6.6: Recurring reveals the interval, so leaving it blank means the
-  // revealed field was ignored rather than not asked.
-  if (product.payment_type === PRICING_MODEL_RECURRING && !isAnswered(product.recurring_interval)) {
-    errors.recurring_interval = "Choose per month or per year.";
-  }
+  // The interval is no longer asked ("How is it paid?" and "Billed" were
+  // removed), so it is never required: an older draft saved as Recurring with
+  // no interval must not be blocked by a field the user cannot see.
 
   return errors;
 }

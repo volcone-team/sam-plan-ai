@@ -21,37 +21,37 @@ export interface NavItem {
   label: string;
   href: string;
   icon: LucideIcon;
+  /** Draws a thin divider above this item. */
+  dividerBefore?: boolean;
 }
 
 export interface NavGroup {
-  label: string;
+  /** Section heading. Null renders no heading, with a divider above the group. */
+  label: string | null;
   items: NavItem[];
 }
 
+/*
+ * Order and labels per the client's sidebar layout (Oct 2026). Only labels
+ * changed; every route is unchanged, so saved links and redirects still work.
+ * "Year" is the dashboard: /year-at-a-glance is the post-login redirect in
+ * middleware and the 2FA flow, so its path stays.
+ */
 export const navigationGroups: NavGroup[] = [
   {
-    label: "Overview",
+    label: "Plan",
     items: [
-      // Renamed from "Year at a Glance". The ROUTE is unchanged on purpose:
-      // /year-at-a-glance is the post-login redirect in middleware, in the 2FA
-      // flow and in several saved links, so renaming the path would break all
-      // of them for a label change.
-      { label: "Your Dashboard", href: "/year-at-a-glance", icon: LayoutDashboard },
-    ],
-  },
-  {
-    label: "Planner",
-    items: [
-      { label: "Daily", href: "/planner/daily", icon: CalendarDays },
-      { label: "Weekly", href: "/planner/weekly", icon: Calendar },
-      { label: "Monthly", href: "/planner/monthly", icon: CalendarRange },
-      { label: "Quarterly", href: "/planner/quarterly", icon: CalendarClock },
-      { label: "Calendar", href: "/planner/calendar", icon: CalendarCheck },
+      { label: "Year", href: "/year-at-a-glance", icon: LayoutDashboard },
+      { label: "Quarter", href: "/planner/quarterly", icon: CalendarClock },
+      { label: "Month", href: "/planner/monthly", icon: CalendarRange },
+      { label: "Week", href: "/planner/weekly", icon: Calendar },
+      { label: "Day", href: "/planner/daily", icon: CalendarDays },
+      { label: "Calendar", href: "/planner/calendar", icon: CalendarCheck, dividerBefore: true },
       { label: "Timeline", href: "/planner/timeline", icon: GanttChart },
     ],
   },
   {
-    label: "Execution",
+    label: "Manage",
     items: [
       { label: "Initiatives", href: "/initiatives", icon: Rocket },
       { label: "Products", href: "/products", icon: Package },
@@ -59,7 +59,7 @@ export const navigationGroups: NavGroup[] = [
     ],
   },
   {
-    label: "Resources",
+    label: "Learn",
     items: [
       { label: "Quickstart Guide", href: "/quickstart-guide", icon: BookOpen },
       { label: "SAM University", href: "/sam-university", icon: GraduationCap },
@@ -67,9 +67,9 @@ export const navigationGroups: NavGroup[] = [
     ],
   },
   {
-    label: "Account",
+    label: null,
     items: [
-      { label: "Plan History", href: "/plan-history", icon: RotateCcw },
+      { label: "Version History", href: "/plan-history", icon: RotateCcw },
       { label: "Settings", href: "/settings", icon: Settings },
     ],
   },

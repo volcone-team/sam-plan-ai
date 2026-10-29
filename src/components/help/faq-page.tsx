@@ -251,16 +251,13 @@ export function FaqPage() {
     );
   }
 
-  const totalQuestions = countFaqItems(categories);
   const searching = query.trim() !== '';
   const matches = countFaqItems(filtered);
 
   return (
     <div className="space-y-6">
-      {/* Summary */}
+      {/* Summary. The answer/category count was removed at the client's request. */}
       <p className="text-sm text-[hsl(var(--foreground-muted))]">
-        {totalQuestions} answer{totalQuestions === 1 ? '' : 's'} across {categories.length}{' '}
-        categor{categories.length === 1 ? 'y' : 'ies'}.
         Can&apos;t find what you&apos;re looking for? Reach out to support.
       </p>
 

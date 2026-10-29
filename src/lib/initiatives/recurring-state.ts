@@ -289,10 +289,10 @@ export function instanceWriteDecision(
   instanceDate: string
 ): Decision<{ instanceDate: string }> {
   if (scope.type !== 'recurring') {
-    return { ok: false, status: 409, error: 'This initiative does not have recurring runs.' };
+    return { ok: false, status: 409, error: 'This initiative does not have recurring occurrences.' };
   }
   if (!instanceDates(scope.template, planYear).includes(instanceDate)) {
-    return { ok: false, status: 400, error: 'That date is not one of this initiative’s runs.' };
+    return { ok: false, status: 400, error: 'That date is not one of this initiative’s occurrences.' };
   }
   return { ok: true, value: { instanceDate } };
 }

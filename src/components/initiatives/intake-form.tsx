@@ -446,7 +446,7 @@ export function IntakeForm({
         layout.frequency.state === 'rendered') && (
         <section className={SECTION_CLASS} aria-labelledby={`${base}-shape`}>
           <h3 id={`${base}-shape`} className={SECTION_HEADING_CLASS}>
-            How it runs
+            How it happens
           </h3>
           {layout.kind.state === 'rendered' && (
             <ChoiceGroup
@@ -664,7 +664,7 @@ export function IntakeForm({
               Lead goal
             </h3>
             <p className={HINT_CLASS}>
-              This one collects leads, so it runs at $0. The initiative that converts them books the revenue.
+              This one collects leads, so its revenue is $0. The initiative that converts them books the revenue.
             </p>
           </div>
           <NumberField

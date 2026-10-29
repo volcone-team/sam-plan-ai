@@ -18,6 +18,7 @@ import {
   TAG_ONBOARDING_CALL_BOOKED,
   TAG_ONBOARDING_PETE_BOOKED,
   TAG_ONBOARDING_RACHEL_BOOKED,
+  TAG_OPTED_COMMUNICATION,
   TAG_OPTED_DND,
   TAG_PLAN_GENERATED,
   TAG_REGISTERED_NOT_PAID,
@@ -248,6 +249,8 @@ export function describeGhlEventType(eventType: string | null): string {
       return "Marketing suppression";
     case "registered":
       return "Registered";
+    case "consent":
+      return "Invite consent";
     default:
       // `login_trigger` lands here by design: the client dropped that tag, so
       // nothing enqueues one any more, but 044's CHECK still accepts it and an
@@ -278,7 +281,9 @@ const FIXED_TAG_DESCRIPTIONS: Readonly<Record<string, string>> = Object.freeze({
   [TAG_REGISTERED_NOT_PAID]:
     "Owner signed up through the public signup and has not paid (trials included). Removed when they become an active buyer.",
   [TAG_OPTED_DND]:
-    "Owner left the promotional consent box unticked at signup. Added once, never removed by the app.",
+    "Owner left the promotional consent box unticked, at signup or when an invited owner set their password. Added once, never removed by the app.",
+  [TAG_OPTED_COMMUNICATION]:
+    "Owner ticked the promotional consent box, at signup or when an invited owner set their password. Added once, never removed by the app.",
 });
 
 export interface GhlFixedTagRow {

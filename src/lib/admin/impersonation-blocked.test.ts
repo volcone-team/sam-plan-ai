@@ -54,6 +54,10 @@ describe("isBlockedWhileImpersonating — blocked", () => {
     expect(isBlockedWhileImpersonating("/auth/reset-password", "GET")).toBe(true);
   });
 
+  it("blocks giving consent on the customer's behalf", () => {
+    expect(isBlockedWhileImpersonating("/api/auth/invite-consent", "POST")).toBe(true);
+  });
+
   it("does not block the rest of the auth area", () => {
     // Sign-in, sign-out and the impersonation exit landing page must stay
     // reachable — they are how the admin stops being the customer.

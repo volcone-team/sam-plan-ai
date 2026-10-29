@@ -362,7 +362,7 @@ function InitiativeChildRow({ entry }: InitiativeChildRowProps) {
             <span className="block text-xs text-[hsl(var(--foreground-muted))]">
               <span className="capitalize">{initiative.kind.replace('-', ' ')}</span>
               {frequency && ` · ${frequency}`}
-              {entry.runs > 0 && ` · ${entry.runs} run${entry.runs !== 1 ? 's' : ''} here`}
+              {entry.runs > 0 && ` · ${entry.runs} occurrence${entry.runs !== 1 ? 's' : ''} here`}
               {shownDates && ` · ${shownDates}`}
             </span>
           </div>

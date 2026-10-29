@@ -28,6 +28,9 @@ import {
   IMPERSONATION_EXIT_PATH,
   isBlockedWhileImpersonating,
 } from '@/lib/admin/impersonation-blocked';
+
+/** The invite consent endpoint (POST from /auth/set-password). */
+const INVITE_CONSENT_PATH = '/api/auth/invite-consent';
 // IMPERSONATION_EXIT_PATH is referenced by three separate rules below: the
 // expired-impersonation redirect, the 2FA exemption, and the billing gates.
 // All three exist so that leaving a customer's account can never be refused.
@@ -359,7 +362,14 @@ export async function updateSession(request: NextRequest) {
      * the rule and it would fall back to skipping plan selection. Returns a
      * single boolean that the pricing page already discloses.
      */
-    request.nextUrl.pathname === '/api/billing/signup-flow';
+    request.nextUrl.pathname === '/api/billing/signup-flow' ||
+    /**
+     * The Privacy Policy and Terms links. Designed to be unauthenticated (see
+     * the route) and returns only those two public URLs. Listed here so the
+     * checkboxes on /auth/set-password can link them for a link-only session,
+     * which may call nothing else.
+     */
+    request.nextUrl.pathname === '/api/legal-urls';
   // Onboarding is NO LONGER public. The flow is account-first:
   //   Landing -> "Create an Account" -> /auth/signup -> /onboarding/welcome
   // Leaving /onboarding open let anyone walk the questionnaire with no account,
@@ -446,6 +456,9 @@ export async function updateSession(request: NextRequest) {
     isAuthRoute ||
     request.nextUrl.pathname.startsWith('/api/auth/2fa') ||
     request.nextUrl.pathname === '/api/me' ||
+    // Called from /auth/set-password (itself exempt) before the person has a
+    // password, so they cannot have passed the code challenge yet.
+    request.nextUrl.pathname === INVITE_CONSENT_PATH ||
     /**
      * 8. the impersonation EXIT endpoint. It is reached while holding the
      *    CUSTOMER's session, so this gate would challenge the customer's inbox
@@ -545,7 +558,12 @@ export async function updateSession(request: NextRequest) {
     // the current password and is not part of this flow).
     if (isApiRoute) {
       const isAllowedApi =
-        request.nextUrl.pathname === '/api/me' || isPublicApiRoute;
+        request.nextUrl.pathname === '/api/me' ||
+        // The signup checkboxes for invited people, answered on
+        // /auth/set-password before the password exists. Writes only the
+        // caller's own consent; see the route's header.
+        request.nextUrl.pathname === INVITE_CONSENT_PATH ||
+        isPublicApiRoute;
 
       if (!isAllowedApi) {
         return NextResponse.json(

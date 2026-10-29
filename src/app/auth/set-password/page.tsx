@@ -6,8 +6,19 @@ import { Loader2, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { BrandLogo } from '@/components/brand-logo';
+import { ConsentCheckboxes } from '@/components/auth/consent-checkboxes';
+import { useLegalUrls } from '@/hooks/use-legal-urls';
 
 export default function SetPasswordPage() {
+  const legal = useLegalUrls();
+  /**
+   * The signup checkboxes, for people created by an admin or invited by an
+   * owner (they never saw the signup form). Null until known; asked only while
+   * there is no terms acceptance on record, so a password reset never asks.
+   */
+  const [consentNeeded, setConsentNeeded] = useState<boolean | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [promotionalConsent, setPromotionalConsent] = useState(false);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -101,6 +112,18 @@ export default function SetPasswordPage() {
         window.history.replaceState({}, '', '/auth/set-password');
       }
 
+      if (user) {
+        try {
+          const res = await fetch('/api/auth/invite-consent', { cache: 'no-store' });
+          const body = (await res.json().catch(() => ({}))) as { needed?: unknown };
+          if (mounted) setConsentNeeded(!res.ok || body.needed !== false);
+        } catch {
+          // Unknown: ask. A missing answer is worse than an extra checkbox.
+          if (mounted) setConsentNeeded(true);
+        }
+      }
+
+      if (!mounted) return;
       setHasSession(!!user);
       setCheckingSession(false);
     };
@@ -126,10 +149,34 @@ export default function SetPasswordPage() {
       return;
     }
 
+    if (consentNeeded && !termsAccepted) {
+      setError('Please agree to the Privacy Policy and Terms & Conditions.');
+      return;
+    }
+
     setLoading(true);
 
     try {
       const supabase = createClient();
+
+      /*
+       * Consent BEFORE the password. Once the password is set this page signs
+       * the link session out, and there would be no session left to record
+       * the answer with.
+       */
+      if (consentNeeded) {
+        const res = await fetch('/api/auth/invite-consent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ termsAccepted: true, promotionalConsent }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: unknown };
+          setError(typeof body.error === 'string' ? body.error : 'Could not save your choices. Please try again.');
+          return;
+        }
+        setConsentNeeded(false);
+      }
 
       const { error: updateError } = await supabase.auth.updateUser({
         password,
@@ -307,6 +354,16 @@ export default function SetPasswordPage() {
               placeholder="Re-enter password"
             />
           </div>
+
+          {consentNeeded && (
+            <ConsentCheckboxes
+              legal={legal}
+              termsAccepted={termsAccepted}
+              onTermsChange={setTermsAccepted}
+              promotionalConsent={promotionalConsent}
+              onPromotionalChange={setPromotionalConsent}
+            />
+          )}
 
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? (

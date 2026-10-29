@@ -77,7 +77,12 @@ export type GhlEventType =
    * Added by migration 052. Until 052 is applied the CHECK refuses it with
    * 23514, which the registration producer reads as "not delivered".
    */
-  | "registered";
+  | "registered"
+  /**
+   * Added by migration 058: an invited owner answered the promotional box on
+   * /auth/set-password. Refused with 23514 until 058 is applied.
+   */
+  | "consent";
 
 export interface EnqueueGhlEventInput {
   eventType: GhlEventType;

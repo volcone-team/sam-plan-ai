@@ -768,7 +768,7 @@ export function draftErrors(draft: IntakeDraft, config: LibraryRecordConfig): Dr
   else if (name.length > MAX_NAME) errors.name = `Keep the name under ${MAX_NAME} characters.`;
 
   if (layout.kind.state === "rendered") {
-    if (!draft.kind) errors.kind = "Choose how this initiative runs.";
+    if (!draft.kind) errors.kind = "Choose how often this initiative happens.";
     else if (!config.allowedKinds.includes(draft.kind)) errors.kind = "That kind is not available for this initiative.";
   }
 

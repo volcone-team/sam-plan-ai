@@ -314,7 +314,7 @@ export function TimelineView() {
                             key={run}
                             className="absolute top-1.5 bottom-1.5 w-px bg-white/80"
                             style={{ left: `${(position(run, 'start') / 12) * 100}%` }}
-                            title={`Run: ${formatDate(parseDateOnly(run))}`}
+                            title={`Occurrence: ${formatDate(parseDateOnly(run))}`}
                           />
                         ))}
                         {/* Event date marker, only when the event is in this year */}

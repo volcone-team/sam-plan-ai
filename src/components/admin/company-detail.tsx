@@ -11,6 +11,7 @@ import {
   DollarSign,
   Loader2,
   Eye,
+  ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { cacheClearAll } from "@/lib/client-cache";
@@ -35,6 +36,45 @@ interface CompanyDetail {
   products: { id: string; name: string; price: number; revenueType: string; ticketTier: string; isActive: boolean }[];
   initiatives: { id: string; name: string; description: string; kind: string; channel: string; status: string; activationDate: string; revenueBetter: number; plannedBudget: number }[];
   annualPlan: { id: string; year: number; baselineRevenue: number; stretchRevenue: number; operatingBudget: number; status: string } | null;
+  /** Super admins only; null or absent for everyone else. */
+  consent?: MemberConsent[] | null;
+}
+
+interface MemberConsent {
+  memberId: string;
+  termsAcceptedAt: string | null;
+  termsAcceptedVia: string | null;
+  promotionalConsent: boolean | null;
+  promotionalConsentAt: string | null;
+}
+
+const consentDate = (iso: string | null): string =>
+  iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+
+/** One checkbox answer: what they chose, when, and where. */
+function ConsentAnswer({ value, at, via }: { value: boolean | null; at: string | null; via?: string | null }) {
+  if (value === null) {
+    return <span className="text-xs text-[hsl(var(--foreground-muted))]">Not asked yet</span>;
+  }
+  const where = via === "invite" ? " · on invite" : via === "signup" ? " · at signup" : "";
+  return (
+    <span className="text-xs">
+      <span
+        className={cn(
+          "rounded-full px-2 py-0.5 font-medium",
+          value ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-700"
+        )}
+      >
+        {value ? "Checked" : "Not checked"}
+      </span>
+      {at && (
+        <span className="ml-1.5 text-[hsl(var(--foreground-muted))]">
+          {consentDate(at)}
+          {where}
+        </span>
+      )}
+    </span>
+  );
 }
 
 /** Shared formatters: whole dollars, or cents only when the amount has them. */
@@ -295,6 +335,53 @@ export function CompanyDetail({ companyId }: { companyId: string }) {
               <p className="text-sm font-semibold">{formatCurrency(annualPlan.operatingBudget)}</p>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Consent: super admins only (the API returns null for anyone else). */}
+      {data.consent && (
+        <div className="rounded-[var(--radius-lg)] border border-border bg-card">
+          <div className="flex items-center gap-2 border-b border-border px-5 py-3">
+            <ShieldCheck className="h-4 w-4 text-[hsl(var(--primary))]" />
+            <h3 className="text-sm font-semibold">Consent</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs text-[hsl(var(--foreground-muted))]">
+                <tr className="border-b border-border">
+                  <th scope="col" className="px-5 py-2 font-medium">Member</th>
+                  <th scope="col" className="px-5 py-2 font-medium">Privacy Policy &amp; Terms</th>
+                  <th scope="col" className="px-5 py-2 font-medium">Promotional messages</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {members.map((m) => {
+                  const c = data.consent?.find((x) => x.memberId === m.id);
+                  return (
+                    <tr key={m.id}>
+                      <td className="px-5 py-3">
+                        <p className="font-medium">{m.firstName} {m.lastName}</p>
+                        <p className="text-xs text-[hsl(var(--foreground-muted))]">{m.email}</p>
+                      </td>
+                      <td className="px-5 py-3">
+                        <ConsentAnswer
+                          value={c?.termsAcceptedAt ? true : null}
+                          at={c?.termsAcceptedAt ?? null}
+                          via={c?.termsAcceptedVia ?? (c?.termsAcceptedAt ? "signup" : null)}
+                        />
+                      </td>
+                      <td className="px-5 py-3">
+                        <ConsentAnswer value={c?.promotionalConsent ?? null} at={c?.promotionalConsentAt ?? null} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="border-t border-border px-5 py-3 text-xs text-[hsl(var(--foreground-muted))]">
+            &ldquo;Not asked yet&rdquo; means they were created by an admin or invited and have not set their password since this was added.
+          </p>
         </div>
       )}
     </div>

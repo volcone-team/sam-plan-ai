@@ -107,6 +107,17 @@ export function GetStartedClient({
         </Link>
       }
       onChoose={choose}
+      footerExtra={
+        <p className="mt-2 text-center text-xs text-white/50">
+          Have questions? Email us at{" "}
+          <a
+            href="mailto:support@samplan.ai"
+            className="underline underline-offset-2 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+          >
+            support@samplan.ai
+          </a>
+        </p>
+      }
     />
   );
 }
@@ -288,6 +299,15 @@ function GetStartedCardsFallback({
 
           <p className="mt-10 text-center text-xs text-[hsl(var(--foreground-subtle))]">
             Payment is handled by Stripe. We never see your card details.
+          </p>
+          <p className="mt-2 text-center text-xs text-[hsl(var(--foreground-subtle))]">
+            Have questions? Email us at{" "}
+            <a
+              href="mailto:support@samplan.ai"
+              className="underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              support@samplan.ai
+            </a>
           </p>
         </div>
       </main>

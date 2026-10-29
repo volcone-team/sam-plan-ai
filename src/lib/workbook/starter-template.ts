@@ -104,7 +104,7 @@ const STEPS: readonly StarterStep[] = [
     category: "Follow-up",
     notes:
       "Follow up with everyone who engaged, then record what actually " +
-      "happened against the goal so the next run starts from real numbers.",
+      "happened against the goal so the next occurrence starts from real numbers.",
   },
 ];
 

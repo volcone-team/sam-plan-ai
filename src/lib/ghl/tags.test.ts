@@ -14,6 +14,8 @@ import {
   TAG_CANCELLATION,
   TAG_REGISTERED_NOT_PAID,
   TAG_OPTED_DND,
+  TAG_OPTED_COMMUNICATION,
+  consentTagFor,
   FIXED_TAGS,
   MARKETING_SUPPRESSION_TAG,
   MARKETING_SUPPRESSION_TAG_AS_WRITTEN,
@@ -167,7 +169,7 @@ describe("the inactivity tags' exact code points", () => {
  * ------------------------------------------------------------------ */
 
 describe("FIXED_TAGS", () => {
-  it("lists all fourteen tags in the client's order", () => {
+  it("lists all fifteen tags in the client's order", () => {
     expect(FIXED_TAGS).toEqual([
       "sam plan ai app - founder",
       "sam plan ai onboarding - pete booked",
@@ -183,8 +185,9 @@ describe("FIXED_TAGS", () => {
       "sam plan ai app - cancellation",
       "sam plan ai app - registered - not - paid",
       "sam plan ai app - buyer - opted - dnd",
+      "sam plan ai app - buyer - opted - communication",
     ]);
-    expect(FIXED_TAGS).toHaveLength(14);
+    expect(FIXED_TAGS).toHaveLength(15);
   });
 
   it("contains no duplicates, even after normalising", () => {
@@ -206,7 +209,7 @@ describe("FIXED_TAGS", () => {
     expect(() => {
       (FIXED_TAGS as string[])[0] = "clobbered";
     }).toThrow(TypeError);
-    expect(FIXED_TAGS).toHaveLength(14);
+    expect(FIXED_TAGS).toHaveLength(15);
     expect(FIXED_TAGS[0]).toBe(TAG_FOUNDER);
   });
 
@@ -948,6 +951,20 @@ describe("registration tags", () => {
   it("are both ours", () => {
     expect(isAppOriginTag(TAG_REGISTERED_NOT_PAID)).toBe(true);
     expect(isAppOriginTag(TAG_OPTED_DND)).toBe(true);
+  });
+
+  it("TAG_OPTED_COMMUNICATION is pinned, ours, and not a buyer tag", () => {
+    expect(TAG_OPTED_COMMUNICATION).toBe("sam plan ai app - buyer - opted - communication");
+    expect(isAppOriginTag(TAG_OPTED_COMMUNICATION)).toBe(true);
+    expect(isBuyerTag(TAG_OPTED_COMMUNICATION)).toBe(false);
+    expect(isBuyerTag("SAM Plan AI App - Buyer - Opted - Communication")).toBe(false);
+  });
+
+  it("consentTagFor picks exactly one tag per answer, none when never asked", () => {
+    expect(consentTagFor(true)).toBe(TAG_OPTED_COMMUNICATION);
+    expect(consentTagFor(false)).toBe(TAG_OPTED_DND);
+    expect(consentTagFor(null)).toBeNull();
+    expect(consentTagFor(undefined)).toBeNull();
   });
 
   it("TAG_OPTED_DND shares the buyer prefix but is not a buyer tag, in any casing", () => {

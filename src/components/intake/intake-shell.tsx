@@ -6,12 +6,10 @@ import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BrandLogo } from "@/components/brand-logo";
 import {
-  HELPER_LINE,
   finalButtonLabel,
   isFinalScreen,
   nextScreen,
   prevScreen,
-  showsHelperLine,
   type PlanPath,
   type ScreenId,
 } from "@/lib/intake/flow";
@@ -176,8 +174,6 @@ export function IntakeShell({
           <ScreenHeader
             title={copy.title}
             subtitle={subtitle || undefined}
-            // Screens 0, 5 and 9 omit it; flow.ts owns that rule.
-            helperLine={showsHelperLine(screen) ? HELPER_LINE : undefined}
           />
 
           <div className="space-y-6">{children}</div>

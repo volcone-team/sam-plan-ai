@@ -231,7 +231,7 @@ export function InitiativeOverview({
     if (layout.close.shown && closeDate && activationDate && closeDate < activationDate) {
       errors.closeDate = "This can't be before the start date.";
     }
-    if (layout.frequency.shown && !frequencyValue) errors.frequency = 'Choose how often it runs.';
+    if (layout.frequency.shown && !frequencyValue) errors.frequency = 'Choose how often it happens.';
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
       setSaveError(null);
@@ -514,7 +514,7 @@ export function InitiativeOverview({
                   aria-invalid={fieldErrors.eventDate ? true : undefined}
                   error={!!fieldErrors.eventDate}
                 />
-                {kindValue === 'recurring' && <p className={helperClass}>The first run. Later runs follow the frequency.</p>}
+                {kindValue === 'recurring' && <p className={helperClass}>The first occurrence. Later occurrences follow the frequency.</p>}
                 {!layout.event.required && kindValue !== 'recurring' && <p className={helperClass}>Leave empty to clear it.</p>}
                 {fieldErrors.eventDate && <p className={fieldErrorClass}>{fieldErrors.eventDate}</p>}
               </div>
@@ -579,7 +579,7 @@ export function InitiativeOverview({
             <legend className={labelClass}>Revenue scenarios ($)</legend>
             <p className={helperClass}>
               Better and Best fill in from Good (+10% and +20%). You can change them.
-              {initiative.kind === 'recurring' && ' For a recurring initiative these are the total across all its runs in the plan.'}
+              {initiative.kind === 'recurring' && ' For a recurring initiative these are the total across all its occurrences in the plan.'}
             </p>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-1.5">
@@ -681,7 +681,7 @@ export function InitiativeOverview({
             {/* Revenue: the plan total, and for recurring work what each run earns */}
             <div className="flex items-start justify-between gap-4">
               <span className="text-sm text-[hsl(var(--foreground-muted))]">
-                Revenue goal{runFigures ? ' (all runs)' : ''}
+                Revenue goal{runFigures ? ' (all occurrences)' : ''}
               </span>
               <span className="text-right text-sm font-medium text-[hsl(var(--foreground))]">
                 {formatMoney(initiative.revenueScenarios?.better ?? 0)}
@@ -693,11 +693,11 @@ export function InitiativeOverview({
             </div>
             {runFigures && (
               <div className="flex items-start justify-between gap-4">
-                <span className="text-sm text-[hsl(var(--foreground-muted))]">Per run</span>
+                <span className="text-sm text-[hsl(var(--foreground-muted))]">Per occurrence</span>
                 <span className="text-right text-sm font-medium text-[hsl(var(--foreground))]">
                   {formatMoney(Math.round(runFigures.better))}
                   <span className="block text-xs font-normal text-[hsl(var(--foreground-muted))]">
-                    {runFigures.runs} run{runFigures.runs !== 1 ? 's' : ''} in the plan
+                    {runFigures.runs} occurrence{runFigures.runs !== 1 ? 's' : ''} in the plan
                     {monthlyBetter !== null && ` · ≈ ${formatMoney(Math.round(monthlyBetter))} a month`}
                   </span>
                 </span>

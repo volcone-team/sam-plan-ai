@@ -1511,7 +1511,7 @@ export function resolveFormLayout(args: {
     if (id === "timing") {
       return isOngoing
         ? { id, rendered: false, reason: "Hidden: an ongoing initiative has no event date." }
-        : { id, rendered: true, reason: "The initiative has a run to place in the year." };
+        : { id, rendered: true, reason: "The initiative has an occurrence to place in the year." };
     }
     if (id === "conversion-path") {
       return {
@@ -1786,7 +1786,7 @@ export function validateLibraryConfig(
     add(
       "no_kinds",
       "allowedKinds",
-      "At least one kind must be allowed, otherwise the form has no run to describe."
+      "At least one kind must be allowed, otherwise the form has no occurrence to describe."
     );
   }
   for (const kind of config.allowedKinds) {

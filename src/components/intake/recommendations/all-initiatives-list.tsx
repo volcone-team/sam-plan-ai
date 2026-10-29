@@ -62,17 +62,26 @@ export function AllInitiativesList({
   notice,
 }: AllInitiativesListProps) {
   const [search, setSearch] = React.useState("");
+  const [hideNotFit, setHideNotFit] = React.useState(false);
   const headingId = React.useId();
   const searchId = React.useId();
   const countId = React.useId();
+  const hideId = React.useId();
 
   const recommended = React.useMemo(() => new Set(recommendedKeys), [recommendedKeys]);
+  // A not-a-fit initiative already in the plan stays visible, so the filter
+  // never hides something the user would then be unable to remove.
+  const visible = React.useMemo(
+    () => (hideNotFit ? options.filter((o) => o.eligible || selectedKeys.has(o.key)) : options),
+    [options, hideNotFit, selectedKeys]
+  );
   const groups = React.useMemo(
-    () => groupByCategory(options, { search, pinFirst: recommendedKeys }),
-    [options, search, recommendedKeys]
+    () => groupByCategory(visible, { search, pinFirst: recommendedKeys }),
+    [visible, search, recommendedKeys]
   );
   const shown = countGrouped(groups);
   const anyIneligible = options.some((o) => !o.eligible);
+  const filtered = search.trim() !== "" || visible.length < options.length;
 
   if (options.length === 0) return null;
 
@@ -87,12 +96,26 @@ export function AllInitiativesList({
           Recommended.
         </p>
         {anyIneligible && (
-          <p className="flex flex-wrap items-center gap-1.5 text-xs text-[hsl(var(--foreground-muted))]">
-            <Badge tone="warning">Not a fit</Badge>
-            <span>shown so you can still choose it.</span>
+          <p className="text-xs text-[hsl(var(--foreground-muted))]">
+            Initiatives that are not a fit for your business, are still shown; but labeled.
           </p>
         )}
       </div>
+
+      {anyIneligible && (
+        <div className="flex items-center gap-2">
+          <input
+            id={hideId}
+            type="checkbox"
+            checked={hideNotFit}
+            onChange={(e) => setHideNotFit(e.target.checked)}
+            className="h-4 w-4 rounded border-input accent-[hsl(var(--primary))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+          <label htmlFor={hideId} className="text-sm text-foreground">
+            Hide initiatives that are not a fit
+          </label>
+        </div>
+      )}
 
       <div className="relative">
         <label htmlFor={searchId} className="sr-only">
@@ -124,9 +147,7 @@ export function AllInitiativesList({
       </div>
 
       <p id={countId} aria-live="polite" className="text-xs text-[hsl(var(--foreground-muted))]">
-        {search.trim() === ""
-          ? `${options.length} initiatives`
-          : `${shown} of ${options.length} initiatives match`}
+        {filtered ? `${shown} of ${options.length} initiatives shown` : `${options.length} initiatives`}
       </p>
 
       {notice}
@@ -134,7 +155,9 @@ export function AllInitiativesList({
       <div className="max-h-[28rem] overflow-y-auto rounded-[var(--radius-md)] border border-border">
         {shown === 0 ? (
           <p className="px-3 py-6 text-center text-sm text-[hsl(var(--foreground-muted))]">
-            Nothing matches &ldquo;{search}&rdquo;.
+            {search.trim() !== ""
+              ? <>Nothing matches &ldquo;{search}&rdquo;.</>
+              : "Every initiative is hidden by the filter above."}
           </p>
         ) : (
           groups.map((group) => (

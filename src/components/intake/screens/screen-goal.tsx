@@ -57,6 +57,7 @@ export function ScreenGoal({
           {prorated !== null && (
             <ReferenceFigure
               label={`Last 12 months, over ${periodMonths} months`}
+              sublabel="Populated from your previous answer"
               value={prorated}
             />
           )}
@@ -72,6 +73,7 @@ export function ScreenGoal({
       <Field
         htmlFor="revenue_goal"
         label={FIELD_COPY.revenue_goal.label}
+        helper={FIELD_COPY.revenue_goal.helper}
         required
         error={errors.revenue_goal}
       >
@@ -107,11 +109,14 @@ export function ScreenGoal({
 
 function ReferenceFigure({
   label,
+  sublabel,
   value,
   emptyText,
   highlight,
 }: {
   label: string;
+  /** Small italic note under the label. */
+  sublabel?: string;
   /** Null shows `emptyText` instead of a figure. */
   value: number | null;
   emptyText?: string;
@@ -129,6 +134,9 @@ function ReferenceFigure({
         {highlight && <TrendingUp className="h-3.5 w-3.5" aria-hidden="true" />}
         {label}
       </p>
+      {sublabel && (
+        <p className="text-xs italic text-[hsl(var(--foreground-muted))]">{sublabel}</p>
+      )}
       {/* Full comma-separated figures, never abbreviated (REQ-2.1). */}
       {value !== null ? (
         <p

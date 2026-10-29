@@ -283,7 +283,8 @@ export function CompanyManagement() {
   /* ---- Access grants, moved here from Subscriptions ---- */
 
   /** Plan catalogue, for choosing which plan a comp grants. */
-  const [plans, setPlans] = useState<{ id: string; name: string }[]>([]);
+  /** Active plans first, then retired ones (admins may still grant those). */
+  const [plans, setPlans] = useState<{ id: string; name: string; retired?: boolean }[]>([]);
   const [compTarget, setCompTarget] = useState<AdminCompany | null>(null);
   const [compPlanId, setCompPlanId] = useState("");
   const [compUntil, setCompUntil] = useState("");
@@ -668,7 +669,7 @@ export function CompanyManagement() {
                     >
                       {plans.length === 0 && <option value="">No plans available</option>}
                       {plans.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
+                        <option key={p.id} value={p.id}>{p.retired ? `${p.name} (retired)` : p.name}</option>
                       ))}
                     </select>
                   </div>
@@ -1257,7 +1258,7 @@ export function CompanyManagement() {
                 >
                   {plans.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name}
+                      {p.retired ? `${p.name} (retired)` : p.name}
                     </option>
                   ))}
                 </select>

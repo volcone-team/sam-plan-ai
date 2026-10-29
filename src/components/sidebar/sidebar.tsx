@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { Fragment, useState, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { navigationGroups } from "./sidebar-config";
@@ -76,23 +76,36 @@ export function Sidebar() {
         className="flex-1 overflow-y-auto px-3 py-4"
       >
         <div className="space-y-6">
-          {navigationGroups.map((group) => (
-            <div key={group.label}>
-              {!collapsed && (
+          {navigationGroups.map((group, index) => (
+            <div
+              key={group.label ?? `group-${index}`}
+              className={cn(
+                group.label === null && "border-t border-[hsl(var(--sidebar-border))] pt-4"
+              )}
+            >
+              {!collapsed && group.label && (
                 <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-subtle))]">
                   {group.label}
                 </p>
               )}
               <ul className="space-y-0.5">
                 {group.items.map((item) => (
-                  <SidebarNavItem
-                    key={item.href}
-                    label={item.label}
-                    href={item.href}
-                    icon={item.icon}
-                    isActive={isActive(item.href)}
-                    collapsed={collapsed}
-                  />
+                  <Fragment key={item.href}>
+                    {item.dividerBefore && (
+                      <li
+                        role="separator"
+                        aria-hidden="true"
+                        className="mx-3 my-2 border-t border-[hsl(var(--sidebar-border))]"
+                      />
+                    )}
+                    <SidebarNavItem
+                      label={item.label}
+                      href={item.href}
+                      icon={item.icon}
+                      isActive={isActive(item.href)}
+                      collapsed={collapsed}
+                    />
+                  </Fragment>
                 ))}
               </ul>
             </div>

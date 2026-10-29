@@ -657,13 +657,21 @@ export const FIELD_COPY: Record<
   payment_type: { label: "How is it paid?" },
   delivery_mode: { label: "How is it delivered?" },
   average_price: {
-    label: "What do customers actually pay on average?",
-    helper: "The real average after discounts, not the list price.",
+    label: "Average revenue per client",
+    helper:
+      "Enter what one client typically pays you for this product. For recurring or " +
+      "subscription offers, use the total you expect to collect from a client over " +
+      "the life of their relationship — not the monthly amount.",
   },
   units_in_period: { label: "How many do you want to sell in this plan period?" },
 
   // Screen 4
-  revenue_goal: { label: "What's your revenue goal for this period?" },
+  revenue_goal: {
+    label: "What's your revenue goal for this planning period?",
+    helper:
+      "If you have revenue for a previous period; increasing by 15% is conservative. " +
+      "If you are just getting started, what amount of revenue do you think you can generate?",
+  },
 
   // Screen 5
   initiative_key: { label: "What is it?" },
@@ -716,10 +724,17 @@ export function unitsGoalLabel(
   pricingModel: string | null
 ): string {
   if (pricingModel === PRICING_MODEL_RECURRING) {
-    return "How many active subscribers by the end?";
+    return "What is your subscriber goal by the end of the planning period?";
   }
   const months = isPlanningPeriod(periodMonths) ? periodMonths : DEFAULT_PLANNING_PERIOD;
   return `How many do you want to sell in the next ${months} months?`;
+}
+
+/** Subtext under the units label. Recurring products only; null otherwise. */
+export function unitsGoalHelper(pricingModel: string | null): string | null {
+  return pricingModel === PRICING_MODEL_RECURRING
+    ? "Either 3, 6, 12 or 18 months, as you chose above."
+    : null;
 }
 
 /** REQ-6.12 — shown only when every product shares one price tier. */
@@ -727,7 +742,7 @@ export const SINGLE_TIER_COACHING_LINE =
   "A strong lineup usually has a low, mid, and high-ticket offer.";
 
 /** REQ-6.11 — the running total is a reference, never a cap. */
-export const PRODUCTS_TOTAL_LABEL = "Products total";
+export const PRODUCTS_TOTAL_LABEL = "Goal per product";
 
 /** REQ-13.6 — only on cards whose forecast came from benchmarks. */
 export const BENCHMARK_NOTICE =

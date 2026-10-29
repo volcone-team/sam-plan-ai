@@ -80,13 +80,27 @@ export const TAG_CANCELLATION = "sam plan ai app - cancellation";
  * consent box unticked (profiles.promotional_consent = false). Add only; the
  * app never removes it.
  *
- * TAG_OPTED_DND STARTS WITH BUYER_TAG_PREFIX AND IS NOT A BUYER TAG. The
- * client chose the string. `isBuyerTag` excludes it explicitly, so the buyer
- * state cleanup (which removes every buyer tag it can name or match) can never
- * strip a do-not-disturb preference off a contact.
+ * TAG_OPTED_COMMUNICATION is its opposite: the box WAS ticked (client, Oct
+ * 2026). Exactly one of the two is added per answer. Add only.
+ *
+ * Both are also added for an invited owner who answers the same box on
+ * /auth/set-password (the `consent` event, producers/invite-consent.ts).
+ *
+ * BOTH START WITH BUYER_TAG_PREFIX AND ARE NOT BUYER TAGS. The client chose
+ * the strings. `isBuyerTag` excludes them explicitly, so the buyer state
+ * cleanup (which removes every buyer tag it can name or match) can never strip
+ * a consent choice off a contact.
  */
 export const TAG_REGISTERED_NOT_PAID = "sam plan ai app - registered - not - paid";
 export const TAG_OPTED_DND = "sam plan ai app - buyer - opted - dnd";
+export const TAG_OPTED_COMMUNICATION = "sam plan ai app - buyer - opted - communication";
+
+/** The consent tag for one answer to the promotional box. Null when never asked. */
+export function consentTagFor(promotionalConsent: boolean | null | undefined): string | null {
+  if (promotionalConsent === true) return TAG_OPTED_COMMUNICATION;
+  if (promotionalConsent === false) return TAG_OPTED_DND;
+  return null;
+}
 
 /**
  * Every fixed tag, in the order the client listed them.
@@ -110,6 +124,7 @@ export const FIXED_TAGS: readonly string[] = Object.freeze([
   TAG_CANCELLATION,
   TAG_REGISTERED_NOT_PAID,
   TAG_OPTED_DND,
+  TAG_OPTED_COMMUNICATION,
 ]);
 
 /**
@@ -188,9 +203,12 @@ export function isAppOriginTag(raw: unknown): boolean {
 
 /**
  * Tags inside the buyer namespace that are NOT buyer-state tags. Compared in
- * normalised form. See TAG_OPTED_DND.
+ * normalised form. See TAG_OPTED_DND and TAG_OPTED_COMMUNICATION.
  */
-const NON_BUYER_STATE_TAGS = new Set([normaliseTagForCompare(TAG_OPTED_DND)]);
+const NON_BUYER_STATE_TAGS = new Set([
+  normaliseTagForCompare(TAG_OPTED_DND),
+  normaliseTagForCompare(TAG_OPTED_COMMUNICATION),
+]);
 
 /**
  * Is this a buyer tag, for any plan including one we no longer know about?

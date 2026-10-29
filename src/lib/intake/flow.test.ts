@@ -9,7 +9,6 @@ import {
   finalButtonLabel,
   outputVariantFor,
   outputHeadline,
-  showsHelperLine,
   resolveResumeScreen,
   type PlanPath,
   type ScreenId,
@@ -212,20 +211,6 @@ describe("outputVariantFor / outputHeadline", () => {
   });
 });
 
-describe("showsHelperLine", () => {
-  // Spec: every screen EXCEPT 0, 5 and 9.
-  it("hides the helper on screens 0, 5 and 9", () => {
-    expect(showsHelperLine("start")).toBe(false);
-    expect(showsHelperLine("initiatives")).toBe(false);
-    expect(showsHelperLine("obstacles")).toBe(false);
-  });
-
-  it("shows the helper on every other screen", () => {
-    for (const screen of ["business", "team", "products", "goal", "wins", "customer", "audience"] as ScreenId[]) {
-      expect(showsHelperLine(screen)).toBe(true);
-    }
-  });
-});
 
 describe("resolveResumeScreen", () => {
   it("resumes at a stored screen on this path", () => {

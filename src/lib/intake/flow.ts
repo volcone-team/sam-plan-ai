@@ -159,19 +159,6 @@ export function outputHeadline(variant: OutputVariant): string {
   }
 }
 
-/**
- * Screens that do NOT show the "Rough numbers are fine" helper line.
- *
- * Screens 0, 5 and 9 per the spec: the first is a single choice with its own
- * explanation, and the other two are not about estimating figures.
- */
-const NO_HELPER_LINE: ReadonlySet<ScreenId> = new Set(["start", "initiatives", "obstacles"]);
-
-export function showsHelperLine(screen: ScreenId): boolean {
-  return !NO_HELPER_LINE.has(screen);
-}
-
-export const HELPER_LINE = "Rough numbers are fine. You can change any of this later.";
 
 /**
  * Validate a resume slug.

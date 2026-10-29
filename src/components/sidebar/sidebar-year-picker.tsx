@@ -154,6 +154,7 @@ export function SidebarYearPicker({ collapsed }: { collapsed: boolean }) {
           {selectedYear}
           {labelFor(selectedYear) && (
             <span className="ml-1.5 text-[10px] font-medium uppercase tracking-wider opacity-60">
+              <span aria-hidden="true">· </span>
               {labelFor(selectedYear)}
             </span>
           )}
@@ -240,7 +241,7 @@ export function SidebarYearPicker({ collapsed }: { collapsed: boolean }) {
       )}
 
       <p className="mt-1.5 text-[10px] leading-snug text-[hsl(var(--foreground-subtle))]">
-        Every page shows the plan year you pick here.
+        Switches the plan you&apos;re viewing.
       </p>
 
       {deleting !== null && (

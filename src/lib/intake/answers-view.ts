@@ -46,10 +46,7 @@ import {
   PLAN_OWNER_OPTIONS,
   PLAN_PATH_OPTIONS,
   PRICE_TIER_OPTIONS,
-  PRICING_MODEL_OPTIONS,
-  PRICING_MODEL_RECURRING,
   PRODUCT_TYPE_OPTIONS,
-  RECURRING_INTERVAL_OPTIONS,
   REPEAT_FREQUENCY_OPTIONS,
   SALES_MODEL_OPTIONS,
   SCREEN_COPY,
@@ -328,12 +325,8 @@ function productRecord(
     field(FIELD_COPY.product_type.label, option(PRODUCT_TYPE_OPTIONS, product.product_type)),
     field(FIELD_COPY.delivery_mode.label, option(DELIVERY_OPTIONS, product.delivery_mode)),
     field(FIELD_COPY.price_level.label, priceTier(product.price_level)),
-    field(FIELD_COPY.payment_type.label, option(PRICING_MODEL_OPTIONS, paymentType)),
   ];
-  // "Billed" is revealed by Recurring only (REQ-6.6).
-  if (paymentType === PRICING_MODEL_RECURRING) {
-    items.push(field("Billed", option(RECURRING_INTERVAL_OPTIONS, product.recurring_interval)));
-  }
+  // "How is it paid?" and "Billed" are no longer asked, so not shown here.
   items.push(
     field(FIELD_COPY.average_price.label, money(product.average_price)),
     // The same period- and model-dependent wording the card used.

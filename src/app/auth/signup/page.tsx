@@ -15,7 +15,7 @@ import {
 } from '@/lib/auth/direct-signup';
 import { ResendConfirmation } from '@/components/auth/resend-confirmation';
 import { useLegalUrls } from '@/hooks/use-legal-urls';
-import { LegalLink } from '@/components/legal-link';
+import { ConsentCheckboxes } from '@/components/auth/consent-checkboxes';
 import {
   DIAL_CODES,
   DEFAULT_COUNTRY,
@@ -809,59 +809,14 @@ export default function SignupPage() {
             is not consent — so it starts unticked and declining it is recorded
             as an explicit FALSE rather than as silence.
           */}
-          <label
-            htmlFor="termsAccepted"
-            className="flex cursor-pointer items-start gap-2.5 text-xs text-[hsl(var(--foreground-muted))]"
-          >
-            <input
-              id="termsAccepted"
-              name="termsAccepted"
-              type="checkbox"
-              required
-              checked={termsAccepted}
-              onChange={(e) => setTermsAccepted(e.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-[hsl(var(--primary))]"
-            />
-            <span>
-              By checking this box, I agree to the{' '}
-              <LegalLink href={legal.privacyPolicyUrl}>Privacy Policy</LegalLink>{' '}
-              and <LegalLink href={legal.termsUrl}>Terms &amp; Conditions</LegalLink>.
-            </span>
-          </label>
-
-          <label
-            htmlFor="promotionalConsent"
-            className="flex cursor-pointer items-start gap-2.5 text-xs text-[hsl(var(--foreground-muted))]"
-          >
-            <input
-              id="promotionalConsent"
-              name="promotionalConsent"
-              type="checkbox"
-              checked={promotionalConsent}
-              onChange={(e) => setPromotionalConsent(e.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-[hsl(var(--primary))]"
-            />
-            {/*
-              The client's exact wording, reproduced verbatim. This is the text
-              the consent is given against, so it is not ours to tidy up — the
-              specific mention of an automatic telephone dialing system and the
-              HELP/STOP instructions are what make it a valid TCPA disclosure.
-            */}
-            <span>
-              By checking this box, I agree to receive promotional messages
-              from Advance Your Reach LLC via sms, email, phone and/or text
-              using an automatic telephone dialing system or prerecorded voice
-              message. Message frequency varies. Message and data rates may
-              apply. Text HELP for more info or email is at{' '}
-              <a
-                href="mailto:info@advanceyourreach.com"
-                className="text-[hsl(var(--primary))] hover:underline"
-              >
-                info@advanceyourreach.com
-              </a>
-              . Text STOP to unsubscribe from messages.
-            </span>
-          </label>
+          {/* Shared with /auth/set-password so the wording never drifts. */}
+          <ConsentCheckboxes
+            legal={legal}
+            termsAccepted={termsAccepted}
+            onTermsChange={setTermsAccepted}
+            promotionalConsent={promotionalConsent}
+            onPromotionalChange={setPromotionalConsent}
+          />
 
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? (

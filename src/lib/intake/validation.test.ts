@@ -360,14 +360,15 @@ describe("products screen", () => {
     ).toBeDefined();
   });
 
-  // REQ-6.6: Recurring reveals the interval, so a blank one was ignored.
-  it("requires the interval once Recurring is chosen", () => {
+  // "Billed" is no longer asked, so an older Recurring draft with no interval
+  // must not be blocked.
+  it("does not require an interval for a saved Recurring product", () => {
     const res = validateProducts(
       periods,
       [{ ...product, payment_type: "recurring" }],
       today
     );
-    expect(res.rowErrors[0].recurring_interval).toBeDefined();
+    expect(res.rowErrors[0]?.recurring_interval).toBeUndefined();
   });
 
   it("accepts Recurring with an interval", () => {

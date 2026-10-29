@@ -3,7 +3,7 @@ import { ghlIsOn, loadGhlConfig, type GhlConfig } from "@/lib/ghl/config";
 import { resolveGhlOwnerContact } from "@/lib/ghl/contact";
 import { buyerPresenceForStatus } from "@/lib/ghl/buyer-state";
 import { enqueueGhlEvent } from "@/lib/ghl/outbox";
-import { TAG_OPTED_DND, TAG_REGISTERED_NOT_PAID } from "@/lib/ghl/tags";
+import { TAG_REGISTERED_NOT_PAID, consentTagFor } from "@/lib/ghl/tags";
 import { isMissingColumnError } from "@/lib/supabase/missing-column";
 
 /**
@@ -14,9 +14,10 @@ import { isMissingColumnError } from "@/lib/supabase/missing-column";
  * throws, config first so an integration that is off costs zero queries,
  * enqueue only, no secrets in the payload.
  *
- * TAGS. TAG_REGISTERED_NOT_PAID always. TAG_OPTED_DND as well when the owner
+ * TAGS. TAG_REGISTERED_NOT_PAID always. Plus TAG_OPTED_DND when the owner
  * left the promotional consent box unticked (`profiles.promotional_consent =
- * false`). Consent true, or NULL (never asked), adds nothing for DND. The
+ * false`) or TAG_OPTED_COMMUNICATION when they ticked it. NULL (never asked)
+ * adds no consent tag. The
  * buyer-state producer removes TAG_REGISTERED_NOT_PAID when the company
  * enters the ACTIVE buyer state (see `buyerStateRemovals`).
  *
@@ -80,8 +81,15 @@ export interface RegistrationDecisionInput {
   adminLevel: string | null | undefined;
   /** `profiles.company_id`. */
   companyId: string | null | undefined;
-  /** `profiles.terms_accepted_at`. Non-null means the public signup. */
+  /** `profiles.terms_accepted_at`. Non-null means terms were accepted somewhere. */
   termsAcceptedAt: string | Date | null | undefined;
+  /**
+   * `profiles.terms_accepted_via` (migration 058). 'invite' means the terms
+   * were accepted on /auth/set-password after an admin or owner invite, which
+   * is NOT a public signup. Null/absent on pre-058 rows, which all came from
+   * the public signup.
+   */
+  termsAcceptedVia?: string | null;
   /** Is a super admin signed in as this person right now? */
   isImpersonating: boolean;
 }
@@ -112,18 +120,22 @@ export function shouldFireRegistration(
   if (typeof input.termsAcceptedAt === "string" && input.termsAcceptedAt.trim() === "") {
     return { fire: false, reason: "not_public_signup" };
   }
+  // Accepted on the set-password screen after an invite (058), not at signup.
+  if (input.termsAcceptedVia === "invite") {
+    return { fire: false, reason: "not_public_signup" };
+  }
 
   return { fire: true, reason: "registered" };
 }
 
 /**
- * The tags to add. TAG_OPTED_DND only for an explicit `false`: NULL means the
- * person was never asked, which is not a refusal.
+ * The tags to add. Plus TAG_OPTED_DND for an explicit `false` and
+ * TAG_OPTED_COMMUNICATION for an explicit `true`. NULL means the person was
+ * never asked, which is neither, so it adds no consent tag.
  */
 export function registrationTags(promotionalConsent: boolean | null | undefined): string[] {
-  return promotionalConsent === false
-    ? [TAG_REGISTERED_NOT_PAID, TAG_OPTED_DND]
-    : [TAG_REGISTERED_NOT_PAID];
+  const consent = consentTagFor(promotionalConsent);
+  return consent ? [TAG_REGISTERED_NOT_PAID, consent] : [TAG_REGISTERED_NOT_PAID];
 }
 
 /** One subscription row, as read for the paid check. */
@@ -226,6 +238,7 @@ interface ProfileRow {
   is_admin?: unknown;
   admin_level?: unknown;
   terms_accepted_at?: unknown;
+  terms_accepted_via?: unknown;
   promotional_consent?: unknown;
 }
 
@@ -256,13 +269,19 @@ export async function enqueueRegisteredEvent(
     const userId = typeof input.userId === "string" ? input.userId.trim() : "";
     if (!userId) return { ok: true, outcome: "skipped", reason: "no_user" };
 
-    const { data: profileData, error: profileError } = await db
-      .from("profiles")
-      .select(
-        "id, company_id, role, is_admin, admin_level, terms_accepted_at, promotional_consent"
-      )
-      .eq("id", userId)
-      .maybeSingle();
+    const selectProfile = (columns: string) =>
+      db.from("profiles").select(columns).eq("id", userId).maybeSingle();
+    const BASE_COLUMNS =
+      "id, company_id, role, is_admin, admin_level, terms_accepted_at, promotional_consent";
+
+    let { data: profileData, error: profileError } = await selectProfile(
+      `${BASE_COLUMNS}, terms_accepted_via`
+    );
+    if (profileError && isMissingColumnError(profileError)) {
+      // Migration 058 not applied: nobody can have accepted via an invite yet,
+      // because the set-password route only stamps terms once 058 exists.
+      ({ data: profileData, error: profileError } = await selectProfile(BASE_COLUMNS));
+    }
 
     if (profileError) {
       if (isMissingColumnError(profileError)) {
@@ -273,7 +292,7 @@ export async function enqueueRegisteredEvent(
     }
     if (!profileData) return { ok: true, outcome: "skipped", reason: "no_profile" };
 
-    const profile = profileData as ProfileRow;
+    const profile = profileData as unknown as ProfileRow;
     const companyId = typeof profile.company_id === "string" ? profile.company_id : null;
     const termsAcceptedAt =
       typeof profile.terms_accepted_at === "string" ? profile.terms_accepted_at : null;
@@ -284,6 +303,8 @@ export async function enqueueRegisteredEvent(
       adminLevel: typeof profile.admin_level === "string" ? profile.admin_level : null,
       companyId,
       termsAcceptedAt,
+      termsAcceptedVia:
+        typeof profile.terms_accepted_via === "string" ? profile.terms_accepted_via : null,
       isImpersonating: false,
     });
     if (!decision.fire || !companyId) {

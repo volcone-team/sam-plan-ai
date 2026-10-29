@@ -400,7 +400,8 @@ describe("toAnswerSections — products", () => {
     expect(recordValue(coaching, FIELD_COPY.price_level.label)).toBe(
       "Mid ticket ($500 to $5,000)"
     );
-    expect(recordValue(coaching, FIELD_COPY.payment_type.label)).toBe("One-time");
+    // "How is it paid?" and "Billed" are no longer asked or shown.
+    expect(recordValue(coaching, FIELD_COPY.payment_type.label)).toBeUndefined();
     expect(recordValue(coaching, "Billed")).toBeUndefined();
     expect(recordValue(coaching, FIELD_COPY.average_price.label)).toBe("$3,000");
     // The units question names the plan's period.
@@ -408,9 +409,9 @@ describe("toAnswerSections — products", () => {
       "25"
     );
 
-    expect(recordValue(membership, FIELD_COPY.payment_type.label)).toBe("Recurring");
-    expect(recordValue(membership, "Billed")).toBe("per month");
-    expect(recordValue(membership, "How many active subscribers by the end?")).toBe("150");
+    expect(recordValue(membership, FIELD_COPY.payment_type.label)).toBeUndefined();
+    expect(recordValue(membership, "Billed")).toBeUndefined();
+    expect(recordValue(membership, "What is your subscriber goal by the end of the planning period?")).toBe("150");
   });
 
   it("names an unnamed product by position", () => {

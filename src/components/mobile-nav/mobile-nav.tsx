@@ -58,18 +58,26 @@ export function MobileNav() {
 
             <nav aria-label="Mobile navigation" className="px-3 py-4">
               <div className="space-y-6">
-                {navigationGroups.map((group) => (
-                  <div key={group.label}>
-                    <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
-                      {group.label}
-                    </p>
+                {navigationGroups.map((group, index) => (
+                  <div
+                    key={group.label ?? `group-${index}`}
+                    className={cn(group.label === null && "border-t border-border pt-4")}
+                  >
+                    {group.label && (
+                      <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
+                        {group.label}
+                      </p>
+                    )}
                     <ul className="space-y-0.5">
                       {group.items.map((item) => {
                         const Icon = item.icon;
                         const active = isActive(item.href);
 
                         return (
-                          <li key={item.href}>
+                          <li
+                            key={item.href}
+                            className={cn(item.dividerBefore && "mt-2 border-t border-border pt-2")}
+                          >
                             <Link
                               href={item.href}
                               onClick={() => setOpen(false)}
