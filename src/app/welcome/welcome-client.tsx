@@ -34,6 +34,8 @@ const VIDEO_URL = "";
  * exactly as the empty constant did.
  */
 const SUPPORT_EMAIL = "support@samplan.ai";
+/** Step 2 button: adds the weekly Founding Member coaching calls to the customer's calendar. */
+const COACHING_CALENDAR_URL = "https://addcal.co/c/SAM-Plan-AI-support-calls";
 
 /**
  * Artwork from the design, served from /public/welcome. Every image falls back
@@ -217,7 +219,7 @@ export function WelcomeClient({
             operating system in your business.
           </p>
 
-          <div className="mx-auto mt-10 max-w-3xl overflow-hidden rounded-xl border border-white/10 bg-black/60 shadow-[0_0_80px_rgba(37,99,235,0.25)]">
+          <div className="mx-auto mt-10 hidden max-w-3xl overflow-hidden rounded-xl border border-white/10 bg-black/60 shadow-[0_0_80px_rgba(37,99,235,0.25)]">
             {VIDEO_URL ? (
               <div className="aspect-video">
                 <iframe
@@ -321,6 +323,18 @@ export function WelcomeClient({
               step={2}
               title={<>Add your Founding Member<br />coaching calls to your calendar</>}
               body={COACHING_BODY[plan]}
+              action={
+                <a
+                  href={COACHING_CALENDAR_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-blue-600 via-sky-500 to-teal-400 px-5 py-3 text-sm font-semibold uppercase tracking-wide text-white shadow-[0_0_30px_rgba(56,189,248,0.3)] transition-opacity hover:opacity-90"
+                >
+                  Add coaching calls to your calendar
+                  <span className="sr-only"> (opens in a new tab)</span>
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </a>
+              }
             />
           </div>
         </section>
