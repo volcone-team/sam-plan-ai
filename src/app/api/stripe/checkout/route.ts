@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type Stripe from "stripe";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
@@ -232,7 +233,7 @@ export async function POST(request: Request) {
     }
 
     const baseUrl = getAppUrl();
-    const session = await stripe.checkout.sessions.create({
+    const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: "subscription",
       customer: customerId,
       line_items: [{ price: price.stripe_price_id, quantity: 1 }],
@@ -285,7 +286,34 @@ export async function POST(request: Request) {
       automatic_tax: { enabled: true },
       billing_address_collection: "required",
       customer_update: { address: "auto", name: "auto" },
-    });
+    };
+
+    /**
+     * A REQUIRED "I agree to the Terms of Service" box on Stripe's page
+     * (client, Oct 2026). Stripe links its own label to the Terms URL set in
+     * the Stripe dashboard (Settings > Public details).
+     *
+     * FAILS OPEN. Without that URL Stripe refuses to create the session at
+     * all, which would stop every purchase over a missing dashboard setting.
+     * So that one refusal is retried without the box, and logged loudly.
+     */
+    const withTerms: Stripe.Checkout.SessionCreateParams = {
+      ...sessionParams,
+      consent_collection: { terms_of_service: "required" },
+    };
+    let session: Stripe.Checkout.Session;
+    try {
+      session = await stripe.checkout.sessions.create(withTerms);
+    } catch (termsErr: unknown) {
+      const termsMessage = termsErr instanceof Error ? termsErr.message : String(termsErr);
+      if (!/terms of service/i.test(termsMessage)) throw termsErr;
+      console.error(
+        "[stripe/checkout] Terms box skipped: set a Terms of Service URL in the Stripe " +
+          "dashboard (Settings > Public details). Stripe said:",
+        termsMessage
+      );
+      session = await stripe.checkout.sessions.create(sessionParams);
+    }
 
     if (!session.url) {
       console.error("[stripe/checkout] Session created without a URL");
