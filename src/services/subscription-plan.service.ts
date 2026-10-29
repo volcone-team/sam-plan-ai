@@ -28,6 +28,7 @@ interface ApiPlan {
   id: string; name: string; description: string | null; tagline: string | null;
   monthly_price: number; annual_price: number;
   is_active: boolean; is_default: boolean; display_order: number;
+  onboarding_call_url_monthly?: string | null; onboarding_call_url_yearly?: string | null;
 }
 interface ApiLimit {
   id: string; plan_id: string; limit_key: string; limit_label: string; limit_value: number;
@@ -57,6 +58,8 @@ function toPlan(p: ApiPlan): SubscriptionPlan {
     isActive: p.is_active,
     isDefault: p.is_default,
     displayOrder: p.display_order,
+    onboardingCallUrlMonthly: p.onboarding_call_url_monthly ?? '',
+    onboardingCallUrlYearly: p.onboarding_call_url_yearly ?? '',
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -129,7 +132,7 @@ class SubscriptionPlanService {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body?.error || 'Could not create plan');
+      throw new Error(body?.message || body?.error || 'Could not create plan');
     }
     const body = await res.json();
     return {
@@ -142,6 +145,8 @@ class SubscriptionPlanService {
       isActive: true,
       isDefault: false,
       displayOrder: 0,
+      onboardingCallUrlMonthly: dto.onboardingCallUrlMonthly?.trim() ?? '',
+      onboardingCallUrlYearly: dto.onboardingCallUrlYearly?.trim() ?? '',
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -159,7 +164,7 @@ class SubscriptionPlanService {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body?.error || 'Could not update plan');
+      throw new Error(body?.message || body?.error || 'Could not update plan');
     }
     return null;
   }

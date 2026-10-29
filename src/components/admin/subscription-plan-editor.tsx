@@ -1,13 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2, Plus, ChevronDown, ChevronRight, Check, Trash2, DollarSign } from 'lucide-react';
+import { Loader2, Plus, ChevronDown, ChevronRight, Check, Trash2, DollarSign, CalendarDays } from 'lucide-react';
+import { isUsableBookingUrl } from '@/lib/billing/booking';
 import { subscriptionPlanService } from '@/services/subscription-plan.service';
 import { LIMIT_KEYS, FEATURE_KEYS } from '@/types/subscription-plan.types';
 import type { SubscriptionPlanFull } from '@/types/subscription-plan.types';
 import { NumberInputRaw } from '@/components/ui/number-input';
 import { pickMoneyFormatter } from '@/lib/results-tab-totals';
 import { PricingTableEditor } from './pricing-table-editor';
+
+const EMPTY_NEW_PLAN = { name: '', monthlyPrice: '', annualPrice: '', calMonthly: '', calYearly: '' };
 
 /**
  * Admin Subscription Plans Editor.
@@ -18,7 +21,8 @@ export function SubscriptionPlanEditor() {
   const [loading, setLoading] = useState(true);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newPlan, setNewPlan] = useState({ name: '', monthlyPrice: '', annualPrice: '' });
+  const [newPlan, setNewPlan] = useState(EMPTY_NEW_PLAN);
+  const [addError, setAddError] = useState<string | null>(null);
 
   useEffect(() => {
     loadPlans();
@@ -40,12 +44,25 @@ export function SubscriptionPlanEditor() {
   const handleAddPlan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPlan.name.trim()) return;
-    await subscriptionPlanService.createPlan({
-      name: newPlan.name.trim(),
-      monthlyPrice: parseFloat(newPlan.monthlyPrice) || 0,
-      annualPrice: parseFloat(newPlan.annualPrice) || 0,
-    });
-    setNewPlan({ name: '', monthlyPrice: '', annualPrice: '' });
+    const linkProblem = calendarLinkProblem(newPlan.calMonthly) ?? calendarLinkProblem(newPlan.calYearly);
+    if (linkProblem) {
+      setAddError(linkProblem);
+      return;
+    }
+    setAddError(null);
+    try {
+      await subscriptionPlanService.createPlan({
+        name: newPlan.name.trim(),
+        monthlyPrice: parseFloat(newPlan.monthlyPrice) || 0,
+        annualPrice: parseFloat(newPlan.annualPrice) || 0,
+        onboardingCallUrlMonthly: newPlan.calMonthly.trim() || undefined,
+        onboardingCallUrlYearly: newPlan.calYearly.trim() || undefined,
+      });
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : 'Could not create plan');
+      return;
+    }
+    setNewPlan(EMPTY_NEW_PLAN);
     setShowAddForm(false);
     loadPlans();
   };
@@ -62,6 +79,28 @@ export function SubscriptionPlanEditor() {
     setPlans(prev => prev.map(p =>
       p.plan.id === planId ? { ...p, plan: { ...p.plan, [field]: num } } : p
     ));
+  };
+
+  /** Saves on blur. Returns an error message for the field, or null when saved. */
+  const handleUpdateCalendarLink = async (
+    planId: string,
+    field: 'onboardingCallUrlMonthly' | 'onboardingCallUrlYearly',
+    value: string
+  ): Promise<string | null> => {
+    const trimmed = value.trim();
+    const current = plans.find(p => p.plan.id === planId)?.plan[field] ?? '';
+    if (trimmed === current) return null;
+    const problem = calendarLinkProblem(trimmed);
+    if (problem) return problem;
+    try {
+      await subscriptionPlanService.updatePlan(planId, { [field]: trimmed });
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Could not save the link';
+    }
+    setPlans(prev => prev.map(p =>
+      p.plan.id === planId ? { ...p, plan: { ...p.plan, [field]: trimmed } } : p
+    ));
+    return null;
   };
 
   const handleUpdateLimit = async (planId: string, limitKey: string, value: string) => {
@@ -146,8 +185,13 @@ export function SubscriptionPlanEditor() {
             <NumberInputRaw value={newPlan.monthlyPrice} onValueChange={monthlyPrice => setNewPlan(p => ({ ...p, monthlyPrice }))} placeholder="Monthly $" aria-label="Monthly price ($)" className="rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
             <NumberInputRaw value={newPlan.annualPrice} onValueChange={annualPrice => setNewPlan(p => ({ ...p, annualPrice }))} placeholder="Annual $" aria-label="Annual price ($)" className="rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
           </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <input type="url" inputMode="url" value={newPlan.calMonthly} onChange={e => setNewPlan(p => ({ ...p, calMonthly: e.target.value }))} placeholder="Calendar link (monthly) https://…" aria-label="Calendar link for monthly purchases" className="rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+            <input type="url" inputMode="url" value={newPlan.calYearly} onChange={e => setNewPlan(p => ({ ...p, calYearly: e.target.value }))} placeholder="Calendar link (yearly) https://…" aria-label="Calendar link for yearly purchases" className="rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))]" />
+          </div>
+          {addError && <p role="alert" className="text-xs text-[hsl(var(--destructive))]">{addError}</p>}
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => setShowAddForm(false)} className="px-3 py-1.5 text-xs border border-border rounded-[var(--radius-md)]">Cancel</button>
+            <button type="button" onClick={() => { setShowAddForm(false); setAddError(null); }} className="px-3 py-1.5 text-xs border border-border rounded-[var(--radius-md)]">Cancel</button>
             <button type="submit" className="px-3 py-1.5 text-xs bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-[var(--radius-md)]">Create</button>
           </div>
         </form>
@@ -216,6 +260,30 @@ export function SubscriptionPlanEditor() {
                         className="w-full mt-1 rounded-[var(--radius-md)] border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-[hsl(var(--primary))]"
                       />
                     </div>
+                  </div>
+                </div>
+
+                {/* Calendar links (migration 060) */}
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--foreground-muted))] mb-2 flex items-center gap-1.5">
+                    <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" /> Calendar Links
+                  </h4>
+                  <p className="text-[11px] text-[hsl(var(--foreground-muted))] mb-2">
+                    Onboarding call calendar shown on the welcome page (embed and button) for this plan. Leave blank to use the Onboarding Call tab link.
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <CalendarLinkInput
+                      id={`plan-${plan.id}-cal-monthly`}
+                      label="Calendar link (monthly)"
+                      defaultValue={plan.onboardingCallUrlMonthly}
+                      onCommit={value => handleUpdateCalendarLink(plan.id, 'onboardingCallUrlMonthly', value)}
+                    />
+                    <CalendarLinkInput
+                      id={`plan-${plan.id}-cal-yearly`}
+                      label="Calendar link (yearly)"
+                      defaultValue={plan.onboardingCallUrlYearly}
+                      onCommit={value => handleUpdateCalendarLink(plan.id, 'onboardingCallUrlYearly', value)}
+                    />
                   </div>
                 </div>
 
@@ -295,6 +363,56 @@ export function SubscriptionPlanEditor() {
       })}
       {/* The plan picker's comparison table (migration 050). */}
       <PricingTableEditor />
+    </div>
+  );
+}
+
+/** Empty is fine (falls back to the global link); otherwise must be https. */
+function calendarLinkProblem(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed || isUsableBookingUrl(trimmed)) return null;
+  return 'Enter a full https:// calendar link.';
+}
+
+/** URL field that saves on blur and shows the save result under itself. */
+function CalendarLinkInput({
+  id,
+  label,
+  defaultValue,
+  onCommit,
+}: {
+  id: string;
+  label: string;
+  defaultValue: string;
+  onCommit: (value: string) => Promise<string | null>;
+}) {
+  const [value, setValue] = useState(defaultValue);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const helpId = `${id}-help`;
+
+  return (
+    <div>
+      <label htmlFor={id} className="text-[11px] text-[hsl(var(--foreground-muted))]">{label}</label>
+      <input
+        id={id}
+        type="url"
+        inputMode="url"
+        value={value}
+        onChange={e => { setValue(e.target.value); setSaved(false); }}
+        onBlur={async () => {
+          const problem = await onCommit(value);
+          setError(problem);
+          setSaved(!problem && value.trim() !== defaultValue);
+        }}
+        placeholder="https://"
+        aria-invalid={!!error}
+        aria-describedby={helpId}
+        className="w-full mt-1 rounded-[var(--radius-md)] border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-[hsl(var(--primary))]"
+      />
+      <p id={helpId} role={error ? 'alert' : undefined} className={`mt-1 text-[11px] ${error ? 'text-[hsl(var(--destructive))]' : 'text-[hsl(var(--foreground-muted))]'}`}>
+        {error ?? (saved ? 'Saved' : value.trim() ? '' : 'Uses the Onboarding Call tab link')}
+      </p>
     </div>
   );
 }

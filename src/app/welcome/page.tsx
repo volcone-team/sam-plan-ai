@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { loadBillingConfig } from "@/lib/billing/stripe-client";
 import { evaluateAccess } from "@/lib/billing/entitlement";
 import { needsCallUnlock, type CallGateCompany } from "@/lib/access/call-gate";
@@ -11,7 +11,7 @@ import {
 } from "@/lib/access/call-gate-settings";
 import { isMissingColumnError } from "@/lib/supabase/missing-column";
 import {
-  resolveOnboardingBookingUrl,
+  resolvePlanOnboardingBookingUrl,
   onboardingBookingCycle,
   isYearlyCycle,
 } from "@/lib/billing/booking";
@@ -23,6 +23,37 @@ export const metadata = {
 };
 
 export const dynamic = "force-dynamic";
+
+interface WelcomePlanRow {
+  name?: string | null;
+  onboarding_call_url_monthly?: string | null;
+  onboarding_call_url_yearly?: string | null;
+}
+
+/**
+ * The plan's name and its per-plan calendar links (migration 060). Fails open:
+ * before 060 the link columns do not exist, so retry with the name only and
+ * the welcome page falls back to the Onboarding Call tab's links.
+ */
+async function loadPlanForWelcome(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: SupabaseClient<any>,
+  planId: string
+): Promise<WelcomePlanRow | null> {
+  const full = await db
+    .from("subscription_plans")
+    .select("name, onboarding_call_url_monthly, onboarding_call_url_yearly")
+    .eq("id", planId)
+    .maybeSingle();
+  if (!full.error) return (full.data as WelcomePlanRow | null) ?? null;
+
+  const nameOnly = await db
+    .from("subscription_plans")
+    .select("name")
+    .eq("id", planId)
+    .maybeSingle();
+  return (nameOnly.data as WelcomePlanRow | null) ?? null;
+}
 
 /**
  * The page a new customer lands on after paying.
@@ -246,19 +277,16 @@ export default async function WelcomePage({
     accessReason: access.reason,
     billingCycle: sub?.billing_cycle ?? null,
   });
-  const bookingUrl = resolveOnboardingBookingUrl({
+  const plan = sub?.plan_id ? await loadPlanForWelcome(db, sub.plan_id) : null;
+
+  // The plan's own link for this cycle (060) first, then the Onboarding Call tab's.
+  const bookingUrl = resolvePlanOnboardingBookingUrl({
+    planMonthlyUrl: plan?.onboarding_call_url_monthly,
+    planYearlyUrl: plan?.onboarding_call_url_yearly,
     monthlyUrl: callSettings.bookingUrl,
     yearlyUrl: callSettings.bookingUrlYearly,
     billingCycle: bookingCycle,
   });
-
-  const { data: plan } = sub?.plan_id
-    ? await db
-        .from("subscription_plans")
-        .select("name")
-        .eq("id", sub.plan_id)
-        .maybeSingle()
-    : { data: null };
 
   /**
    * Has the intake already been completed?
@@ -277,7 +305,7 @@ export default async function WelcomePage({
   return (
     <WelcomeClient
       firstName={firstName}
-      planName={(plan as { name?: string } | null)?.name ?? null}
+      planName={plan?.name ?? null}
       intakeDone={(initiativeCount ?? 0) > 0}
       isTrial={access.reason === "trialing"}
       trialDaysRemaining={access.daysRemaining}

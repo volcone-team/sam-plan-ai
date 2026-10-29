@@ -12,6 +12,9 @@ export interface SubscriptionPlan {
   isActive: boolean;
   isDefault: boolean;
   displayOrder: number;
+  /** Onboarding call links shown on /welcome (migration 060). Empty = Onboarding Call tab link. */
+  onboardingCallUrlMonthly: string;
+  onboardingCallUrlYearly: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -50,6 +53,8 @@ export interface CreateSubscriptionPlanDTO {
   tagline?: string;
   monthlyPrice: number;
   annualPrice: number;
+  onboardingCallUrlMonthly?: string;
+  onboardingCallUrlYearly?: string;
 }
 
 export interface UpdateSubscriptionPlanDTO {
@@ -60,6 +65,9 @@ export interface UpdateSubscriptionPlanDTO {
   annualPrice?: number;
   isActive?: boolean;
   displayOrder?: number;
+  /** Onboarding calendar links (migration 060). Empty string clears. */
+  onboardingCallUrlMonthly?: string;
+  onboardingCallUrlYearly?: string;
 }
 
 /**

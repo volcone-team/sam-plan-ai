@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireSuperAdmin } from "@/lib/require-admin";
 import { logActivity } from "@/lib/activity-log";
+import { isUsableBookingUrl } from "@/lib/billing/booking";
+
+const PLAN_COLUMNS =
+  "id, name, description, tagline, monthly_price, annual_price, is_active, is_default, display_order";
+/** Plus migration 060's per-plan calendar links. */
+const PLAN_COLUMNS_060 = `${PLAN_COLUMNS}, onboarding_call_url_monthly, onboarding_call_url_yearly`;
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,11 +48,15 @@ export async function GET() {
 
     const db = adminClient();
 
+    // Try with 060's columns; fall back so the editor still loads before 060.
+    const loadPlans = async () => {
+      const withLinks = await db.from("subscription_plans").select(PLAN_COLUMNS_060).order("display_order");
+      if (!withLinks.error) return withLinks;
+      return db.from("subscription_plans").select(PLAN_COLUMNS).order("display_order");
+    };
+
     const [plansRes, limitsRes, featuresRes, pricesRes] = await Promise.all([
-      db
-        .from("subscription_plans")
-        .select("id, name, description, tagline, monthly_price, annual_price, is_active, is_default, display_order")
-        .order("display_order"),
+      loadPlans(),
       db.from("plan_limits").select("id, plan_id, limit_key, limit_label, limit_value"),
       db.from("plan_features").select("id, plan_id, feature_key, feature_label, enabled"),
       db.from("stripe_prices").select("plan_id, billing_cycle, unit_amount, stripe_mode, is_current").eq("is_current", true),
@@ -184,6 +194,28 @@ export async function PUT(req: Request) {
         }
       }
 
+      // Onboarding calendar links (migration 060). Empty clears (falls back to
+      // the Onboarding Call tab); anything else must be an https link.
+      for (const [field, column] of [
+        ["onboardingCallUrlMonthly", "onboarding_call_url_monthly"],
+        ["onboardingCallUrlYearly", "onboarding_call_url_yearly"],
+      ] as const) {
+        if (body[field] === undefined) continue;
+        const raw = body[field];
+        if (raw !== null && typeof raw !== "string") {
+          return NextResponse.json({ error: field }, { status: 400 });
+        }
+        const trimmed = (raw ?? "").trim();
+        if (trimmed && !isUsableBookingUrl(trimmed)) {
+          return NextResponse.json(
+            { error: field, message: "Enter a full https:// calendar link." },
+            { status: 400 }
+          );
+        }
+        patch[column] = trimmed || null;
+        changed[field] = trimmed || null;
+      }
+
       if (body.isActive !== undefined) {
         if (typeof body.isActive !== "boolean") {
           return NextResponse.json({ error: "isActive" }, { status: 400 });
@@ -199,7 +231,15 @@ export async function PUT(req: Request) {
       const { error } = await db.from("subscription_plans").update(patch).eq("id", planId);
       if (error) {
         console.error("[admin/plans] Plan update failed:", error.message);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        const missing060 = /onboarding_call_url_(monthly|yearly)/.test(error.message);
+        return NextResponse.json(
+          {
+            error: missing060
+              ? "Calendar link columns are missing. Run migration 060 in the Supabase SQL editor."
+              : error.message,
+          },
+          { status: 500 }
+        );
       }
     }
 
@@ -254,6 +294,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "price" }, { status: 400 });
     }
 
+    // Optional calendar links (060). Only written when given, so creating a
+    // plan without them still works before 060 is applied.
+    const links: Record<string, string> = {};
+    for (const [field, column] of [
+      ["onboardingCallUrlMonthly", "onboarding_call_url_monthly"],
+      ["onboardingCallUrlYearly", "onboarding_call_url_yearly"],
+    ] as const) {
+      const raw = typeof body[field] === "string" ? (body[field] as string).trim() : "";
+      if (!raw) continue;
+      if (!isUsableBookingUrl(raw)) {
+        return NextResponse.json(
+          { error: field, message: "Enter a full https:// calendar link." },
+          { status: 400 }
+        );
+      }
+      links[column] = raw;
+    }
+
     const db = adminClient();
 
     const { data: existing } = await db
@@ -274,13 +332,22 @@ export async function POST(req: Request) {
         is_active: true,
         is_default: false,
         display_order: ((existing?.display_order as number) ?? 0) + 1,
+        ...links,
       })
       .select("id")
       .single();
 
     if (error) {
       console.error("[admin/plans] Create failed:", error.message);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      const missing060 = /onboarding_call_url_(monthly|yearly)/.test(error.message);
+      return NextResponse.json(
+        {
+          error: missing060
+            ? "Calendar link columns are missing. Run migration 060 in the Supabase SQL editor."
+            : error.message,
+        },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ created: true, planId: created.id });

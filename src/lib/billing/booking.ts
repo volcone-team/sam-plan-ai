@@ -120,6 +120,30 @@ export function resolveOnboardingBookingUrl(args: {
 }
 
 /**
+ * The onboarding link with PER-PLAN links first (migration 060).
+ *
+ * A yearly customer gets the plan's yearly link, everyone else the plan's
+ * monthly link. When that plan link is empty or unusable, the global choice
+ * (resolveOnboardingBookingUrl over the Onboarding Call tab's links) applies,
+ * so a plan with no links set behaves exactly as before.
+ */
+export function resolvePlanOnboardingBookingUrl(args: {
+  planMonthlyUrl: unknown;
+  planYearlyUrl: unknown;
+  monthlyUrl: unknown;
+  yearlyUrl: unknown;
+  billingCycle: unknown;
+}): string | null {
+  const planUrl = isYearlyCycle(args.billingCycle) ? args.planYearlyUrl : args.planMonthlyUrl;
+  if (isUsableBookingUrl(planUrl)) return planUrl.trim();
+  return resolveOnboardingBookingUrl({
+    monthlyUrl: args.monthlyUrl,
+    yearlyUrl: args.yearlyUrl,
+    billingCycle: args.billingCycle,
+  });
+}
+
+/**
  * The billing cycle to choose the onboarding link by, from the access decision.
  *
  * Only a PAID subscription has a cycle worth honouring. A trial, a comp, open

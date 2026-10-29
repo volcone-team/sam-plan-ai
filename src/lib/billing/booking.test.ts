@@ -3,6 +3,7 @@ import {
   isUsableBookingUrl,
   resolveBookingUrls,
   resolveOnboardingBookingUrl,
+  resolvePlanOnboardingBookingUrl,
   onboardingBookingCycle,
   describeResetCallOffer,
   describeStrategyCallOffer,
@@ -180,6 +181,29 @@ describe("describeCallBooked", () => {
 
   it("sends them to a page that exists", () => {
     expect(describeCallBooked({ reasonWasResults: false }).ctaHref).toBe("/year-at-a-glance");
+  });
+});
+
+describe("resolvePlanOnboardingBookingUrl", () => {
+  const global = { monthlyUrl: "https://g.example.com/m", yearlyUrl: "https://g.example.com/y" };
+  const plan = { planMonthlyUrl: "https://p.example.com/m", planYearlyUrl: "https://p.example.com/y" };
+
+  it("uses the plan's monthly link for a monthly purchase", () => {
+    expect(resolvePlanOnboardingBookingUrl({ ...plan, ...global, billingCycle: "monthly" })).toBe(plan.planMonthlyUrl);
+    expect(resolvePlanOnboardingBookingUrl({ ...plan, ...global, billingCycle: null })).toBe(plan.planMonthlyUrl);
+  });
+
+  it("uses the plan's yearly link for a yearly purchase", () => {
+    expect(resolvePlanOnboardingBookingUrl({ ...plan, ...global, billingCycle: "annual" })).toBe(plan.planYearlyUrl);
+  });
+
+  it("falls back to the global links when the plan link is empty or unusable", () => {
+    expect(resolvePlanOnboardingBookingUrl({ planMonthlyUrl: "", planYearlyUrl: null, ...global, billingCycle: "monthly" })).toBe(global.monthlyUrl);
+    expect(resolvePlanOnboardingBookingUrl({ planMonthlyUrl: null, planYearlyUrl: "javascript:alert(1)", ...global, billingCycle: "annual" })).toBe(global.yearlyUrl);
+  });
+
+  it("never gives a monthly customer the plan's yearly link", () => {
+    expect(resolvePlanOnboardingBookingUrl({ planMonthlyUrl: null, planYearlyUrl: plan.planYearlyUrl, ...global, billingCycle: "monthly" })).toBe(global.monthlyUrl);
   });
 });
 
