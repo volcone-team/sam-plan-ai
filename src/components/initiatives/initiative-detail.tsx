@@ -55,7 +55,9 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
   const [initiativeType, setInitiativeType] = useState<InitiativeType | null>(null);
   const [productName, setProductName] = useState<string>('');
   const [initiativeTypes, setInitiativeTypes] = useState<InitiativeType[]>([]);
-  const [products, setProducts] = useState<Array<{ id: string; name: string }>>([]);
+  const [products, setProducts] = useState<
+    Array<{ id: string; name: string; price: number | null; goalUnits: number | null }>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
@@ -114,7 +116,10 @@ export function InitiativeDetail({ initiativeId, onBack }: InitiativeDetailProps
 
         if (allTypes.status === "fulfilled") setInitiativeTypes(allTypes.value);
         if (allProducts.status === "fulfilled") {
-          setProducts(allProducts.value.map(p => ({ id: p.id, name: p.name })));
+          // Price and goal units: the edit form's units x price target.
+          setProducts(
+            allProducts.value.map(p => ({ id: p.id, name: p.name, price: p.price ?? null, goalUnits: p.goalUnits ?? null }))
+          );
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load initiative';

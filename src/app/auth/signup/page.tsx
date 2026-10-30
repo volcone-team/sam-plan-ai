@@ -14,6 +14,7 @@ import {
   pathAfterSignupTrust,
 } from '@/lib/auth/direct-signup';
 import { ResendConfirmation } from '@/components/auth/resend-confirmation';
+import { RegistrationClosedNotice } from '@/components/auth/registration-closed-notice';
 import { useLegalUrls } from '@/hooks/use-legal-urls';
 import { ConsentCheckboxes } from '@/components/auth/consent-checkboxes';
 import {
@@ -37,8 +38,10 @@ import {
  * arrives; showing the form and then yanking it away is worse than a brief
  * spinner.
  */
-function useRequiresPlanFirst(): boolean | null {
+function useSignupFlow(): { requiresPlanFirst: boolean | null; registrationOpen: boolean } {
   const [requires, setRequires] = useState<boolean | null>(null);
+  /** The admin's "allow new registrations" switch (migration 062). Fails open. */
+  const [registrationOpen, setRegistrationOpen] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,8 +50,11 @@ function useRequiresPlanFirst(): boolean | null {
       try {
         const res = await fetch('/api/billing/signup-flow', { cache: 'no-store' });
         if (!res.ok) throw new Error(String(res.status));
-        const body = (await res.json()) as { requiresPlanFirst?: boolean };
-        if (!cancelled) setRequires(body.requiresPlanFirst === true);
+        const body = (await res.json()) as { requiresPlanFirst?: boolean; registrationOpen?: boolean };
+        if (!cancelled) {
+          setRegistrationOpen(body.registrationOpen !== false);
+          setRequires(body.requiresPlanFirst === true);
+        }
       } catch {
         /*
          * Fails OPEN: on a read failure the form is shown. A plan can still be
@@ -64,7 +70,7 @@ function useRequiresPlanFirst(): boolean | null {
     };
   }, []);
 
-  return requires;
+  return { requiresPlanFirst: requires, registrationOpen };
 }
 
 export default function SignupPage() {
@@ -131,7 +137,7 @@ export default function SignupPage() {
       : `${selectedCountry.min} to ${selectedCountry.max} digits`
     : 'Digits only, no spaces needed';
 
-  const requiresPlanFirst = useRequiresPlanFirst();
+  const { requiresPlanFirst, registrationOpen } = useSignupFlow();
 
   /**
    * Send anyone who arrived without a plan to pick one first.
@@ -141,7 +147,7 @@ export default function SignupPage() {
    * /get-started does not bounce back.
    */
   useEffect(() => {
-    if (requiresPlanFirst !== true) return;
+    if (requiresPlanFirst !== true || !registrationOpen) return;
 
     const planInUrl = asPlanId(
       new URLSearchParams(window.location.search).get('plan')
@@ -149,7 +155,7 @@ export default function SignupPage() {
     if (planInUrl) return;
 
     router.replace('/get-started');
-  }, [requiresPlanFirst, router]);
+  }, [requiresPlanFirst, registrationOpen, router]);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -449,6 +455,11 @@ export default function SignupPage() {
         <Loader2 className="h-6 w-6 animate-spin text-[hsl(var(--primary))]" />
       </div>
     );
+  }
+
+  // The admin has closed new registrations: no form at all.
+  if (!registrationOpen) {
+    return <RegistrationClosedNotice />;
   }
 
   if (

@@ -3,6 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import { loadBillingConfig, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client";
 import { firstSignupStep } from "@/lib/billing/signup-flow";
 import { loadPricingTable } from "@/lib/billing/load-pricing-table";
+import { readRegistrationOpen } from "@/lib/auth/registration-setting";
+import { RegistrationClosedNotice } from "@/components/auth/registration-closed-notice";
 import { selectComparisonPlans } from "@/components/billing/plan-comparison-view";
 import {
   GetStartedClient,
@@ -40,7 +42,10 @@ export default async function GetStartedPage() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  const config = await loadBillingConfig(db);
+  const [config, registration] = await Promise.all([loadBillingConfig(db), readRegistrationOpen(db)]);
+
+  // The admin has closed new registrations: no plans to pick.
+  if (!registration.open) return <RegistrationClosedNotice />;
 
   // Trial on, or billing off entirely: no plan choice belongs in signup.
   if (firstSignupStep({

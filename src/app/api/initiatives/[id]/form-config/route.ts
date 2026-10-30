@@ -4,6 +4,7 @@ import { serviceClient } from "@/lib/billing/enforce";
 import { requireCompanyMember } from "@/lib/require-company-member";
 import { isInitiativeId } from "@/lib/initiatives/recurring-request";
 import { loadLibraryConfigs, toRecordConfig } from "@/lib/intake-v3/config-repo";
+import { toPickerItems, type PickerItem } from "@/lib/intake-v3/picker";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,7 +36,7 @@ export async function GET(_request: NextRequest, ctx: { params: Promise<{ id: st
     const db = serviceClient();
     const { data: row, error } = await db
       .from("initiatives")
-      .select("library_key")
+      .select("library_key, format, audience_source")
       .eq("id", id)
       .eq("company_id", check.companyId)
       .maybeSingle();
@@ -56,9 +57,30 @@ export async function GET(_request: NextRequest, ctx: { params: Promise<{ id: st
     }
     const record = loaded.records.find((r) => r.initiativeKey === key);
     const config = record ? toRecordConfig(record.effective) : null;
+    /**
+     * `item` lets the Overview open the SAME form as Add Initiative
+     * (IntakeForm), prefilled. Null when the record cannot be a picker item
+     * (no category or audience); the Overview then keeps its own edit form.
+     */
+    let item: (PickerItem & { revenueScore: number | null }) | null = null;
+    if (config && record) {
+      const [picked] = toPickerItems([record]);
+      if (picked) {
+        const { data: lib } = await db
+          .from("wb_initiative_library")
+          .select("revenue_score")
+          .eq("initiative_key", key)
+          .maybeSingle();
+        const score = (lib as { revenue_score?: unknown } | null)?.revenue_score;
+        item = { ...picked, revenueScore: typeof score === "number" ? score : null };
+      }
+    }
     return NextResponse.json({
       config,
       categoryId: config && record ? record.effective.categoryId ?? null : null,
+      item,
+      format: typeof row.format === "string" ? row.format : null,
+      audienceSource: typeof row.audience_source === "string" ? row.audience_source : null,
     });
   } catch (err: unknown) {
     console.error("[initiatives/form-config] failed:", err instanceof Error ? err.message : String(err));

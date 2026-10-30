@@ -185,6 +185,7 @@ export function isAlreadyRegisteredError(
 
 export const EXISTS_MESSAGE =
   "An account with this email already exists. Please sign in instead.";
+const REGISTRATION_CLOSED_FALLBACK = "We're not accepting new registrations right now.";
 export const RATE_LIMITED_MESSAGE =
   "Too many attempts. Please wait a few minutes and try again.";
 
@@ -212,6 +213,13 @@ export function decideDirectSignupOutcome(
   const body = (response.body ?? {}) as { ok?: unknown; error?: unknown; message?: unknown };
 
   if (status === 200 && body.ok === true) return { kind: "sign_in" };
+  // Closed by the admin: stop, never fall back to signUp().
+  if (status === 403 && body.error === "registration_closed") {
+    return {
+      kind: "error",
+      message: typeof body.message === "string" && body.message ? body.message : REGISTRATION_CLOSED_FALLBACK,
+    };
+  }
   if (status === 409 && body.error === "exists") return { kind: "error", message: EXISTS_MESSAGE };
   if (status === 409 && body.error === "verification_required") return { kind: "fallback" };
   if (status === 429) return { kind: "error", message: RATE_LIMITED_MESSAGE };

@@ -3,7 +3,7 @@ import { formatDate } from "@/lib/format-date";
 import { formatScheduleDate } from "@/lib/initiatives/schedule";
 import { toDateOnly, parseDateOnly } from "@/lib/plan-dates";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Calendar, Package, Tag, Clock, Zap, Pencil, Loader2 } from 'lucide-react';
 import type { Initiative, InitiativeStatus, UpdateInitiativeDTO } from '@/types';
 import type { InitiativeType } from '@/types/initiative-type.types';
@@ -20,22 +20,25 @@ import { planService } from '@/services/plan.service';
 import { horizonEnd, perRun, runDates } from '@/lib/planning/revenue-spread';
 import { OCCURRENCE_COPY, lastOccurrenceOf, totalForOccurrences } from '@/lib/initiatives/occurrences';
 import { occurrenceCards } from '@/lib/initiatives/occurrence-cards';
-import { REPEAT_FREQUENCY_LABELS, REPEAT_RUNS_PER_YEAR, type RepeatFrequency } from '@/lib/intake-forecast';
+import { REPEAT_FREQUENCY_LABELS, type RepeatFrequency } from '@/lib/intake-forecast';
 import type { DateOnly } from '@/lib/plan-dates';
 import { editLayout } from '@/lib/initiatives/edit-layout';
 import { submitBlockedNotice } from './intake-form-view';
 import type { LibraryRecordConfig } from '@/lib/intake-v3/library-config';
 import type { InitiativeKind } from '@/types';
+import type { CreateInitiativeRequest } from '@/lib/initiatives/create-request';
+import type { PickerItem } from '@/lib/intake-v3/picker';
+import { draftFromInitiative } from '@/lib/intake-v3/edit-draft';
+import { IntakeForm } from './intake-form';
 
-/** Frequencies frequent enough that "per month" is a meaningful figure. */
-const MONTHLY_OR_FASTER = new Set<string>(['weekly', 'bi-weekly', 'monthly']);
 
 export interface InitiativeOverviewProps {
   initiative: Initiative;
   initiativeType: InitiativeType | null;
   productName: string;
   initiativeTypes: InitiativeType[];
-  products: { id: string; name: string }[];
+  /** Price and goal units drive the units x price target in the Add-form edit. */
+  products: { id: string; name: string; price?: number | null; goalUnits?: number | null }[];
   onSaved: (updated: Initiative) => void;
 }
 
@@ -118,13 +121,30 @@ export function InitiativeOverview({
    * dates, kind and frequency (edit-layout.ts). Null until loaded, and for a
    * custom initiative; the form then offers every field.
    */
-  const [formConfig, setFormConfig] = useState<{ config: LibraryRecordConfig | null; categoryId: string | null } | null>(null);
+  const [formConfig, setFormConfig] = useState<{
+    config: LibraryRecordConfig | null;
+    categoryId: string | null;
+    /** Set: Edit opens the Add Initiative form itself (IntakeForm), prefilled. */
+    item?: PickerItem | null;
+    format?: string | null;
+    audienceSource?: string | null;
+  } | null>(null);
   useEffect(() => {
     if (!editing || formConfig) return;
     let cancelled = false;
     fetch(`/api/initiatives/${initiative.id}/form-config`, { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : { config: null, categoryId: null }))
-      .then(body => { if (!cancelled) setFormConfig({ config: body.config ?? null, categoryId: body.categoryId ?? null }); })
+      .then(body => {
+        if (!cancelled) {
+          setFormConfig({
+            config: body.config ?? null,
+            categoryId: body.categoryId ?? null,
+            item: body.item ?? null,
+            format: body.format ?? null,
+            audienceSource: body.audienceSource ?? null,
+          });
+        }
+      })
       .catch(() => { if (!cancelled) setFormConfig({ config: null, categoryId: null }); });
     return () => { cancelled = true; };
   }, [editing, formConfig, initiative.id]);
@@ -237,11 +257,6 @@ export function InitiativeOverview({
     }
     return { good: t?.good, better: t?.better, best: t?.best };
   };
-  const monthlyBetter =
-    runFigures && frequency && MONTHLY_OR_FASTER.has(frequency)
-      ? (runFigures.good * REPEAT_RUNS_PER_YEAR[frequency as RepeatFrequency]) / 12
-      : null;
-
   const [revenueGood, setRevenueGood] = useState(numberToInputValue(startingFigures().good));
   const [revenueBetter, setRevenueBetter] = useState(numberToInputValue(startingFigures().better));
   const [revenueBest, setRevenueBest] = useState(numberToInputValue(startingFigures().best));
@@ -286,7 +301,70 @@ export function InitiativeOverview({
 
   const handleEdit = () => {
     resetForm();
+    setIntakeError(null);
     setEditing(true);
+  };
+
+  /*
+   * EDIT WITH THE ADD FORM (client, Oct 2026: "exactly the same as the Add
+   * Initiative form"). A library initiative whose record has a config opens
+   * IntakeForm prefilled from the saved row and saves through
+   * PUT /api/initiatives/[id]. A custom initiative (no record) keeps the
+   * edit form below.
+   */
+  const editPlanYear = (() => {
+    const d = initiative.eventDate ?? initiative.activationDate;
+    return d ? Number(toDateOnly(d).slice(0, 4)) : new Date().getFullYear();
+  })();
+  const intake = formConfig?.config && formConfig.item ? { config: formConfig.config, item: formConfig.item } : null;
+  const [intakeSaving, setIntakeSaving] = useState(false);
+  const [intakeError, setIntakeError] = useState<string | null>(null);
+  /** The company's other initiatives: the lead-handoff choices and the units suggestion. */
+  const [others, setOthers] = useState<Initiative[]>([]);
+  useEffect(() => {
+    if (!editing || !initiative.companyId) return;
+    let cancelled = false;
+    initiativeService
+      .getInitiativesByCompany(initiative.companyId)
+      .then(rows => { if (!cancelled) setOthers(rows.filter(r => r.id !== initiative.id)); })
+      .catch(() => { /* no choices: the form still saves */ });
+    return () => { cancelled = true; };
+  }, [editing, initiative.companyId, initiative.id]);
+  const intakeStart = useMemo(() => {
+    if (!intake) return null;
+    const draft = draftFromInitiative(
+      { ...initiative, format: formConfig?.format ?? null, audienceSource: formConfig?.audienceSource ?? null },
+      intake.item,
+      intake.config,
+      editPlanYear
+    );
+    // Units only when the saved target IS units x today's price; otherwise
+    // the dollar figure is kept exactly as saved.
+    const price = products.find(p => p.id === draft.productId)?.price ?? null;
+    const good = Number(draft.revenue.goal) || 0;
+    const units = initiative.unitsGoal ?? null;
+    const unitsMatch = units !== null && typeof price === 'number' && price > 0 && Math.abs(units * price - good) < 0.5;
+    return { draft, units: unitsMatch ? units : null, inDollars: !unitsMatch };
+  }, [intake, initiative, formConfig?.format, formConfig?.audienceSource, products, editPlanYear]);
+  const handleIntakeSave = async (request: CreateInitiativeRequest) => {
+    setIntakeSaving(true);
+    setIntakeError(null);
+    try {
+      const res = await fetch(`/api/initiatives/${initiative.id}`, {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (!res.ok) throw new Error(body?.error || 'Could not save the initiative.');
+      onSaved(await initiativeService.getInitiative(initiative.id));
+      setEditing(false);
+    } catch (err) {
+      setIntakeError(err instanceof Error ? err.message : 'Could not save the initiative.');
+    } finally {
+      setIntakeSaving(false);
+    }
   };
 
   const handleCancel = () => {
@@ -430,7 +508,34 @@ export function InitiativeOverview({
         )}
       </div>
 
-      {editing ? (
+      {editing && formConfig === null ? (
+        <div role="status" className="mt-4 flex items-center gap-2 text-sm text-[hsl(var(--foreground-muted))]">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading the form…
+        </div>
+      ) : editing && intake && intakeStart ? (
+        <div className="mt-4 rounded-[var(--radius-lg)] border border-border bg-card p-5">
+          <IntakeForm
+            key={initiative.id}
+            item={intake.item}
+            config={intake.config}
+            products={products}
+            annualPlanId={initiative.annualPlanId}
+            planYear={editPlanYear}
+            onBack={handleCancel}
+            onSubmit={handleIntakeSave}
+            submitting={intakeSaving}
+            error={intakeError}
+            handoffTargets={others}
+            planInitiatives={others}
+            startDraft={intakeStart.draft}
+            startUnits={intakeStart.units}
+            startInDollars={intakeStart.inDollars}
+            heading="Edit Initiative"
+            submitLabel="Save changes"
+            backLabel="Cancel"
+          />
+        </div>
+      ) : editing ? (
         <div className="mt-4 space-y-5 rounded-[var(--radius-lg)] border border-border bg-card p-5">
           {saveError && (
             <div
@@ -819,24 +924,35 @@ export function InitiativeOverview({
               </span>
             </div>
 
-            {/* Target: the plan total (Good), and for recurring work what each occurrence earns */}
-            <div className="flex items-start justify-between gap-4">
-              <span className="text-sm text-[hsl(var(--foreground-muted))]">
-                Target{runFigures ? ' (all occurrences)' : ''}
-              </span>
-              <span className="text-right text-sm font-medium text-[hsl(var(--foreground))]">
-                {formatMoney(initiative.revenueScenarios?.good ?? 0)}
-              </span>
-            </div>
-            {runFigures && (
-              <div className="flex items-start justify-between gap-4">
-                <span className="text-sm text-[hsl(var(--foreground-muted))]">Per occurrence</span>
-                <span className="text-right text-sm font-medium text-[hsl(var(--foreground))]">
-                  {formatMoney(Math.round(runFigures.good))}
-                  <span className="block text-xs font-normal text-[hsl(var(--foreground-muted))]">
-                    {runFigures.runs} occurrence{runFigures.runs !== 1 ? 's' : ''} in the plan
-                    {monthlyBetter !== null && ` · ≈ ${formatMoney(Math.round(monthlyBetter))} a month`}
+            {/*
+              Recurring (client, Oct 2026): one occurrence first, then the
+              total = occurrences x revenue per occurrence. One-time: Target.
+            */}
+            {runFigures ? (
+              <>
+                <div className="flex items-start justify-between gap-4">
+                  <span className="text-sm text-[hsl(var(--foreground-muted))]">
+                    Revenue Target (one occurrence)
                   </span>
+                  <span className="text-right text-sm font-medium text-[hsl(var(--foreground))]">
+                    {formatMoney(Math.round(runFigures.good))}
+                  </span>
+                </div>
+                <div className="flex items-start justify-between gap-4">
+                  <span className="text-sm text-[hsl(var(--foreground-muted))]">Total revenue target</span>
+                  <span className="text-right text-sm font-medium text-[hsl(var(--foreground))]">
+                    {formatMoney(totalForOccurrences(Math.round(runFigures.good), runFigures.runs))}
+                    <span className="block text-xs font-normal text-[hsl(var(--foreground-muted))]">
+                      {runFigures.runs} occurrence{runFigures.runs !== 1 ? 's' : ''} × {formatMoney(Math.round(runFigures.good))}
+                    </span>
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-start justify-between gap-4">
+                <span className="text-sm text-[hsl(var(--foreground-muted))]">Target</span>
+                <span className="text-right text-sm font-medium text-[hsl(var(--foreground))]">
+                  {formatMoney(initiative.revenueScenarios?.good ?? 0)}
                 </span>
               </div>
             )}

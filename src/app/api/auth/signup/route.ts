@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { readRequireEmailVerification } from "@/lib/auth/email-verification-setting";
+import { readRegistrationOpen, REGISTRATION_CLOSED_MESSAGE } from "@/lib/auth/registration-setting";
 import {
   DIRECT_SIGNUP_SOURCE,
   DIRECT_SIGNUP_SOURCE_KEY,
@@ -36,6 +37,7 @@ export const runtime = "nodejs";
  *   400 { error: "invalid", message }        validation failed
  *   409 { error: "verification_required" }   switch is on: use the old flow
  *   409 { error: "exists" }                  address already registered
+ *   403 { error: "registration_closed" }     the admin closed new registrations
  *   429 { error: "rate_limited" }
  *   500 { error: "server_error" }
  *
@@ -97,6 +99,16 @@ export async function POST(request: Request) {
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
       { auth: { persistSession: false, autoRefreshToken: false } }
     );
+
+    // Registration closed by the admin: create nothing. Checked before the
+    // verification switch so the page never falls back to signUp().
+    const registration = await readRegistrationOpen(adminClient);
+    if (!registration.open) {
+      return NextResponse.json(
+        { error: "registration_closed", message: REGISTRATION_CLOSED_MESSAGE },
+        { status: 403 }
+      );
+    }
 
     const setting = await readRequireEmailVerification(adminClient);
     if (setting.required) {

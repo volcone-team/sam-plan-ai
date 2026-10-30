@@ -7,6 +7,7 @@ import { RoleManagement } from "./role-management";
 import { LegalLinksSettings } from './legal-links-settings';
 import { SupportContactSettings } from './support-contact-settings';
 import { GhlSettings } from './ghl-settings';
+import { RegistrationToggle } from './registration-toggle';
 
 /* ------------------------------------------------------------------
    Types
@@ -219,6 +220,9 @@ export function AdminSettings() {
       {/* Platform Settings */}
       {activeSettingsTab === 'platform' && (
       <section aria-label="Platform Settings">
+        {/* Open / close new customer signups. Server-saved, applies at once. */}
+        <RegistrationToggle />
+
         {/*
           Browser inspection deterrent. Unlike the platform settings below
           (localStorage-only, affecting nobody but the admin's own browser),

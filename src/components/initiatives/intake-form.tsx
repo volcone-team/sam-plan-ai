@@ -111,6 +111,18 @@ export interface IntakeFormProps {
    * from what is LEFT of the product goal after their Good targets.
    */
   planInitiatives?: readonly PlanInitiativeTarget[];
+  /**
+   * EDIT MODE (the Overview's Edit, client Oct 2026: the same form as Add).
+   * The saved initiative as a draft (draftFromInitiative), and its units
+   * when its target was set in units. Absent: a fresh Add form.
+   */
+  startDraft?: IntakeDraft;
+  startUnits?: number | null;
+  /** Edit only: the target was typed in dollars, so keep the dollar field until the product changes. */
+  startInDollars?: boolean;
+  heading?: string;
+  submitLabel?: string;
+  backLabel?: string;
 }
 
 /** What the units suggestion reads from an existing initiative. */
@@ -158,8 +170,16 @@ export function IntakeForm({
   error = null,
   handoffTargets = [],
   planInitiatives = [],
+  startDraft,
+  startUnits = null,
+  startInDollars = false,
+  heading = 'New Initiative',
+  submitLabel = 'Add Initiative',
+  backLabel = 'Back',
 }: IntakeFormProps) {
-  const [draft, setDraft] = useState<IntakeDraft>(() => formStartDraft(item, config, planYear));
+  const [draft, setDraft] = useState<IntakeDraft>(() => startDraft ?? formStartDraft(item, config, planYear));
+  /** Edit: a dollar target stays in dollars until the product changes. */
+  const [dollarsOnly, setDollarsOnly] = useState(startInDollars);
   /** "No, nothing is promoting it": hides the warning for this draft only. */
   const [promotionWarningDismissed, setPromotionWarningDismissed] = useState(false);
   const [attempted, setAttempted] = useState(false);
@@ -171,7 +191,7 @@ export function IntakeForm({
    * TARGET SETTING: the units the user typed. Null = the suggestion. Reset
    * when the product changes (spec: the suggestion overwrites the units).
    */
-  const [unitsTyped, setUnitsTyped] = useState<string | null>(null);
+  const [unitsTyped, setUnitsTyped] = useState<string | null>(startUnits === null ? null : String(startUnits));
 
   const base = useId();
   const formRef = useRef<HTMLFormElement>(null);
@@ -223,7 +243,7 @@ export function IntakeForm({
       }),
     [draft.productId, item.revenueScore, layout.effectivePath, recurring, occurrences, capacity, planInitiatives, annualPlanId, products, planGoal]
   );
-  const unitsMode = unitPrice !== null && draft.revenue.mode === 'goal';
+  const unitsMode = unitPrice !== null && draft.revenue.mode === 'goal' && !dollarsOnly;
   const unitsValue = unitsTyped ?? (unitSuggestion.units === null ? '' : String(unitSuggestion.units));
   const unitsNumber = unitsValue.trim() === '' ? null : Number(unitsValue);
   useEffect(() => {
@@ -456,7 +476,7 @@ export function IntakeForm({
         </button>
         <div className="min-w-0">
           <h2 id={`${base}-heading`} className="text-lg font-semibold text-[hsl(var(--foreground))]">
-            New Initiative
+            {heading}
           </h2>
           <p className={HINT_CLASS}>{categoryLabel(item.categoryId)}</p>
         </div>
@@ -514,6 +534,7 @@ export function IntakeForm({
             onChange={e => {
               // A new product re-runs the suggestion and overwrites typed units (spec).
               setUnitsTyped(null);
+              setDollarsOnly(false);
               update({ productId: e.target.value || null });
             }}
             className={`${INPUT_CLASS} border-border`}
@@ -1140,7 +1161,7 @@ export function IntakeForm({
           onClick={onBack}
           className="rounded-[var(--radius-md)] border border-border px-4 py-2 text-sm font-medium text-[hsl(var(--foreground))] transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          Back
+          {backLabel}
         </button>
         <button
           type="submit"
@@ -1148,7 +1169,7 @@ export function IntakeForm({
           aria-busy={submitting || undefined}
           className="rounded-[var(--radius-md)] bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] transition-colors hover:bg-[hsl(var(--primary))]/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting ? 'Saving…' : 'Add Initiative'}
+          {submitting ? 'Saving…' : submitLabel}
         </button>
       </div>
     </form>

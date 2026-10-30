@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { getInviteContext, sendMemberInvite } from "@/lib/team-invite";
 import { LIMIT_KEYS } from "@/lib/billing/limits";
 import { checkLiveLimit, liveLimitResponse } from "@/lib/billing/live-limits";
+import { ADMIN_CREATED_APP_METADATA } from "@/lib/auth/registration-setting";
 
 /**
  * POST /api/team/create-member
@@ -95,6 +96,8 @@ export async function POST(request: Request) {
     // 4. Create the auth user with service role (no password — invite flow)
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
       email,
+      // Lets the account through while new registrations are closed (migration 062).
+      app_metadata: { ...ADMIN_CREATED_APP_METADATA },
       email_confirm: true, // Account usable; they'll set a password via invite link
       user_metadata: {
         // No password chosen yet — middleware confines this session to

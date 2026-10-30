@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { loadBillingConfig } from "@/lib/billing/stripe-client";
 import { firstSignupStep } from "@/lib/billing/signup-flow";
+import { readRegistrationOpen } from "@/lib/auth/registration-setting";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,14 +30,19 @@ export async function GET() {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    const config = await loadBillingConfig(db);
+    const [config, registration] = await Promise.all([loadBillingConfig(db), readRegistrationOpen(db)]);
 
     const step = firstSignupStep({
       trialEnabled: config.trialEnabled,
       stripeEnabled: config.stripeEnabled,
     });
 
-    return NextResponse.json({ requiresPlanFirst: step === "choose_plan" });
+    // registrationOpen: the admin's switch (migration 062). Public on purpose:
+    // the signup page shows its "not accepting registrations" notice from it.
+    return NextResponse.json({
+      requiresPlanFirst: step === "choose_plan",
+      registrationOpen: registration.open,
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[billing/signup-flow] failed:", message);
@@ -47,6 +53,6 @@ export async function GET() {
      * entitlement gate, whereas a signup page that refuses to load loses the
      * customer for good.
      */
-    return NextResponse.json({ requiresPlanFirst: false });
+    return NextResponse.json({ requiresPlanFirst: false, registrationOpen: true });
   }
 }

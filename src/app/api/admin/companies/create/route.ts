@@ -9,6 +9,7 @@ import { newCompanyGateAction } from "@/lib/access/portal-access";
 import { isMissingColumnError } from "@/lib/supabase/missing-column";
 import { ensureSubscriptionRow } from "@/lib/billing/subscription-row";
 import { applyComp, parseCreateGrant, createGrantErrorMessage } from "@/lib/billing/comp";
+import { ADMIN_CREATED_APP_METADATA } from "@/lib/auth/registration-setting";
 
 /**
  * POST /api/admin/companies/create
@@ -227,6 +228,8 @@ export async function POST(request: Request) {
     // 4. Create the auth user (no password — invite flow, skip email verification)
     const { data: newUser, error: authError } = await adminClient.auth.admin.createUser({
       email: ownerEmail,
+      // Lets the account through while new registrations are closed (migration 062).
+      app_metadata: { ...ADMIN_CREATED_APP_METADATA },
       email_confirm: true,
       user_metadata: {
         // No password chosen yet — middleware confines this session to
