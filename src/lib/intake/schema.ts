@@ -659,9 +659,10 @@ export const FIELD_COPY: Record<
   average_price: {
     label: "Average revenue per client",
     helper:
-      "Enter what one client typically pays you for this product. For recurring or " +
-      "subscription offers, use the total you expect to collect from a client over " +
-      "the life of their relationship — not the monthly amount.",
+      "Enter what one client typically pays you for this product. For a subscription, " +
+      "enter the AVERAGE revenue you receive from one client per year — allow for " +
+      "people who cancel part-way (e.g. 7 months at $100 is $700). Your targets are " +
+      "units × this figure.",
   },
   units_in_period: { label: "How many do you want to sell in this plan period?" },
 

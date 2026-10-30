@@ -159,7 +159,6 @@ export function metricsScenarios(
 export interface RevenueAnswers {
   product?: { price?: number | null } | null;
   attrs?: { entry_price?: number | null } | null;
-  vip_price?: number | null;
   host_fee?: number | null;
   /** ISO dates (YYYY-MM-DD or full ISO), by name. */
   dates?: Readonly<Partial<Record<NamedDate, string | null>>>;
@@ -232,8 +231,6 @@ export function resolvePrice(source: PriceSource, answers: RevenueAnswers): numb
       return positive(answers.product?.price);
     case "attrs.entry_price":
       return positive(answers.attrs?.entry_price);
-    case "vip_price":
-      return positive(answers.vip_price);
     case "host_fee":
       return positive(answers.host_fee);
   }

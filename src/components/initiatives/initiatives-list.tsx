@@ -6,6 +6,16 @@ import type { Initiative } from '@/types';
 import type { DifficultyDimensions } from '@/types/initiative-type.types';
 import { findPerformerByName, type RankedPerformer } from '@/lib/top-performers';
 import { InitiativeCard } from './initiative-card';
+import { occurrenceCards, occurrenceLabel } from '@/lib/initiatives/occurrence-cards';
+import { parseDateOnly, toDateOnly } from '@/lib/plan-dates';
+
+/** Does a YYYY-MM-DD fall in any of the "Q1 2027" filters? No filter = yes. */
+function inQuarters(date: string, quarters: readonly string[]): boolean {
+  if (quarters.length === 0) return true;
+  const year = Number(date.slice(0, 4));
+  const q = Math.floor((Number(date.slice(5, 7)) - 1) / 3) + 1;
+  return quarters.some(f => f === `Q${q} ${year}`);
+}
 import { InitiativesFilters, type FilterOptions } from './initiatives-filters';
 import { EmptyState } from '@/components/empty-state';
 import { LoadingState } from '@/components/loading-state';
@@ -30,6 +40,8 @@ export interface InitiativesListProps {
   lastYearRanking?: RankedPerformer[];
   onInitiativeClick?: (id: string) => void;
   onRemoveInitiative?: (id: string) => void;
+  /** Plan horizon end: a recurring series shows one card per occurrence up to it. */
+  planEnd?: string | null;
 }
 
 type SortOption = 'date-created' | 'status' | 'revenue';
@@ -48,6 +60,7 @@ export function InitiativesList({
   lastYearRanking,
   onInitiativeClick,
   onRemoveInitiative,
+  planEnd = null,
 }: InitiativesListProps) {
   const [filters, setFilters] = useState<FilterOptions>({
     search: '',
@@ -94,8 +107,8 @@ export function InitiativesList({
         return false;
       }
 
-      // Quarter filter
-      if (filters.quarter.length > 0) {
+      // Quarter filter. A recurring series is filtered per occurrence below.
+      if (filters.quarter.length > 0 && initiative.kind !== 'recurring') {
         const eventDate = initiative.eventDate || initiative.activationDate;
         // Undated (unscheduled) initiatives are in no quarter.
         if (!eventDate) return false;
@@ -220,7 +233,20 @@ export function InitiativesList({
         />
       ) : (
         <div className="grid gap-4 sm:gap-6 grid-cols-1 md:grid-cols-2">
-          {sortedInitiatives.map(initiative => {
+          {sortedInitiatives.flatMap(initiative => {
+            /*
+             * A recurring series is shown as one card per occurrence (client,
+             * Oct 2026), past ones included. It is still ONE initiative: every
+             * card opens it, and only the first offers Remove (which removes
+             * the series).
+             */
+            const today = toDateOnly(new Date());
+            const cards = occurrenceCards(initiative, planEnd, today).filter(c => inQuarters(c.date, filters.quarter));
+            if (cards.length === 0 && initiative.kind === 'recurring' && filters.quarter.length > 0) {
+              const d = initiative.eventDate || initiative.activationDate;
+              if (!d || !inQuarters(toDateOnly(d), filters.quarter)) return [];
+            }
+            return (cards.length > 0 ? cards : [null]).map(card => {
             const initiativeType = initiativeTypes.find(
               t => t.id === initiative.initiativeTypeId
             );
@@ -230,24 +256,30 @@ export function InitiativesList({
               ? findPerformerByName(lastYearRanking, initiative.name)
               : undefined;
 
+            const shown = card
+              ? { ...initiative, eventDate: parseDateOnly(card.date), revenueScenarios: card.scenarios }
+              : initiative;
             return (
               <InitiativeCard
-                key={initiative.id}
-                initiative={initiative}
+                key={card ? `${initiative.id}:${card.scheduled}` : initiative.id}
+                initiative={shown}
                 initiativeTypeName={initiativeType?.name || 'Unknown Type'}
                 channel={initiativeType?.channel}
                 difficulty={initiativeType?.difficulty}
                 productName={product?.name || 'Unknown Product'}
-                actuals={actualsByInitiative?.get(initiative.id)}
+                // Series actuals are not split by occurrence yet (needs migration 046).
+                actuals={card ? undefined : actualsByInitiative?.get(initiative.id)}
                 lastYear={
                   lastYearPerformer
                     ? { rank: lastYearPerformer.rank, revenue: lastYearPerformer.revenue }
                     : undefined
                 }
+                occurrence={card ? { label: occurrenceLabel(card), past: card.past } : undefined}
                 onViewDetails={onInitiativeClick}
-                onRemove={onRemoveInitiative}
+                onRemove={!card || card.index === 1 ? onRemoveInitiative : undefined}
               />
             );
+            });
           })}
         </div>
       )}

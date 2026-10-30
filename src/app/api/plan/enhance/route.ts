@@ -12,6 +12,8 @@ import { LIMIT_KEYS } from "@/lib/billing/limits";
 import { toDateOnly, todayDateOnly } from "@/lib/plan-dates";
 import { loadCompanyFit, partitionLibrary, rejectionReason } from "@/lib/recommend/company-eligibility";
 import { suggestionChannel } from "@/lib/initiatives/suggestion-initiative";
+import { ENHANCE_SYSTEM_PROMPT, buildPlanSummary } from "@/lib/plans/enhance-prompt";
+import { buildSuggestionRows } from "@/lib/plans/suggestion-rows";
 
 export const maxDuration = 60;
 
@@ -27,46 +29,6 @@ const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5-20250929";
  *
  * Returns: { batchId, count } so the UI can load the review screen.
  */
-const ENHANCE_SYSTEM_PROMPT = `You are SAM Plan AI, a strategic revenue planning assistant.
-
-You are given a business's CURRENT revenue plan (products, initiatives, targets).
-Your job is to suggest IMPROVEMENTS — you are NOT rewriting the plan.
-
-Return ONLY valid JSON (no markdown) in this exact shape:
-
-{
-  "suggestions": [
-    {
-      "type": "new_initiative" | "budget_change" | "date_change" | "target_change" | "product_update",
-      "targetName": "string | null",   // name of the existing initiative/product this applies to; null for new_initiative
-      "title": "string",               // short, plain-language summary of the suggestion
-      "rationale": "string",           // one sentence: why you suggest this
-      "current": { },                  // current value(s) for change types; {} for new_initiative
-      "proposed": { }                  // proposed value(s)
-    }
-  ]
-}
-
-Rules:
-- Suggest 3-8 high-value improvements. Quality over quantity.
-- DATES MUST BE IN THE FUTURE. The CURRENT DATE and the PLAN YEAR are given below.
-  Never propose a date in the past or in an earlier year — the work could not be
-  done. Every activationMonth you return must fall on or after the current date
-  and within the plan year.
-- Use a full ISO date ("YYYY-MM-DD") for activationMonth, not a bare month
-  number, so there is no ambiguity about which year you mean.
-- new_initiative: propose "proposed" as { name, description, libraryKey, activationMonth, plannedBudget, revenueBetter, tasks }
-  - libraryKey MUST be one of the key= values from the INITIATIVE LIBRARY below. Do not invent one.
-  - tasks is a FALLBACK only: [{ name, description, daysBeforeEvent (positive), estimatedHours, priority }].
-    Where the workbook has an authored task template for the chosen libraryKey it is used instead of yours.
-- budget_change: "current" as { plannedBudget }, "proposed" as { plannedBudget }
-- date_change: "current" as { activationMonth }, "proposed" as { activationMonth }
-- target_change: "current" as { baselineRevenue?, stretchRevenue? }, "proposed" as { baselineRevenue?, stretchRevenue? }
-- product_update: "current" as { price? }, "proposed" as { price?, note? }
-- Base suggestions on what's realistic for their budget, team, and what has worked.
-- Every suggestion must be actionable and specific. No vague advice.
-- Do NOT suggest deleting anything. Only additions and adjustments.
-`;
 
 export async function POST(request: Request) {
   // Hoisted so the outer catch can log a FAILED enhancement event. They stay
@@ -208,29 +170,7 @@ export async function POST(request: Request) {
     console.log("[plan/enhance] Loaded plan:", products?.length || 0, "products,", initiatives.length, "initiatives");
 
     // 3. Build the plan summary for Claude
-    const planSummary = `CURRENT PLAN
-
-CURRENT DATE: ${today}
-PLAN YEAR: ${planYear}
-EARLIEST ALLOWED DATE: ${today}
-LATEST ALLOWED DATE: ${planYear}-12-31
-
-Every date you propose must fall between the earliest and latest allowed dates
-above. Anything earlier is in the past and cannot be executed.
-
-Revenue Targets:
-- Baseline: $${annualPlan?.baseline_revenue || company?.baseline_revenue || 0}
-- Stretch: $${annualPlan?.stretch_revenue || company?.stretch_revenue || 0}
-- Operating Budget: $${annualPlan?.operating_budget || company?.operating_budget || 0}
-- Target Revenue: $${company?.target_revenue || 0}
-
-Products:
-${(products || []).map((p) => `- ${p.name} ($${p.price}, ${p.revenue_type})`).join("\n") || "None"}
-
-Initiatives (name | channel | status | activation date | budget | projected revenue):
-${initiatives.map((i: any) => `- ${i.name} | ${i.initiative_types?.channel || "unknown"} | ${i.status} | ${i.activation_date} | $${i.planned_budget} | $${i.revenue_better}`).join("\n")}
-
-Suggest improvements to this plan as JSON.`;
+    const planSummary = buildPlanSummary({ today, planYear, company, annualPlan, products, initiatives });
 
     // 4. Call Claude
     if (!process.env.ANTHROPIC_API_KEY) {
@@ -296,12 +236,8 @@ Suggest improvements to this plan as JSON.`;
       return NextResponse.json({ error: "The AI did not return any suggestions. Try again." }, { status: 500 });
     }
 
-    // 6. Map AI targetName back to the real initiative/product id where possible
-    const initByName = new Map((initiatives || []).map((i) => [i.name.toLowerCase(), i.id]));
-    const prodByName = new Map((products || []).map((p) => [p.name.toLowerCase(), p.id]));
-
+    // 6. Map the AI suggestions to pending rows (target ids resolved by name)
     const batchId = randomUUID();
-    const validTypes = ["new_initiative", "budget_change", "date_change", "target_change", "product_update"];
 
     /**
      * FIT, enforced server-side: a new_initiative whose library key fails FIT
@@ -320,28 +256,7 @@ Suggest improvements to this plan as JSON.`;
       return !reason;
     };
 
-    const rows = suggestions
-      .filter((s: any) => validTypes.includes(s.type))
-      .filter(passesFit)
-      .map((s: any) => {
-        const name = (s.targetName || "").toLowerCase();
-        let targetId: string | null = null;
-        if (s.type === "product_update") targetId = prodByName.get(name) || null;
-        else if (s.type !== "new_initiative" && s.type !== "target_change") targetId = initByName.get(name) || null;
-
-        return {
-          company_id: companyId,
-          batch_id: batchId,
-          suggestion_type: s.type,
-          target_id: targetId,
-          target_label: s.targetName || null,
-          title: String(s.title || "Suggestion").slice(0, 300),
-          rationale: String(s.rationale || "").slice(0, 500),
-          current_value: s.current || {},
-          proposed_value: s.proposed || {},
-          status: "pending",
-        };
-      });
+    const rows = buildSuggestionRows(suggestions, { companyId, batchId, initiatives, products, passesFit });
 
     // 7. Clear any older pending suggestions for this company, then insert the new batch.
     //    (A fresh enhance run replaces stale pending suggestions.)

@@ -25,12 +25,13 @@
  * day stays the same calendar day in every timezone.
  */
 import { addDays, daysInMonth, parseDateOnly, toDateOnly, todayDateOnly, type DateOnly } from '@/lib/plan-dates';
+import { lastOccurrenceOf, type OccurrenceFields } from '@/lib/initiatives/occurrences';
 
 export type DatePrecision = 'day' | 'month';
 type DateLike = Date | string | null | undefined;
 
 /** The fields every rule here reads. Matches `Initiative` and raw-ish rows alike. */
-export interface ScheduleFields {
+export interface ScheduleFields extends OccurrenceFields {
   kind?: string | null;
   activationDate?: DateLike;
   eventDate?: DateLike;
@@ -168,7 +169,13 @@ export interface HorizonSpan {
 export function horizonSpan(i: ScheduleFields): HorizonSpan | null {
   const start = launchDate(i);
   if (start === null) return null;
-  const end = revenueCloseDate(i);
+  /*
+   * A RECURRING series runs to its last occurrence (open-ended when none is
+   * recorded), not to the close date: that is one occurrence's cart close
+   * (client, Oct 2026). Ending it there dropped a monthly webinar out of
+   * every month after its first.
+   */
+  const end = i.kind === 'recurring' ? lastOccurrenceOf(i) : revenueCloseDate(i);
   if (end !== null && end < start) return { start, end: start };
   return { start, end };
 }

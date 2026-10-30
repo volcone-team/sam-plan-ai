@@ -93,7 +93,7 @@ export async function GET() {
     const [loaded, oneLinerRes] = await Promise.all([
       loadLibraryConfigs(db),
       // The config record does not carry the one-liner.
-      db.from("wb_initiative_library").select("initiative_key, one_liner"),
+      db.from("wb_initiative_library").select("initiative_key, one_liner, revenue_score"),
     ]);
     if (!loaded.ok || oneLinerRes.error) {
       const detail = !loaded.ok ? loaded.error : oneLinerRes.error!.message;
@@ -109,8 +109,17 @@ export async function GET() {
         (r) => [r.initiative_key, r.one_liner]
       )
     );
+    const revenueScores = new Map(
+      ((oneLinerRes.data ?? []) as { initiative_key: string; revenue_score: number | null }[]).map(
+        (r) => [r.initiative_key, typeof r.revenue_score === "number" ? r.revenue_score : null]
+      )
+    );
     const offered = loaded.records.filter(isOfferedInIntakePicker);
-    const items = toPickerItems(offered, oneLiners);
+    // The Revenue score rides along for the New Initiative form's units suggestion.
+    const items = toPickerItems(offered, oneLiners).map((item) => ({
+      ...item,
+      revenueScore: revenueScores.get(item.key) ?? null,
+    }));
     const configs = pickerConfigs(offered, items.map((i) => i.key));
 
     return NextResponse.json({

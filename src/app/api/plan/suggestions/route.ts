@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { toClientSuggestions } from "@/lib/plans/suggestion-rows";
 
 /**
  * GET /api/plan/suggestions
@@ -51,18 +52,7 @@ export async function GET() {
 
     console.log("[plan/suggestions] Found", data?.length || 0, "pending suggestions");
 
-    const suggestions = (data || []).map((s) => ({
-      id: s.id,
-      batchId: s.batch_id,
-      type: s.suggestion_type,
-      targetId: s.target_id,
-      targetLabel: s.target_label,
-      title: s.title,
-      rationale: s.rationale,
-      current: s.current_value,
-      proposed: s.proposed_value,
-      status: s.status,
-    }));
+    const suggestions = toClientSuggestions(data);
 
     return NextResponse.json({ suggestions });
   } catch (err: any) {

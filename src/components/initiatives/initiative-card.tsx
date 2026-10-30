@@ -39,6 +39,8 @@ export interface InitiativeCardProps {
   lastYear?: { rank: number; revenue: number };
   onViewDetails?: (id: string) => void;
   onRemove?: (id: string) => void;
+  /** One occurrence of a recurring series: its label ("Occurrence 3 of 12") and whether it is past. */
+  occurrence?: { label: string; past: boolean };
 }
 
 const STATUS_STYLES: Record<string, { label: string; dot: string; pill: string }> = {
@@ -198,6 +200,7 @@ export function InitiativeCard({
   lastYear,
   onViewDetails,
   onRemove,
+  occurrence,
 }: InitiativeCardProps) {
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -207,7 +210,8 @@ export function InitiativeCard({
   // D2: actual spend is Σ the initiative's recorded expenses (supplied by the
   // caller). The hand-typed initiative.actualSpend is not read.
   const spend = actuals?.spend || 0;
-  const expectedRevenue = initiative.revenueScenarios?.better || 0;
+  // One target per initiative: Good (spec). The separate "expected" (Better) figure is retired.
+  const expectedRevenue = initiative.revenueScenarios?.good || 0;
   const plannedBudget = initiative.plannedBudget || 0;
   const net = actualRevenue - spend;
   // No spend means ROI is undefined, not Infinity and not -100%.
@@ -254,6 +258,19 @@ export function InitiativeCard({
           <span className="rounded-full bg-[hsl(var(--background-muted))] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--foreground-muted))]">
             {initiative.kind}
           </span>
+          {occurrence && (
+            <span
+              className={
+                'rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ' +
+                (occurrence.past
+                  ? 'bg-[hsl(var(--background-muted))] text-[hsl(var(--foreground-subtle))]'
+                  : 'bg-[hsl(var(--primary)_/_0.12)] text-[hsl(var(--primary))]')
+              }
+            >
+              {occurrence.label}
+              {occurrence.past ? ' · past' : ''}
+            </span>
+          )}
           {unscheduled && (
             <span
               className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"
@@ -313,7 +330,7 @@ export function InitiativeCard({
             {formatCurrency(actualRevenue)}
           </span>
           <span className="ml-1 text-xs text-[hsl(var(--foreground-muted))]">
-            / {formatCurrency(expectedRevenue)} expected
+            / {formatCurrency(expectedRevenue)} Good
           </span>
         </div>
         {relativeDate && (

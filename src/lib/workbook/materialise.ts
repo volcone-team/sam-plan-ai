@@ -9,7 +9,13 @@
  * Pure: takes templates and an event date, returns rows. No database.
  */
 
-import { computeTaskDueDate, clampNotBefore, toDateOnly, type DateOnly } from '@/lib/plan-dates';
+import {
+  computeSignedTaskDueDate,
+  computeTaskDueDate,
+  clampNotBefore,
+  toDateOnly,
+  type DateOnly,
+} from '@/lib/plan-dates';
 
 export interface TaskTemplate {
   taskNumber: number | null;
@@ -21,6 +27,16 @@ export interface TaskTemplate {
   dependsOn: number[];
   notes?: string | null;
   displayOrder: number;
+  /** Workbook section heading (migration 061). Null = no heading. */
+  section?: string | null;
+  /**
+   * Which template this row came from, when several are combined (the
+   * initiative's own plus sections pulled in by intake answers). Task numbers
+   * restart per group and section, so dependencies resolve within one.
+   */
+  group?: string | null;
+  /** "cart": counts back from when the cart opens, not from the event (sales funnels). */
+  anchor?: 'cart' | null;
 }
 
 export interface MaterialisedTask {
@@ -41,16 +57,8 @@ export interface MaterialiseOptions {
   floor: Date | string;
   /** Supplies ids so dependencies resolve in a single pass. Injectable for tests. */
   newId?: () => string;
-}
-
-/**
- * Priority is not a workbook column, so it is DERIVED from the dependency graph
- * rather than invented: a task other tasks wait on is blocking, and blocking
- * work matters more than leaf work. Everything else stays medium.
- */
-function derivePriority(template: TaskTemplate, blockers: Set<number>): MaterialisedTask['priority'] {
-  if (template.taskNumber !== null && blockers.has(template.taskNumber)) return 'high';
-  return 'medium';
+  /** When the cart opens; tasks anchored to it count back from here. */
+  cartOpens?: Date | string | null;
 }
 
 /** Role has no column on `tasks`, so it is folded into the description. */
@@ -69,39 +77,95 @@ export function materialiseTasks(
   if (!templates || templates.length === 0) return [];
   const newId = options.newId ?? (() => crypto.randomUUID());
 
-  const ordered = [...templates].sort((a, b) => a.displayOrder - b.displayOrder);
+  // Source order: groups in the order they were combined, then sheet order.
+  const groupRank = new Map<string, number>();
+  for (const t of templates) {
+    const g = t.group ?? '';
+    if (!groupRank.has(g)) groupRank.set(g, groupRank.size);
+  }
+  const ordered = templates
+    .map((t, i) => ({ t, i }))
+    .sort(
+      (a, b) =>
+        (groupRank.get(a.t.group ?? '') ?? 0) - (groupRank.get(b.t.group ?? '') ?? 0) ||
+        a.t.displayOrder - b.t.displayOrder ||
+        a.i - b.i
+    )
+    .map((x) => x.t);
 
-  // Ids first, so `dependsOn` task numbers can be turned into real ids without a
-  // second database round trip.
-  const idByTaskNumber = new Map<number, string>();
+  /*
+   * Task numbers restart in every section and every combined template (the
+   * OPS tab numbers its "selling" section 18-37 again), so a dependency is
+   * looked up within its own group and section. Looking it up across the
+   * whole list pointed later sections at the first section's tasks.
+   */
+  const scope = (t: TaskTemplate) => `${t.group ?? ''}\u0000${t.section ?? ''}`;
+  const idByNumber = new Map<string, string>();
   const ids = ordered.map((t) => {
     const id = newId();
-    if (t.taskNumber !== null && !idByTaskNumber.has(t.taskNumber)) {
-      idByTaskNumber.set(t.taskNumber, id);
+    if (t.taskNumber !== null) {
+      const k = `${scope(t)}\u0000${t.taskNumber}`;
+      if (!idByNumber.has(k)) idByNumber.set(k, id);
     }
     return id;
   });
 
-  // Task numbers that something else depends on.
-  const blockers = new Set<number>();
-  for (const t of ordered) for (const d of t.dependsOn) blockers.add(d);
+  const blockers = new Set<string>();
+  for (const t of ordered) for (const d of t.dependsOn) blockers.add(`${scope(t)}\u0000${d}`);
 
-  return ordered.map((t, i) => ({
+  const built = ordered.map((t, i) => ({
     id: ids[i],
     name: t.name,
     description: buildDescription(t),
-    // Counted back from the event, floored so nothing is due before the plan
-    // exists. The lead time is the workbook's, not the model's.
-    dueDate: toDateOnly(clampNotBefore(computeTaskDueDate(options.eventDate, t.leadDays), options.floor)),
+    // Counted from the event (positive lead = before, negative = after),
+    // floored so nothing is due before the plan exists. The lead time is the
+    // workbook's, not the model's.
+    dueDate: toDateOnly(
+      clampNotBefore(
+        computeSignedTaskDueDate(t.anchor === 'cart' && options.cartOpens ? options.cartOpens : options.eventDate, t.leadDays),
+        options.floor
+      )
+    ),
     estimatedHours: typeof t.durationHours === 'number' && Number.isFinite(t.durationHours)
       ? t.durationHours
       : 0,
-    priority: derivePriority(t, blockers),
-    // A dependency on a task number that isn't in this template is dropped
+    // Priority is derived, not a workbook column: a task others wait on is high.
+    priority: (t.taskNumber !== null && blockers.has(`${scope(t)}\u0000${t.taskNumber}`) ? 'high' : 'medium') as MaterialisedTask['priority'],
+    // A dependency on a task number that isn't in this section is dropped
     // rather than guessed at.
-    dependencyIds: t.dependsOn.map((n) => idByTaskNumber.get(n)).filter((v): v is string => !!v),
-    displayOrder: i,
+    dependencyIds: t.dependsOn
+      .map((n) => idByNumber.get(`${scope(t)}\u0000${n}`))
+      .filter((v): v is string => !!v),
+    order: i,
   }));
+
+  /*
+   * ONE TASK PER NAME (client: "so much task duplication"). Combined sections
+   * repeat steps ("Define pricing" in OPS and in Funnels); the one due
+   * EARLIEST is kept, the rest are dropped and anything depending on them
+   * depends on the kept one instead.
+   */
+  const keepByName = new Map<string, (typeof built)[number]>();
+  const replacedBy = new Map<string, string>();
+  for (const task of built) {
+    const k = task.name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const kept = keepByName.get(k);
+    if (!kept) { keepByName.set(k, task); continue; }
+    const [winner, loser] = task.dueDate < kept.dueDate ? [task, kept] : [kept, task];
+    keepByName.set(k, winner);
+    replacedBy.set(loser.id, winner.id);
+    if (loser.priority === 'high') winner.priority = 'high';
+  }
+  const resolve = (id: string) => { let cur = id; while (replacedBy.has(cur)) cur = replacedBy.get(cur)!; return cur; };
+
+  // In date order, so the list reads as the plan runs.
+  return [...keepByName.values()]
+    .sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : a.order - b.order))
+    .map(({ order: _o, ...task }, i) => {
+      void _o;
+      const deps = [...new Set(task.dependencyIds.map(resolve))].filter((d) => d !== task.id);
+      return { ...task, dependencyIds: deps, displayOrder: i };
+    });
 }
 
 /**
@@ -112,7 +176,9 @@ export function materialiseTasks(
 export function templateRunwayDays(templates: readonly TaskTemplate[]): number {
   let max = 0;
   for (const t of templates || []) {
-    const lead = Math.abs(Math.trunc(t.leadDays || 0));
+    // Only work BEFORE the event needs runway; a follow-up (negative lead)
+    // happens after it and must not push the event later.
+    const lead = Math.max(0, Math.trunc(t.leadDays || 0));
     if (lead > max) max = lead;
   }
   return max;

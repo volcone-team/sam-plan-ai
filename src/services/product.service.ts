@@ -282,6 +282,11 @@ export class ProductService {
       revenueType: (row.revenue_type as Product['revenueType']) || 'one-time',
       // Migration 055; absent or null on a recurring row reads as monthly.
       recurringInterval: readInterval(row.revenue_type, row.recurring_interval),
+      // Migration 061: units the user wants to sell in the plan (product goal = price x this).
+      goalUnits:
+        row.goal_units === null || row.goal_units === undefined || !Number.isFinite(Number(row.goal_units))
+          ? null
+          : Number(row.goal_units),
       ticketTier: (row.ticket_tier as Product['ticketTier']) || 'mid',
       isActive: row.is_active as boolean ?? true,
       displayOrder: (row.display_order as number) ?? 0,

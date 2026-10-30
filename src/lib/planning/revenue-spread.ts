@@ -6,10 +6,10 @@
  * by the number of runs). Putting all of it in one month made a weekly webinar
  * look like a single $75,000 event. This module spreads it:
  *
- *   - RECURRING with a frequency: split evenly across its run dates, from the
- *     first event to the end of the window (plan end, or the revenue close
- *     date when that is earlier). A weekly run lands ~4 times a month, a
- *     quarterly one once a quarter.
+ *   - RECURRING with a frequency: split evenly across its occurrences, from
+ *     the first event to the LAST OCCURRENCE (else the plan end). The revenue
+ *     close date does not end the series; it is each occurrence's cart close.
+ *     A weekly run lands ~4 times a month, a quarterly one once a quarter.
  *   - ONGOING / evergreen: split evenly across the months it is active, launch
  *     month to the end of the window.
  *   - Everything else: all of it in the event month (else the launch month).
@@ -23,6 +23,12 @@ import { instanceDates, type RecurrenceFrequency } from '@/lib/initiatives/recur
 import { RECURRENCE_FREQUENCIES } from '@/lib/intake-v3/library-config';
 import { isOngoing, launchDate, type ScheduleFields } from '@/lib/initiatives/schedule';
 import { toDateOnly, type DateOnly } from '@/lib/plan-dates';
+import {
+  lastOccurrenceOf,
+  occurrenceOverridesOf,
+  perOccurrenceOf,
+  type OccurrenceFields,
+} from '@/lib/initiatives/occurrences';
 
 export interface Scenarios {
   good: number;
@@ -30,7 +36,7 @@ export interface Scenarios {
   best: number;
 }
 
-export interface SpreadRow extends ScheduleFields {
+export interface SpreadRow extends ScheduleFields, OccurrenceFields {
   revenueScenarios?: Partial<Scenarios> | null;
   repeatFrequency?: string | null;
 }
@@ -99,15 +105,51 @@ function windowEnd(i: SpreadRow, start: DateOnly, planEnd: DateOnly | null): Dat
 }
 
 /**
+ * Where a recurring series ends: its LAST OCCURRENCE when one is recorded,
+ * else the plan end (else twelve months on).
+ *
+ * NOT the revenue close date. That is the cart / round close for an
+ * occurrence (client, Oct 2026): letting it end the series gave a monthly
+ * webinar whose cart closed three days later exactly one occurrence.
+ */
+function seriesEnd(i: SpreadRow, first: DateOnly, planEnd: DateOnly | null): DateOnly {
+  return lastOccurrenceOf(i) ?? planEnd ?? twelveMonthsFrom(first);
+}
+
+/**
  * Every run date of a recurring initiative from its first event up to the
- * window end. A first run already past the end still returns that one date,
+ * series end. A first run already past the end still returns that one date,
  * so its revenue is never dropped.
  */
 export function runDates(i: SpreadRow, planEnd: DateOnly | null): DateOnly[] {
+  return runSchedule(i, planEnd).map((r) => r.date);
+}
+
+/** One occurrence: the date it falls on and the date the schedule gave it. */
+export interface RunSlot {
+  date: DateOnly;
+  scheduled: DateOnly;
+}
+
+/**
+ * Every occurrence with any one-off moves applied (attrs.occurrence_overrides),
+ * in date order. The schedule itself is still worked out from the first
+ * occurrence and the frequency, so moving one occurrence never shifts the
+ * others, and the number of occurrences stays the same.
+ */
+export function runSchedule(i: SpreadRow, planEnd: DateOnly | null): RunSlot[] {
+  const moves = occurrenceOverridesOf(i);
+  return scheduledRunDates(i, planEnd)
+    .map((scheduled) => ({ scheduled, date: moves[scheduled] ?? scheduled }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.scheduled < b.scheduled ? -1 : 1));
+}
+
+/** The calculated run dates, before any one-off moves. */
+export function scheduledRunDates(i: SpreadRow, planEnd: DateOnly | null): DateOnly[] {
   const frequency = recurrenceOf(i);
   const first = day(i.eventDate) ?? launchDate(i);
   if (!frequency || !first) return [];
-  const end = windowEnd(i, first, planEnd);
+  const end = seriesEnd(i, first, planEnd);
   if (end < first) return [first];
   const out: DateOnly[] = [];
   for (let y = Number(first.slice(0, 4)); y <= Number(end.slice(0, 4)); y++) {
@@ -174,10 +216,26 @@ function share(key: string, fraction: number, total: Scenarios, runs: number, da
   };
 }
 
-/** Per-run figures for a recurring initiative, or null when it has no runs. */
+/**
+ * Per-occurrence figures for a recurring initiative, or null when it has no
+ * occurrences.
+ *
+ * When the per-occurrence Good was recorded (migration 061, or attrs before
+ * it) that is the figure, and Better / Best keep the stored total's ratios.
+ * Otherwise (older rows) the stored total divided by the occurrences.
+ */
 export function perRun(i: SpreadRow, planEnd: DateOnly | null): (Scenarios & { runs: number }) | null {
   const runs = runDates(i, planEnd).length;
   if (runs === 0) return null;
   const t = scenariosOf(i);
+  const recorded = perOccurrenceOf(i);
+  if (recorded !== null && t.good > 0) {
+    return {
+      good: recorded,
+      better: (recorded * t.better) / t.good,
+      best: (recorded * t.best) / t.good,
+      runs,
+    };
+  }
   return { good: t.good / runs, better: t.better / runs, best: t.best / runs, runs };
 }

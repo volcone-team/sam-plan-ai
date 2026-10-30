@@ -41,9 +41,12 @@ import {
   marketingReveals,
   setDraftKind,
   projectedScenarios,
+  draftOccurrences,
   type DraftDate,
   type IntakeDraft,
 } from '@/lib/intake-v3/universal-form';
+import { OCCURRENCE_COPY } from '@/lib/initiatives/occurrences';
+import { ownProductGoal, suggestUnitsForNew, targetSourceFor, usablePrice } from '@/lib/planning/targets';
 import { handoffOptions, handoffWarnings, type HandoffInitiative } from '@/lib/initiatives/lead-handoff';
 import {
   AD_PLATFORM_OPTIONS,
@@ -75,6 +78,7 @@ import {
   pathOptions,
   revenueView,
   setDatePrecision,
+  submitBlockedNotice,
   togglePromotion,
   type Option,
 } from './intake-form-view';
@@ -82,8 +86,11 @@ import {
 export interface IntakeFormProps {
   item: PickerItem;
   config: LibraryRecordConfig;
-  products: Array<{ id: string; name: string }>;
+  /** Price and goal units drive the units x price target (client spec, Oct 2026). */
+  products: Array<{ id: string; name: string; price?: number | null; goalUnits?: number | null }>;
   annualPlanId: string;
+  /** The plan's Good target: a product without its own goal shares what is left of it. */
+  planGoal?: number | null;
   /**
    * The plan's year. An ongoing initiative's close date defaults to 31
    * December of it (else of the start date's year).
@@ -99,6 +106,19 @@ export interface IntakeFormProps {
    * block's "Where do these leads go?". Only those in `annualPlanId` are listed.
    */
   handoffTargets?: readonly HandoffInitiative[];
+  /**
+   * The plan's existing initiatives, for the units suggestion: it is taken
+   * from what is LEFT of the product goal after their Good targets.
+   */
+  planInitiatives?: readonly PlanInitiativeTarget[];
+}
+
+/** What the units suggestion reads from an existing initiative. */
+export interface PlanInitiativeTarget {
+  annualPlanId?: string | null;
+  productId?: string | null;
+  conversionPath?: string | null;
+  revenueScenarios?: { good?: number | null } | null;
 }
 
 const INPUT_CLASS =
@@ -131,11 +151,13 @@ export function IntakeForm({
   products,
   annualPlanId,
   planYear = null,
+  planGoal = null,
   onBack,
   onSubmit,
   submitting = false,
   error = null,
   handoffTargets = [],
+  planInitiatives = [],
 }: IntakeFormProps) {
   const [draft, setDraft] = useState<IntakeDraft>(() => formStartDraft(item, config, planYear));
   /** "No, nothing is promoting it": hides the warning for this draft only. */
@@ -145,6 +167,11 @@ export function IntakeForm({
   const [failedSubmits, setFailedSubmits] = useState(0);
   /** A thrown onSubmit error, when the caller does not pass one in. */
   const [localError, setLocalError] = useState<string | null>(null);
+  /**
+   * TARGET SETTING: the units the user typed. Null = the suggestion. Reset
+   * when the product changes (spec: the suggestion overwrites the units).
+   */
+  const [unitsTyped, setUnitsTyped] = useState<string | null>(null);
 
   const base = useId();
   const formRef = useRef<HTMLFormElement>(null);
@@ -157,6 +184,57 @@ export function IntakeForm({
   const revenue = useMemo(() => revenueView(draft, config), [draft, config]);
 
   const shown = attempted ? errors : {};
+  /** Recurring: First / Last occurrence, and revenue per occurrence (client, Oct 2026). */
+  const recurring = layout.effectiveKind === 'recurring';
+  const occurrences = useMemo(() => (recurring ? draftOccurrences(draft, config) : null), [recurring, draft, config]);
+  /*
+   * TARGET SETTING (client spec, Screen 2). With a priced product the user
+   * enters UNITS; Good = units x price and is written into the draft's Good,
+   * so validation, Better / Best and the request work exactly as before.
+   * Units are pre-filled from the Revenue-score share of what is LEFT of the
+   * product goal (suggestUnitsForNew). No product, or a product with no price,
+   * keeps the typed Good field.
+   */
+  const selectedProduct = products.find(p => p.id === draft.productId) ?? null;
+  const unitPrice = usablePrice(selectedProduct?.price);
+  const capacity = Number(draft.category['capacity']);
+  const unitSuggestion = useMemo(
+    () =>
+      suggestUnitsForNew({
+        item: {
+          id: 'new',
+          productId: draft.productId,
+          revenueScore: item.revenueScore ?? null,
+          path: layout.effectivePath,
+          occurrences: recurring ? occurrences : 1,
+          capacity: Number.isFinite(capacity) && capacity > 0 ? capacity : null,
+        },
+        existing: planInitiatives
+          .filter(i => !i.annualPlanId || i.annualPlanId === annualPlanId)
+          .map((i, n) => ({
+            id: `existing-${n}`,
+            productId: i.productId ?? null,
+            revenueScore: null,
+            path: i.conversionPath ?? null,
+            good: i.revenueScenarios?.good ?? 0,
+          })),
+        products: products.map(p => ({ id: p.id, price: p.price ?? null, goalUnits: p.goalUnits ?? null })),
+        planGoal,
+      }),
+    [draft.productId, item.revenueScore, layout.effectivePath, recurring, occurrences, capacity, planInitiatives, annualPlanId, products, planGoal]
+  );
+  const unitsMode = unitPrice !== null && draft.revenue.mode === 'goal';
+  const unitsValue = unitsTyped ?? (unitSuggestion.units === null ? '' : String(unitSuggestion.units));
+  const unitsNumber = unitsValue.trim() === '' ? null : Number(unitsValue);
+  useEffect(() => {
+    if (!unitsMode) return;
+    const good =
+      unitsNumber !== null && Number.isFinite(unitsNumber) && unitsNumber >= 0
+        ? String(Math.round(Math.floor(unitsNumber) * (unitPrice ?? 0) * 100) / 100)
+        : null;
+    setDraft(d => (d.revenue.goal === good ? d : { ...d, revenue: { ...d.revenue, goal: good } }));
+  }, [unitsMode, unitsNumber, unitPrice]);
+
   const update = (patch: Partial<IntakeDraft>) => setDraft(d => ({ ...d, ...patch }));
   const setDate = (key: keyof IntakeDraft['dates'], date: DraftDate) =>
     setDraft(d => ({ ...d, dates: { ...d.dates, [key]: date } }));
@@ -179,7 +257,14 @@ export function IntakeForm({
       return;
     }
     try {
-      await onSubmit(buildCreateRequest(draft, config, { annualPlanId }));
+      const request = buildCreateRequest(draft, config, { annualPlanId });
+      // Units x price: what was set, at what price, and whether it was the suggestion.
+      if (unitsMode && unitsNumber !== null && Number.isFinite(unitsNumber) && unitPrice !== null) {
+        request.unitsGoal = Math.floor(unitsNumber);
+        request.unitPriceAtSet = unitPrice;
+        request.targetSource = targetSourceFor(Math.floor(unitsNumber), unitSuggestion.units);
+      }
+      await onSubmit(request);
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Could not save the initiative.');
     }
@@ -188,7 +273,6 @@ export function IntakeForm({
   const attachedBlocks = attachedBlockIds(layout);
   const reveals = marketingReveals(draft);
   const commission = commissionView(commissionPreview(draft, config));
-  const setVip = (patch: Partial<IntakeDraft['vip']>) => setDraft(d => ({ ...d, vip: { ...d.vip, ...patch } }));
   const setAffiliate = (patch: Partial<IntakeDraft['affiliate']>) =>
     setDraft(d => ({ ...d, affiliate: { ...d.affiliate, ...patch } }));
   const setPromoPlan = (patch: Partial<IntakeDraft['promoPlan']>) =>
@@ -223,6 +307,7 @@ export function IntakeForm({
   const unplacedErrors =
     layout.conversionPath.state === 'absent' && shown.conversionPath ? [shown.conversionPath] : [];
   const submitError = error ?? localError;
+  const blockedNotice = submitBlockedNotice(errorCount);
 
   const fieldProps = (key: string) => ({
     id: fieldDomId(base, key),
@@ -426,7 +511,11 @@ export function IntakeForm({
           <select
             id={fieldDomId(base, 'product')}
             value={draft.productId ?? ''}
-            onChange={e => update({ productId: e.target.value || null })}
+            onChange={e => {
+              // A new product re-runs the suggestion and overwrites typed units (spec).
+              setUnitsTyped(null);
+              update({ productId: e.target.value || null });
+            }}
             className={`${INPUT_CLASS} border-border`}
           >
             <option value="">Select a product (optional)...</option>
@@ -541,12 +630,30 @@ export function IntakeForm({
         {layout.eventDate.state === 'rendered' && (
           <DateField
             id={fieldDomId(base, 'dates.event')}
-            label="Event date"
+            label={recurring ? OCCURRENCE_COPY.first : 'Event date'}
+            hint={recurring ? OCCURRENCE_COPY.firstHint : undefined}
             date={draft.dates.event}
             onChange={d => setDate('event', d)}
             errorId={errorDomId(base, 'dates.event')}
             error={shown['dates.event']}
-            required={layout.effectiveKind === 'one-time'}
+            required={layout.effectiveKind === 'one-time' || recurring}
+          />
+        )}
+        {/* Recurring: where the series ends. The close date below no longer ends it. */}
+        {recurring && (
+          <DateField
+            id={fieldDomId(base, 'dates.last')}
+            label={OCCURRENCE_COPY.last}
+            hint={
+              occurrences !== null
+                ? `${OCCURRENCE_COPY.lastHint} That gives ${occurrences} occurrence${occurrences === 1 ? '' : 's'}.`
+                : OCCURRENCE_COPY.lastHint
+            }
+            date={draft.dates.last ?? { value: null, precision: 'day' }}
+            onChange={d => setDate('last', d)}
+            errorId={errorDomId(base, 'dates.last')}
+            error={shown['dates.last']}
+            required
           />
         )}
         {/* Cart block: only "Cart opens" — the cart closes on the close date below.
@@ -566,7 +673,7 @@ export function IntakeForm({
         <DateField
           id={fieldDomId(base, 'dates.close')}
           label={closeLabel}
-          hint={closeBound?.hint}
+          hint={closeBound?.hint ?? (recurring ? OCCURRENCE_COPY.closeHint : undefined)}
           date={draft.dates.close}
           onChange={d => setDate('close', d)}
           errorId={errorDomId(base, 'dates.close')}
@@ -583,13 +690,58 @@ export function IntakeForm({
               Revenue goal
             </h3>
             <p className={HINT_CLASS}>
-              Enter your Good target. Better (+10%) and Best (+20%) fill in for you; change them if you like.
+              {recurring
+                ? 'Enter what ONE occurrence earns (e.g. one webinar). Better (+10%) and Best (+20%) fill in for you; the plan total is that times the occurrences.'
+                : 'Enter your Good target. Better (+10%) and Best (+20%) fill in for you; change them if you like.'}
             </p>
           </div>
-          {revenue.lines === null ? (
+          {selectedProduct && unitPrice === null && (
+            <p role="status" className="text-xs text-amber-700 dark:text-amber-300">
+              Add a price to this product to set its target in units.{' '}
+              <a href="/products" className="font-medium underline">
+                Go to Products
+              </a>
+            </p>
+          )}
+          {unitsMode ? (
+            <div className="space-y-2">
+              <p className={HINT_CLASS}>
+                Enter the units you expect to sell{recurring ? ' per occurrence' : ''}. Good is units × price; Better and Best
+                fill in for you.
+              </p>
+              <div className="grid grid-cols-3 items-end gap-3">
+                <NumberField
+                  id={fieldDomId(base, 'units')}
+                  label={recurring ? 'Units per occurrence' : 'Units you expect to sell'}
+                  value={unitsValue}
+                  onChange={v => setUnitsTyped(v)}
+                  errorId={errorDomId(base, 'revenue.goal')}
+                  error={shown['revenue.goal']}
+                />
+                <dl className="space-y-1">
+                  <dt className={LABEL_CLASS}>Price</dt>
+                  <dd className="py-2 text-sm tabular-nums">{moneyOrDash(unitPrice)}</dd>
+                </dl>
+                <dl className="space-y-1">
+                  <dt className={LABEL_CLASS}>{recurring ? 'Good per occurrence' : 'Good'}</dt>
+                  <dd className="py-2 text-sm font-semibold tabular-nums">
+                    {moneyOrDash(unitsNumber !== null && Number.isFinite(unitsNumber) ? Math.floor(unitsNumber) * (unitPrice ?? 0) : null)}
+                  </dd>
+                </dl>
+              </div>
+              {selectedProduct && ownProductGoal({ id: selectedProduct.id, price: selectedProduct.price ?? null, goalUnits: selectedProduct.goalUnits ?? null }) === null && (
+                <p className={HINT_CLASS}>Based on your annual goal (this product has no goal of its own).</p>
+              )}
+              {unitSuggestion.units !== null && unitsTyped !== null && Number(unitsTyped) !== unitSuggestion.units && (
+                <button type="button" onClick={() => setUnitsTyped(null)} className="text-xs font-medium underline">
+                  Use the suggestion ({unitSuggestion.units} unit{unitSuggestion.units === 1 ? '' : 's'})
+                </button>
+              )}
+            </div>
+          ) : revenue.lines === null ? (
             <MoneyField
               id={fieldDomId(base, 'revenue.goal')}
-              label="Good ($)"
+              label={recurring ? 'Good ($) per occurrence' : 'Good ($)'}
               value={draft.revenue.goal === null ? '' : String(draft.revenue.goal)}
               onChange={v => setDraft(d => ({ ...d, revenue: { ...d.revenue, goal: v === '' ? null : v } }))}
               errorId={errorDomId(base, 'revenue.goal')}
@@ -644,7 +796,7 @@ export function IntakeForm({
                 <MoneyField
                   key={key}
                   id={fieldDomId(base, `revenue.${key}`)}
-                  label={key === 'better' ? 'Better (+10%)' : 'Best (+20%)'}
+                  label={`${key === 'better' ? 'Better (+10%)' : 'Best (+20%)'}${recurring ? ' per occurrence' : ''}`}
                   value={value}
                   onChange={v => setDraft(d => ({ ...d, revenue: { ...d.revenue, [key]: v } }))}
                   errorId={errorDomId(base, `revenue.${key}`)}
@@ -653,6 +805,13 @@ export function IntakeForm({
               );
             })}
           </div>
+          {recurring && (
+            <p className={HINT_CLASS} role="status">
+              {occurrences !== null && projected
+                ? `${occurrences} occurrence${occurrences === 1 ? '' : 's'} × ${moneyOrDash(projected.good / occurrences)} = ${moneyOrDash(projected.good)} Good for the plan (Better ${moneyOrDash(projected.better)}, Best ${moneyOrDash(projected.best)}).`
+                : 'Choose how often it repeats and the first occurrence to see the plan total.'}
+            </p>
+          )}
         </section>
       )}
 
@@ -736,50 +895,6 @@ export function IntakeForm({
               errorId={errorDomId(base, 'partner.bookingStatus')}
               error={shown['partner.bookingStatus']}
             />
-          )}
-        </section>
-      )}
-
-      {/* VIP block */}
-      {attachedBlocks.has('vip') && (
-        <section className={SECTION_CLASS} aria-labelledby={`${base}-vip`}>
-          <h3 id={`${base}-vip`} className={SECTION_HEADING_CLASS}>
-            VIP tier
-          </h3>
-          <ChoiceGroup
-            name={fieldDomId(base, 'vip.offered')}
-            legend="Offering a VIP tier?"
-            options={YES_NO_OPTIONS}
-            value={toYesNo(draft.vip.offered)}
-            onChange={v => setVip({ offered: fromYesNo(v) })}
-            errorId={errorDomId(base, 'vip.offered')}
-          />
-          {draft.vip.offered === true && (
-            <>
-              <NumberField
-                id={fieldDomId(base, 'vip.price')}
-                label="Price ($)"
-                value={amountInput(draft.vip.price)}
-                onChange={v => setVip({ price: v === '' ? null : v })}
-                errorId={errorDomId(base, 'vip.price')}
-                error={shown['vip.price']}
-                required
-              />
-              <NumberField
-                id={fieldDomId(base, 'vip.capacity')}
-                label="Capacity"
-                value={amountInput(draft.vip.capacity)}
-                onChange={v => setVip({ capacity: v === '' ? null : v })}
-                errorId={errorDomId(base, 'vip.capacity')}
-                error={shown['vip.capacity']}
-              />
-              <TextField
-                id={fieldDomId(base, 'vip.included')}
-                label="What's included"
-                value={draft.vip.included}
-                onChange={included => setVip({ included })}
-              />
-            </>
           )}
         </section>
       )}
@@ -1004,6 +1119,20 @@ export function IntakeForm({
           />
         </div>
       </section>
+
+      {/*
+       * Repeated beside the button: on a long form the summary at the top is
+       * off-screen when the user clicks, so the button seemed to do nothing.
+       */}
+      {(blockedNotice || submitError) && (
+        <div
+          role="status"
+          className="flex items-start gap-2 rounded-[var(--radius-md)] border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{blockedNotice ?? submitError}</span>
+        </div>
+      )}
 
       <div className="flex justify-end gap-2 border-t border-border pt-4">
         <button

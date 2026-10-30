@@ -180,6 +180,12 @@ function SubscriptionPill({ sub }: { sub: CompanySubscription | null }) {
     );
   }
 
+  // Registered and never paid (no Stripe subscription): an abandoned cart,
+
+  // not a cancellation (client, Oct 2026).
+
+  const abandoned = !sub.isPaused && !sub.isComped && sub.access.reason === "no_subscription";
+
   // Paused is checked FIRST because it outranks everything else: a paused
   // comped account is paused, and labelling it "Comped" would be a lie.
   const label = sub.isPaused
@@ -188,9 +194,15 @@ function SubscriptionPill({ sub }: { sub: CompanySubscription | null }) {
       ? "Comped"
       : sub.access.reason === "billing_disabled"
         ? "Billing off"
-        : (sub.stripeStatus ?? sub.status);
+        : abandoned
+          ? "abandoned cart"
+          : (sub.stripeStatus ?? sub.status);
 
-  const tone = !sub.access.allowed
+  const tone = abandoned
+
+    ? "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+
+    : !sub.access.allowed
     ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
     : sub.access.warn
       ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"

@@ -173,12 +173,12 @@ export {
  * itself. Not normalised to one shape on purpose — these are stored values and
  * renaming them later is a migration.
  */
-export type PriceSource = "product.price" | "attrs.entry_price" | "vip_price" | "host_fee";
+// "vip_price" was removed with the VIP block (client, Oct 2026: "delete VIP completely").
+export type PriceSource = "product.price" | "attrs.entry_price" | "host_fee";
 
 export const PRICE_SOURCES: readonly PriceSource[] = Object.freeze([
   "product.price",
   "attrs.entry_price",
-  "vip_price",
   "host_fee",
 ]);
 
@@ -570,14 +570,7 @@ export const ASK_UNDECIDED_CATEGORY_IDS: readonly CategoryId[] = Object.freeze([
 export const offersAskUndecided = (id: CategoryId): boolean =>
   ASK_UNDECIDED_CATEGORY_IDS.includes(id);
 
-/** Categories that run launches, webinars and challenges, i.e. can have a VIP tier. */
-export const VIP_BLOCK_CATEGORY_IDS: readonly CategoryId[] = Object.freeze([
-  "webinars",
-  "funnels-launches-promotions",
-  "your-own-event-in-person",
-  "your-own-event-virtual",
-]);
-
+// The VIP tier block was removed (client, Oct 2026: "can you just delete VIP completely?").
 /* ------------------------------------------------------------------ *
  * The category matcher
  * ------------------------------------------------------------------ */
@@ -1158,8 +1151,6 @@ export type ConditionalBlockId =
   | "partner-booking"
   /** Many-partner plays. */
   | "affiliate"
-  /** A higher tier on a launch, webinar or challenge. */
-  | "vip"
   /** Where collected leads go. Attaches on the `leads` path. */
   | "lead-handoff";
 
@@ -1594,13 +1585,6 @@ export function resolveFormLayout(args: {
       reason: AFFILIATE_BLOCK_CATEGORY_IDS.includes(category.id)
         ? `${category.label} runs many-partner plays.`
         : `${category.label} does not run many-partner plays.`,
-    },
-    {
-      id: "vip",
-      attached: VIP_BLOCK_CATEGORY_IDS.includes(category.id),
-      reason: VIP_BLOCK_CATEGORY_IDS.includes(category.id)
-        ? `${category.label} can carry a VIP tier.`
-        : `${category.label} has no VIP tier.`,
     },
     {
       id: "lead-handoff",

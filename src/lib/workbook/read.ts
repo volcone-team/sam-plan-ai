@@ -332,16 +332,17 @@ async function fetchTaskTemplates(
   const out = new Map<string, TaskTemplate[]>();
   if (unique.length === 0) return out;
 
-  const { data, error } = await db
-    .from("wb_task_templates")
-    .select("initiative_key, task_number, name, category, lead_days, duration_hours, role, depends_on, notes, display_order")
-    .in("initiative_key", unique)
-    .order("display_order", { ascending: true });
+  const columns = "initiative_key, task_number, name, category, lead_days, duration_hours, role, depends_on, notes, display_order";
+  const run = (cols: string) =>
+    db.from("wb_task_templates").select(cols).in("initiative_key", unique).order("display_order", { ascending: true });
+  // `section` is migration 061; without it every task reads as unsectioned.
+  let { data, error } = await run(`${columns}, section`);
+  if (error && isMissingColumnError(error)) ({ data, error } = await run(columns));
   if (error) {
     console.error("[workbook/read] loadTaskTemplates failed:", error.message);
     return out;
   }
-  for (const r of data || []) {
+  for (const r of ((data ?? []) as unknown as Record<string, unknown>[])) {
     const key = r.initiative_key as string;
     const list = out.get(key) || [];
     list.push({
@@ -354,6 +355,7 @@ async function fetchTaskTemplates(
       dependsOn: (r.depends_on as number[]) || [],
       notes: (r.notes as string) ?? null,
       displayOrder: Number(r.display_order) || 0,
+      section: typeof r.section === "string" ? r.section : null,
     });
     out.set(key, list);
   }

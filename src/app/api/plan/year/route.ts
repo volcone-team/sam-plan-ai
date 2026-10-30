@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { requirePlanEditor } from "@/lib/require-plan-editor";
 import { snapshotProducts } from "@/lib/snapshot-products";
+import { yearsLabel } from "@/lib/plan-snapshot-year";
 
 /**
  * GET    /api/plan/year?year=YYYY — what deleting that year would remove.
@@ -219,35 +220,57 @@ export async function DELETE(request: Request) {
      */
     let snapshotId: string | null = null;
 
+    /*
+     * THE BACKUP COVERS EVERY YEAR THIS PLAN TOUCHES (client, Oct 2026). A
+     * 2026 plan that runs into 2027 is backed up with 2027 as well, labelled
+     * "2026–2027", so restoring it can never lose either year. Only the 2026
+     * work is deleted below; the other years are copied, not removed.
+     */
+    const touchedYears = new Set<number>([year]);
+    for (const i of found.initiatives) {
+      for (const d of [i.event_date, i.activation_date]) {
+        const y = typeof d === "string" ? Number(d.slice(0, 4)) : NaN;
+        if (Number.isInteger(y) && y > 2000 && y < 3000) touchedYears.add(y);
+      }
+    }
+    const years = [...touchedYears].sort((a, b) => a - b);
+    const others = await Promise.all(
+      years.filter((y) => y !== year).map((y) => collectYear(supabase, companyId!, y))
+    );
+    const backupIds = [...new Set([...found.initiativeIds, ...others.flatMap((o) => o?.initiativeIds ?? [])])];
+    const planIds = [found.plan?.id, ...others.map((o) => o?.plan?.id)].filter((id): id is string => !!id);
+
     const [{ data: initiatives }, { data: tasks }, { data: projections },
-           { data: results }, { data: expenses }] = await Promise.all([
-      found.initiativeIds.length
-        ? supabase!.from("initiatives").select("*").in("id", found.initiativeIds)
+           { data: results }, { data: expenses }, { data: planRows }] = await Promise.all([
+      backupIds.length
+        ? supabase!.from("initiatives").select("*").in("id", backupIds)
         : Promise.resolve({ data: [] as unknown[] }),
-      found.initiativeIds.length
-        ? supabase!.from("tasks").select("*").in("initiative_id", found.initiativeIds)
+      backupIds.length
+        ? supabase!.from("tasks").select("*").in("initiative_id", backupIds)
         : Promise.resolve({ data: [] as unknown[] }),
-      found.plan?.id
-        ? supabase!.from("projections").select("*").eq("annual_plan_id", found.plan.id)
+      planIds.length
+        ? supabase!.from("projections").select("*").in("annual_plan_id", planIds)
         : Promise.resolve({ data: [] as unknown[] }),
-      found.initiativeIds.length
-        ? supabase!.from("results").select("*").in("initiative_id", found.initiativeIds)
+      backupIds.length
+        ? supabase!.from("results").select("*").in("initiative_id", backupIds)
         : Promise.resolve({ data: [] as unknown[] }),
-      found.initiativeIds.length
-        ? supabase!.from("expenses").select("*").in("initiative_id", found.initiativeIds)
+      backupIds.length
+        ? supabase!.from("expenses").select("*").in("initiative_id", backupIds)
+        : Promise.resolve({ data: [] as unknown[] }),
+      planIds.length
+        ? supabase!.from("annual_plans").select("*").in("id", planIds)
         : Promise.resolve({ data: [] as unknown[] }),
     ]);
 
-    const { data: planRow } = found.plan?.id
-      ? await supabase!.from("annual_plans").select("*").eq("id", found.plan.id).maybeSingle()
-      : { data: null };
+    const planRow =
+      ((planRows ?? []) as { id: string }[]).find((p) => p.id === found.plan?.id) ?? null;
 
     const { count: snapshotCount } = await supabase!
       .from("plan_snapshots")
       .select("id", { count: "exact", head: true })
       .eq("company_id", companyId!);
 
-    const label = `${year} Plan (deleted) v${(snapshotCount || 0) + 1}`;
+    const label = `${yearsLabel(years)} Plan (deleted) v${(snapshotCount || 0) + 1}`;
 
     const { data: snapRow, error: snapErr } = await supabase!
       .from("plan_snapshots")
@@ -256,6 +279,8 @@ export async function DELETE(request: Request) {
         label,
         snapshot: {
           annualPlan: planRow,
+          annualPlans: planRows ?? [],
+          years,
           initiatives: initiatives ?? [],
           tasks: tasks ?? [],
           projections: projections ?? [],

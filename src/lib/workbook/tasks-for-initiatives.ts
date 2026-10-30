@@ -54,6 +54,7 @@ import {
   type LibraryEntry,
 } from "@/lib/workbook/read";
 import { logGenerationEvent } from "@/lib/generation-events";
+import { extraTemplateKeys, selectTemplates, type TaskAnswers } from "@/lib/workbook/task-rules";
 import { aiFailureLogDetail } from "@/lib/ai-errors";
 
 export type TaskSource = "template" | "ai" | "starter";
@@ -65,6 +66,11 @@ export interface ResolveTasksItem {
   eventDate: Date | string;
   /** No task may be due before this (today, in practice). */
   floor: Date | string;
+  /**
+   * The initiative's form answers. When given they choose the sections that
+   * apply and pull in funnel / ad-platform sections (task-rules.ts).
+   */
+  answers?: TaskAnswers;
 }
 
 export interface ResolvedTasks {
@@ -113,12 +119,31 @@ export async function resolveTasks(
     options
   );
 
+  // Sections pulled in by answers come from the WORKBOOK only (never AI).
+  const extraKeys = [
+    ...new Set(items.flatMap((i) => (i.answers ? extraTemplateKeys(i.libraryKey, i.answers) : []))),
+  ];
+  const extras = extraKeys.length > 0 ? await loadTaskTemplates(db, extraKeys) : new Map<string, TaskTemplate[]>();
+
   for (const item of items) {
     if (out.has(item.libraryKey)) continue;
     const entry = resolved.get(item.libraryKey);
     if (!entry) continue;
+    const templates = item.answers
+      ? selectTemplates({
+          ownKey: item.libraryKey,
+          own: entry.templates,
+          extras: new Map(
+            extraTemplateKeys(item.libraryKey, item.answers)
+              .map((k) => [k, extras.get(k) ?? []] as const)
+              .filter(([, rows]) => rows.length > 0)
+          ),
+          answers: item.answers,
+        })
+      : entry.templates;
     out.set(item.libraryKey, {
-      tasks: materialiseTasks(entry.templates, {
+      tasks: materialiseTasks(templates, {
+        cartOpens: item.answers?.cartOpens ?? null,
         eventDate: item.eventDate,
         floor: item.floor,
         newId: options.newId,
@@ -613,7 +638,7 @@ function renderExamples(examples: readonly TaskTemplate[][]): string {
     templates
       .map(
         (t) =>
-          `  - ${t.name} | ${t.leadDays} days before | ` +
+          `  - ${t.name} | ${t.leadDays < 0 ? `${-t.leadDays} days after` : `${t.leadDays} days before`} | ` +
           `${t.durationHours ?? "?"}h | ${t.role ?? "unassigned"}` +
           (t.dependsOn.length > 0 ? ` | after ${t.dependsOn.join(", ")}` : "")
       )

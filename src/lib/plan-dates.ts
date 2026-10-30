@@ -118,6 +118,19 @@ export function computeTaskDueDate(anchor: Date | string, rawLead: unknown): Dat
   return subDays(anchor, resolveLeadDays(rawLead));
 }
 
+/**
+ * A WORKBOOK task's due date, keeping the sign: positive lead days fall before
+ * the anchor, negative ones after it (follow-ups such as a debrief at -10).
+ *
+ * Separate from `computeTaskDueDate` on purpose: AI-written tasks are asked
+ * for a positive count of days before the event, and a stray minus there is
+ * still read as a magnitude. Only the workbook authors "after the event".
+ */
+export function computeSignedTaskDueDate(anchor: Date | string, leadDays: number): Date {
+  const n = Number.isFinite(leadDays) ? Math.trunc(leadDays) : 0;
+  return subDays(anchor, n);
+}
+
 /** Days in a month, 1-indexed month. */
 export function daysInMonth(year: number, month1: number): number {
   return new Date(year, month1, 0).getDate();

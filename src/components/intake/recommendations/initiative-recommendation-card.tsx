@@ -7,6 +7,7 @@ import { formatMoney } from "@/lib/format-money";
 import type { ScoreBreakdown, ScoreLetter } from "@/lib/recommend/score";
 import type { RecommendationExplanation } from "@/lib/recommend/explain";
 import { ScoreBreakdownView } from "@/components/recommend/score-breakdown";
+import type { CardTarget } from "@/lib/intake/recommend-targets";
 
 /**
  * One recommendation card (REQ-13.4, REQ-13.6, REQ-13.14).
@@ -70,6 +71,14 @@ export interface RecommendationCardProps {
   onDismiss: () => void;
   onRestore: () => void;
   onSwap: () => void;
+  /**
+   * Target setting (client spec, Screen 1). When given, the card shows the
+   * product it sells and its units x price target instead of a flat forecast.
+   */
+  target?: CardTarget;
+  products?: readonly { id: string; name: string }[];
+  onProductChange?: (productId: string) => void;
+  onUnitsChange?: (units: string) => void;
 }
 
 export function RecommendationCard({
@@ -82,6 +91,10 @@ export function RecommendationCard({
   onDismiss,
   onRestore,
   onSwap,
+  target,
+  products,
+  onProductChange,
+  onUnitsChange,
 }: RecommendationCardProps) {
   /**
    * A dismissed card collapses but STAYS on screen with an Undo (REQ-13.7).
@@ -135,12 +148,23 @@ export function RecommendationCard({
           )}
         </div>
 
-        <div className="text-right">
-          <p className="text-xs text-[hsl(var(--foreground-muted))]">Forecast</p>
-          <p className="text-lg font-semibold tabular-nums text-foreground">
-            {formatMoney(data.forecast)}
-          </p>
-        </div>
+        {target ? (
+          <CardTargetArea
+            cardKey={data.key}
+            target={target}
+            products={products ?? []}
+            accepted={accepted}
+            onProductChange={onProductChange}
+            onUnitsChange={onUnitsChange}
+          />
+        ) : (
+          <div className="text-right">
+            <p className="text-xs text-[hsl(var(--foreground-muted))]">Forecast</p>
+            <p className="text-lg font-semibold tabular-nums text-foreground">
+              {formatMoney(data.forecast)}
+            </p>
+          </div>
+        )}
       </div>
 
       <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-[hsl(var(--foreground-muted))]">
@@ -320,6 +344,104 @@ function ExplanationDetails({ explanation }: { explanation: RecommendationExplan
           </div>
         )}
       </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The card's target, top right where Forecast used to be.
+ *
+ *   At rest:  Product dropdown, "Suggested: N units · $X", and the hint.
+ *   Added:    Product (still editable), Units (editable, pre-filled), Price
+ *             (read-only, from the product), Good = units x price (live).
+ */
+export function CardTargetArea({
+  cardKey,
+  target,
+  products,
+  accepted,
+  unitsLabel,
+  onProductChange,
+  onUnitsChange,
+}: {
+  cardKey: string;
+  target: CardTarget;
+  products: readonly { id: string; name: string }[];
+  accepted: boolean;
+  /** e.g. "Units × 12" for a recurring initiative: units are per occurrence. */
+  unitsLabel?: string;
+  onProductChange?: (productId: string) => void;
+  onUnitsChange?: (units: string) => void;
+}) {
+  const id = React.useId();
+  const noPrice = target.price === null;
+  return (
+    <div className="w-full space-y-2 sm:w-64" data-card={cardKey}>
+      <div className="space-y-1">
+        <label htmlFor={`${id}-product`} className="text-xs text-[hsl(var(--foreground-muted))]">
+          Product
+        </label>
+        <select
+          id={`${id}-product`}
+          value={target.productId ?? ""}
+          onChange={(e) => onProductChange?.(e.target.value)}
+          className="w-full rounded-[var(--radius-md)] border border-input bg-background px-2 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {target.productId === null && <option value="">Choose a product…</option>}
+          {products.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {noPrice ? (
+        <p className="text-xs text-[hsl(var(--warning))]">Add a price to this product to set a target.</p>
+      ) : !accepted ? (
+        <div className="space-y-0.5 text-right">
+          <p className="text-sm font-semibold tabular-nums text-foreground">
+            Suggested: {target.suggestedUnits ?? 0} unit{target.suggestedUnits === 1 ? "" : "s"} ·{" "}
+            {formatMoney(target.good)}
+          </p>
+          <p className="text-[11px] text-[hsl(var(--foreground-muted))]">
+            {target.fromAnnualGoal
+              ? "Based on your annual goal. Adjust when you add it."
+              : "Based on this initiative's revenue potential. Adjust when you add it."}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 items-end gap-2">
+          <div className="space-y-1">
+            <label htmlFor={`${id}-units`} className="text-[11px] text-[hsl(var(--foreground-muted))]">
+              {unitsLabel ?? "Units"}
+            </label>
+            <input
+              id={`${id}-units`}
+              type="number"
+              inputMode="numeric"
+              min={0}
+              step={1}
+              value={target.units ?? ""}
+              onChange={(e) => onUnitsChange?.(e.target.value)}
+              className="w-full rounded-[var(--radius-md)] border border-input bg-background px-2 py-1 text-xs tabular-nums text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+          <div className="space-y-1 text-right">
+            <p className="text-[11px] text-[hsl(var(--foreground-muted))]">Price</p>
+            <p className="py-1 text-xs tabular-nums text-foreground">{formatMoney(target.price ?? 0)}</p>
+          </div>
+          <div className="space-y-1 text-right">
+            <p className="text-[11px] text-[hsl(var(--foreground-muted))]">Good</p>
+            <p className="py-1 text-sm font-semibold tabular-nums text-foreground">{formatMoney(target.good)}</p>
+          </div>
+          {target.fromAnnualGoal && (
+            <p className="col-span-3 text-right text-[11px] text-[hsl(var(--foreground-muted))]">
+              Based on your annual goal
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

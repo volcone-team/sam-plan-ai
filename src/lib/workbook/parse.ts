@@ -110,6 +110,8 @@ export interface TaskTemplateRow {
   initiativeKey: string; taskNumber: number | null; name: string; category: string | null;
   leadDays: number; durationHours: number | null; role: string | null;
   dependsOn: number[]; notes: string | null; displayOrder: number;
+  /** The section heading the row sat under (wb_task_templates.section, migration 061). */
+  section?: string | null;
 }
 export interface AiContextRow {
   initiativeKey: string; whenToUse: string | null; bestFit: string | null; minBudget: string | null;
@@ -549,6 +551,45 @@ export function parseNumeric(raw: unknown, unitHint?: string): number | null {
 }
 
 /**
+ * A task template's Lead Time cell, as days relative to the event.
+ *
+ * POSITIVE = days BEFORE the event, NEGATIVE = days AFTER it (follow-ups such
+ * as "Debrief & metrics review" at -10). The sign used to be thrown away, so
+ * every follow-up landed before the event it follows up.
+ *
+ * The workbook writes minimums and ranges, which `parseNumeric` rejected and
+ * the task then fell to 0 (due on the event day):
+ *   "60+"    -> 60   (at least 60 days before)
+ *   "25-30+" -> 30   (a range: the earlier start, so there is time)
+ *   "-1"     -> -1   (the day after)
+ * Null for a blank or unreadable cell.
+ */
+export function parseLeadDays(raw: unknown): number | null {
+  const s = String(raw ?? '').trim().replace(/[\s,]/g, '').replace(/[–—]/g, '-');
+  if (s === '') return null;
+  const exact = Number(s);
+  if (Number.isFinite(exact)) return Math.trunc(exact);
+  // "60+", "45 +", "60 days": a leading (optionally negative) number.
+  const range = /^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)\+?/.exec(s);
+  if (range) return Math.trunc(Math.max(Number(range[1]), Number(range[2])));
+  const lead = /^(-?\d+(?:\.\d+)?)/.exec(s);
+  return lead ? Math.trunc(Number(lead[1])) : null;
+}
+
+/**
+ * A Duration cell in hours. Same leniency as the lead time for "5+" / "10+"
+ * (read as the minimum), which used to be stored as unknown.
+ */
+export function parseTaskHours(raw: unknown): number | null {
+  const s = String(raw ?? '').trim().replace(/[\s,]/g, '');
+  if (s === '') return null;
+  const exact = parseNumeric(s);
+  if (exact !== null) return exact;
+  const lead = /^(\d+(?:\.\d+)?)\+/.exec(s);
+  return lead ? Number(lead[1]) : null;
+}
+
+/**
  * Plausibility ceilings. Spreadsheet cells get mistyped and, worse, silently
  * date-formatted: one Duration cell in the real workbook held 46025, an Excel
  * date serial, which overflows `tasks.estimated_hours NUMERIC(6,2)` and failed
@@ -629,7 +670,40 @@ const KEY_ALIASES: Record<string, string> = {
   'your-own-in-person-event': 'your-own-event',
   'affiliate-launch': 'affiliate-launches',
   'opt-in-funnels': 'funnels',
+  /*
+   * Tabs whose column-A name or (truncated) tab name is a typo or shortening
+   * of exactly one library initiative (Oct 2026 workbook). Ambiguous ones are
+   * left for the client to name: Challenge / Bootcamp (free or paid?),
+   * Content & Organic Social, 5.0B / 5.0C, the second Google Search tab.
+   */
+  'referral': 'referrals',
+  'pdocast-vodcast': 'podcast-vodcast',
+  'own-in-peson-event': 'your-own-event',
+  'own-in-person-event': 'your-own-event',
+  'seo-ai-search-ads': 'seo-ai-search',
+  'renewal-r': 'renewal-rebill-calls',
+  'renewal-rebill': 'renewal-rebill-calls',
+  'betafounding': 'beta-founding-cohort-launch',
 };
+
+/**
+ * Section headings that are library initiatives in their own right, as the
+ * Paid Ads tab writes them. Anything else matches by its normalised name.
+ */
+const SECTION_KEY_ALIASES: Record<string, string> = {
+  'meta-ads': 'paid-ads-meta',
+  'facebook-ads': 'paid-ads-meta',
+  'pinterest-ads': 'paid-ads-pinterest',
+  'geo-targeted-and-radius-ads': 'geo-targeted-radius-ads',
+  'event-sponsorship-someone-elses-event': 'sponsorship-of-someone-elses-event',
+};
+
+/** The library key a section heading names, or null when it names none. */
+export function sectionLibraryKey(heading: string, libraryKeys: ReadonlySet<string>): string | null {
+  const k = normalizeKey(heading);
+  const key = SECTION_KEY_ALIASES[k] ?? KEY_ALIASES[k] ?? k;
+  return libraryKeys.has(key) ? key : null;
+}
 
 /** Canonical join key: normalised, then alias-resolved. */
 export function canonicalKey(name: unknown): string {
@@ -1078,43 +1152,90 @@ export function parseWorkbook(sheets: RawSheet[]): ParsedWorkbook {
   // ---- Task templates (many sheets) ----
   const templateSheets = sheets.filter((s) => /task\s*template/i.test(s.name));
   if (templateSheets.length === 0) warnings.push('No "Task Template" sheets found.');
+  const libraryKeySet = new Set(out.library.map((r) => r.initiativeKey));
+  /** Which sheet claimed a key first: a second sheet with the same name is NOT merged into it. */
+  const keyOwner = new Map<string, string>();
+  /** display_order runs per key across the whole workbook, so nothing interleaves. */
+  const orderByKey = new Map<string, number>();
   for (const sheet of templateSheets) {
     const rows = contentRows(sheet);
     const name = templateInitiativeName(sheet.name, rows);
-    const key = canonicalKey(name);
-    let order = 0;
+    let key = canonicalKey(name);
+    /*
+     * TABS ARE NO LONGER MERGED (client, Oct 2026). 5.0, 5.0B and 5.0C all
+     * carry "Other People's Stages (OPS)" in column A, which used to stack
+     * three task lists into one 150-task list. A later tab with a key that is
+     * already taken falls back to its own tab name, and the upload says so.
+     */
+    if (keyOwner.has(key)) {
+      const m = /task\s*template\s*(.*)$/i.exec(sheet.name);
+      const fromTab = canonicalKey(m?.[1] || sheet.name);
+      let alt = fromTab && fromTab !== key && !keyOwner.has(fromTab) ? fromTab : `${key}-${sheet.name.trim().split(/\s+/)[0].replace(/[^0-9a-z]+/gi, '').toLowerCase()}`;
+      while (keyOwner.has(alt)) alt = `${alt}-x`;
+      warnings.push(
+        `"${sheet.name}" has the same initiative name ("${name}") as "${keyOwner.get(key)}". ` +
+          `It was kept separate as "${alt}" instead of being merged. Put the exact library initiative name in column A.`
+      );
+      key = alt;
+    }
+    keyOwner.set(key, sheet.name);
+
+    /*
+     * SECTIONS. A heading row has text in column A and nothing else ("Opt-in
+     * Funnels", "Meta Ads", "If approved for selling on stage"). It is no
+     * longer thrown away: every task below it carries it as `section`, so the
+     * intake answers can pick the sections that apply.
+     *
+     * A tab whose sections are themselves library initiatives (Paid Ads:
+     * "Meta Ads", "YouTube Ads", ...) gives each section's tasks to that
+     * initiative, instead of filing all seven under one of them.
+     */
+    let section: string | null = null;
+    let sectionKey: string | null = null;
     let added = 0;
     for (const row of rows) {
+      const colA = cell(row, 0);
+      const rest = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => cell(row, i));
+      if (colA && rest.every((v) => v === '')) {
+        section = colA;
+        const matched = sectionLibraryKey(colA, libraryKeySet);
+        sectionKey = matched && matched !== key ? matched : null;
+        continue;
+      }
       const taskName = cell(row, 2);
       if (!taskName) continue;
       if (/^task\s*name$/i.test(taskName)) continue;
-      const leadRaw = parseNumeric(cell(row, 4));
-      let leadDays = leadRaw === null ? 0 : Math.abs(Math.trunc(leadRaw));
-      if (leadDays > MAX_LEAD_DAYS) {
+      const leadRaw = parseLeadDays(cell(row, 4));
+      let leadDays = leadRaw ?? 0;
+      if (Math.abs(leadDays) > MAX_LEAD_DAYS) {
         warnings.push(`"${sheet.name}" task "${taskName}": lead time ${leadDays} exceeds ${MAX_LEAD_DAYS} days - treated as 0. Check the cell is a number of days, not a date.`);
         leadDays = 0;
       }
 
-      const hoursRaw = parseNumeric(cell(row, 5));
+      const hoursRaw = parseTaskHours(cell(row, 5));
       let durationHours = hoursRaw;
       if (hoursRaw !== null && (hoursRaw < 0 || hoursRaw > MAX_TASK_HOURS)) {
         warnings.push(`"${sheet.name}" task "${taskName}": duration ${hoursRaw}h is implausible (limit ${MAX_TASK_HOURS}h) - stored as unknown. A value in the tens of thousands is usually a date-formatted cell.`);
         durationHours = null;
       }
 
+      const rowKey = sectionKey ?? key;
+      const order = orderByKey.get(rowKey) ?? 0;
+      orderByKey.set(rowKey, order + 1);
       out.taskTemplates.push({
-        initiativeKey: key,
+        initiativeKey: rowKey,
         taskNumber: parseNumeric(cell(row, 1)) ?? null,
         name: taskName,
         category: orNull(cell(row, 3)),
-        // Authored as "days before launch", so non-negative. Magnitude guards a
-        // stray minus sign, matching resolveLeadDays elsewhere.
+        // Days before the event; negative = after it (follow-ups).
         leadDays,
         durationHours,
         role: orNull(cell(row, 6)),
         dependsOn: parseDependsOn(cell(row, 7)),
         notes: orNull(cell(row, 8)),
-        displayOrder: order++,
+        displayOrder: order,
+        // A section that became its own initiative is not a section of it.
+        section: sectionKey ? null : section,
       });
       added++;
     }

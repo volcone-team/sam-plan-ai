@@ -30,6 +30,7 @@ import {
   initialDraft,
   revenueLineIds,
   withOngoingCloseDefault,
+  withRecurringLastDefault,
   type AdPlatform,
   type BookingStatus,
   type CommissionBasis,
@@ -339,8 +340,12 @@ export function formStartDraft(
   planYear?: number | null
 ): IntakeDraft {
   const draft = initialDraft(item, config);
-  return withOngoingCloseDefault(
-    { ...draft, revenue: { ...draft.revenue, mode: revenueModeFor(config) } },
+  return withRecurringLastDefault(
+    withOngoingCloseDefault(
+      { ...draft, revenue: { ...draft.revenue, mode: revenueModeFor(config) } },
+      config,
+      planYear
+    ),
     config,
     planYear
   );
@@ -369,3 +374,17 @@ export function fieldDomId(base: string, key: string): string {
 
 /** The DOM id of a field's error message. */
 export const errorDomId = (base: string, key: string): string => `${fieldDomId(base, key)}-error`;
+
+/**
+ * The notice shown just above the submit button when a save was refused.
+ *
+ * On a long form the field errors and the summary at the top are off-screen
+ * when the user clicks, so the button looked like it did nothing (client,
+ * Oct 2026). Null when there is nothing to say.
+ */
+export function submitBlockedNotice(errorCount: number): string | null {
+  if (!Number.isFinite(errorCount) || errorCount <= 0) return null;
+  return errorCount === 1
+    ? 'One field needs attention. Scroll up to fix it, then try again.'
+    : `${errorCount} fields need attention. Scroll up to fix them, then try again.`;
+}

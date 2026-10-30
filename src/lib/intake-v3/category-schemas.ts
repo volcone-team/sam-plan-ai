@@ -41,7 +41,6 @@ export type SchemaBind =
   | "partner.host"
   | "partner.bookingStatus"
   | "format"
-  | "vip.offered"
   | "cart"
   | "close"
   | "conversionPath"
@@ -381,13 +380,6 @@ const WEBINARS: CategorySchema = {
           hint: "Needed because Limited-Time Replay and Replay Scarcity both attach here as maximizers.",
         },
         { key: "replayExpires", label: "Replay expires", type: "date", tag: "IF REPLAY", gate: { answer: "replay", equals: true } },
-        {
-          key: "vip",
-          label: "Paid VIP upgrade?",
-          type: "yesno",
-          binds: "vip.offered",
-          hint: "VIP yes → price, capacity, what's included. Adds a second revenue line.",
-        },
       ],
     },
     {
@@ -575,13 +567,6 @@ const OWN_EVENT_VIRTUAL: CategorySchema = {
         { key: "days", label: "How many days?", type: "number", placeholder: "5" },
         { key: "sessionLength", label: "Session length", type: "text", placeholder: "60 min" },
         { key: "entry", label: "Free or paid entry?", type: "single", options: ["Free", "Paid"] },
-        {
-          key: "vip",
-          label: "Paid VIP upgrade?",
-          type: "yesno",
-          binds: "vip.offered",
-          hint: "VIP is sold during registration and pitched again on day 1 — same window as entry, different curve.",
-        },
         // NOT ON THE CHALLENGE RECORDS: they ask "Pitch day" as a date type
         // extra (type-extras.ts), which also sets when the cart opens. One
         // question per record, so the schema keeps it only where no extra does.

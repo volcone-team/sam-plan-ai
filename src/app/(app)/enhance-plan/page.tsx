@@ -11,7 +11,6 @@ import {
   Plus,
   DollarSign,
   Calendar,
-  Target,
   Package,
 } from "lucide-react";
 import { PageContainer, PageHeader } from "@/components/layout";
@@ -23,11 +22,12 @@ import { usePlanYears } from "@/hooks/use-plan-years";
 import { formatMoney } from "@/lib/format-money";
 import { limitNoticeFrom } from "@/lib/billing/limit-notice";
 import { upgradeAction } from "@/components/billing/limit-notice";
+import { isAcceptableSuggestionType } from "@/lib/plans/suggestion-policy";
 
 interface Suggestion {
   id: string;
   batchId: string;
-  type: "new_initiative" | "budget_change" | "date_change" | "target_change" | "product_update";
+  type: "new_initiative" | "budget_change" | "date_change" | "product_update";
   targetId: string | null;
   targetLabel: string | null;
   title: string;
@@ -44,7 +44,6 @@ const TYPE_META: Record<
   new_initiative: { label: "New Initiative", icon: Plus, color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300" },
   budget_change: { label: "Budget Change", icon: DollarSign, color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300" },
   date_change: { label: "Date Change", icon: Calendar, color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300" },
-  target_change: { label: "Target Change", icon: Target, color: "text-purple-600 bg-purple-100 dark:bg-purple-900/30 dark:text-purple-300" },
   product_update: { label: "Product Update", icon: Package, color: "text-pink-600 bg-pink-100 dark:bg-pink-900/30 dark:text-pink-300" },
 };
 
@@ -204,7 +203,10 @@ export default function EnhancePlanPage() {
   const acceptAll = async () => {
     if (!canEditPlan) return;
     setApplyingAll(true);
-    const count = suggestions.length;
+    // Goal changes are retired (revenue goals are fixed for the year), so any
+    // such suggestion still listed is skipped rather than sent.
+    const acceptable = suggestions.filter((s) => isAcceptableSuggestionType(s.type));
+    let count = acceptable.length;
     console.log("[EnhancePlan] Accepting all", count, "suggestions");
     const toastId = showToast("Applying all suggestions to your plan, just a moment...", { variant: "wait" });
     try {
@@ -212,7 +214,7 @@ export default function EnhancePlanPage() {
       // max_initiatives, and saying "all added" would then be untrue.
       let applied = 0;
       let notice: ReturnType<typeof limitNoticeFrom> = null;
-      for (const s of suggestions) {
+      for (const s of acceptable) {
         const res = await fetch(`/api/plan/suggestions/${s.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -220,9 +222,15 @@ export default function EnhancePlanPage() {
         });
         if (res.ok) {
           applied += 1;
-        } else if (!notice) {
-          notice = limitNoticeFrom(await res.json().catch(() => null));
+          continue;
         }
+        const data = await res.json().catch(() => null);
+        if (res.status === 409 && data?.code === "goal_change_retired") {
+          // Skipped: not applied, not an error, not part of the count.
+          count -= 1;
+          continue;
+        }
+        if (!notice) notice = limitNoticeFrom(data);
       }
       await loadSuggestions();
       if (notice) {

@@ -113,12 +113,12 @@ describe("metrics mode", () => {
 describe("revenue lines", () => {
   const challengeLines: RevenueLine[] = [
     { id: "entry", priceSource: "attrs.entry_price", windowOpens: "registration_opens", windowCloses: "registration_closes" },
-    { id: "vip", priceSource: "vip_price", windowOpens: "registration_opens", windowCloses: "event_date" },
+    { id: "vip", priceSource: "host_fee", windowOpens: "registration_opens", windowCloses: "event_date" },
     { id: "offer", priceSource: "product.price", windowOpens: "cart_opens", windowCloses: "cart_closes", condition: "path=offer" },
   ];
   const challengeAnswers: RevenueAnswers = {
     attrs: { entry_price: 47 },
-    vip_price: 197,
+    host_fee: 197,
     product: { price: 997 },
     dates: {
       registration_opens: "2027-02-01",
@@ -147,7 +147,7 @@ describe("revenue lines", () => {
   it("reports unresolvable lines with a reason and keeps them", () => {
     const r = resolveRevenueLines(challengeLines, {
       ...challengeAnswers,
-      vip_price: null,
+      host_fee: null,
       dates: { ...challengeAnswers.dates, cart_closes: "2027-03-01" },
     });
     expect(r.lines).toHaveLength(3);

@@ -110,6 +110,7 @@ export async function ingestWorkbook(
         initiative_key: r.initiativeKey, task_number: r.taskNumber, name: r.name,
         category: r.category, lead_days: r.leadDays, duration_hours: r.durationHours,
         role: r.role, depends_on: r.dependsOn, notes: r.notes, display_order: r.displayOrder,
+        section: r.section ?? null,
       }))],
       ["wb_ai_context", parsed.aiContext.map((r) => ({
         initiative_key: r.initiativeKey, when_to_use: r.whenToUse, best_fit: r.bestFit,
@@ -121,7 +122,12 @@ export async function ingestWorkbook(
     for (const [table, rows] of inserts) {
       stage = `inserting ${table}`;
       for (let i = 0; i < rows.length; i += CHUNK) {
-        const { error } = await client.from(table).insert(rows.slice(i, i + CHUNK));
+        const chunk = rows.slice(i, i + CHUNK);
+        let { error } = await client.from(table).insert(chunk);
+        // wb_task_templates.section is migration 061: without it, keep the tasks.
+        if (error && table === "wb_task_templates" && isMissingColumnError(error)) {
+          ({ error } = await client.from(table).insert(chunk.map(({ section: _s, ...rest }) => (void _s, rest))));
+        }
         if (error) throw new Error(`inserting ${table}: ${error.message}`);
       }
       written.push(table);

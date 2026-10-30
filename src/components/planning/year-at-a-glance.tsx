@@ -369,7 +369,8 @@ export function YearAtAGlance() {
               const d = parseDateOnly(launch);
               return d >= from && d <= cutoff;
             })
-            .reduce((sum, i) => sum + (i.revenueScenarios?.better || 0), 0);
+            // The Good target: one target per initiative (spec), not Better.
+            .reduce((sum, i) => sum + (i.revenueScenarios?.good || 0), 0);
 
         setPeriodStats({
           mtd: { actual: sumActual(monthStart), expected: sumExpected(monthStart) },
@@ -1206,7 +1207,7 @@ function PaceCard({ label, actual, expected }: { label: string; actual: number; 
       </p>
       <p className="mt-1.5 text-2xl font-bold tracking-tight">{formatCurrency(actual)}</p>
       <p className="mt-1 flex items-center gap-1 text-sm text-[hsl(var(--foreground-muted))]">
-        Expected: {formatCurrency(expected)}
+        Good target: {formatCurrency(expected)}
         <span title="Based on the initiatives scheduled to have launched by now.">
           <Info className="h-3 w-3 text-[hsl(var(--foreground-subtle))]" />
         </span>
@@ -1246,7 +1247,8 @@ function PaceCard({ label, actual, expected }: { label: string; actual: number; 
 function initiativeHealth(initiative: Initiative, actualRevenue: number): {
   label: string; dot: string; tone: string;
 } {
-  const planned = initiative.revenueScenarios?.better || 0;
+  // One target per initiative: Good (target-setting spec, Oct 2026).
+  const planned = initiative.revenueScenarios?.good || 0;
   const launch = launchDate(initiative);
   const started = launch !== null && parseDateOnly(launch) <= new Date();
   if (!started || initiative.status === 'planned') {
@@ -1275,7 +1277,7 @@ function MiniBar({ value, max, color }: { value: number; max: number; color: str
 function InitiativeSummaryCard({
   initiative, actuals,
 }: { initiative: Initiative; actuals: { revenue: number; spend: number } }) {
-  const plannedRevenue = initiative.revenueScenarios?.better || 0;
+  const plannedRevenue = initiative.revenueScenarios?.good || 0;
   const plannedSpend = initiative.plannedBudget || 0;
   // D2: Σ the initiative's recorded expenses; no hand-typed fallback.
   const spend = actuals.spend || 0;

@@ -33,6 +33,8 @@ export interface PickerItem {
   oneLiner: string | null;
   categoryId: CategoryId;
   audience: RecordAudienceSource;
+  /** SCORE Revenue 1-5, for the units suggestion (target setting). Optional. */
+  revenueScore?: number | null;
 }
 
 /** A category as the picker shows it. `launchCount` deliberately absent. */

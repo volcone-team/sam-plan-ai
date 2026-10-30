@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { loadBillingConfig, STRIPE_MODE_TAG } from "@/lib/billing/stripe-client";
-import { evaluateAccess } from "@/lib/billing/entitlement";
+import { evaluateAccess, neverPaid } from "@/lib/billing/entitlement";
 import { lockoutCopy } from "@/lib/billing/lockout";
 import { decideChoosePlanPage } from "@/lib/billing/billing-gate";
 import { loadPricingTable } from "@/lib/billing/load-pricing-table";
@@ -117,6 +117,7 @@ export default async function ChoosePlanPage() {
           cancelAtPeriodEnd: sub.cancel_at_period_end,
           isPaused: sub.is_paused ?? false,
           pauseResumesAt: sub.pause_resumes_at,
+          neverPaid: neverPaid(sub),
         }
       : null
   );

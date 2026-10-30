@@ -31,12 +31,14 @@ import { HISTORY_PROMPT_RULE, historyPromptLines } from "@/lib/recommend/history
 import type { LibraryInitiative } from "@/lib/intake/library";
 import {
   forecastForInitiative,
+  forecastPerRun,
+  runsInPeriod,
   goalGap,
-  productGoal,
   type InitiativeCadence,
   type RepeatFrequency,
 } from "@/lib/intake-forecast";
 import { LIMIT_KEYS } from "@/lib/billing/limits";
+import { toCadence, toFrequency } from "@/lib/intake/build-forecast";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -91,8 +93,10 @@ interface Recommendation {
   fromBenchmarks: boolean;
   /** Why it fits: `explanation.whyFits`, kept for the existing card. */
   why: string | null;
-  /** Product ids this initiative is suggested to sell. */
+  /** Product ids this initiative is suggested to sell (the default product). */
   productIds: string[];
+  /** SCORE Revenue 1-5 (blank counted as 3): its weight in the product share. */
+  revenueScore: number;
   /** SCORE for this initiative; `missing` lists the letters counted as 3. */
   score: Pick<InitiativeScore, "total" | "weightedTotal" | "breakdown" | "complete" | "missing">;
   /** 1-based position in the SCORE ranking of the eligible pool. */
@@ -125,7 +129,18 @@ export async function POST() {
 
     const planned = initiatives.filter((row) => (row.source ?? "planned") === "planned");
 
-    const yours = planned.map((row) => ({
+    const yours = planned.map((row) => {
+      const funnel = {
+        audienceReached: num(row.audience_reached),
+        stages: Array.isArray(row.funnel_stages)
+          ? (row.funnel_stages as { key: string; label: string; percent: number | null }[])
+          : [],
+        averagePrice: num(row.average_price),
+      };
+      // The build's own translation, so runs here match the runs it stores.
+      const cadence = toCadence(row.cadence);
+      const frequency = toFrequency(row.repeat_frequency);
+      return {
       /**
        * The `intake_initiatives` row id.
        *
@@ -152,7 +167,15 @@ export async function POST() {
           horizonMonths,
         }) ?? null,
       productIds: toStringArray(row.product_ids),
-    }));
+      /**
+       * Target setting: what ONE run of the user's own funnel earns, and how
+       * many runs the plan has. The page pre-fills units as perRun / price
+       * and multiplies by runs, so a recurring initiative is per occurrence.
+       */
+      perRun: forecastPerRun(funnel),
+      runs: Math.max(1, runsInPeriod(cadence, frequency, horizonMonths)),
+    };
+    });
 
     /* ---- Eligibility context from the answers ---- */
 
@@ -260,9 +283,33 @@ export async function POST() {
       "| AI keys ignored:", explained.ignored.length
     );
 
-    /* ---- Forecast the shortlist from benchmarks ---- */
+    /* ---- Products the cards can sell (target setting, client spec Oct 2026) ---- */
 
-    const benchmarkRevenue = await benchmarkRevenuePerProduct(products, horizonMonths);
+    /**
+     * The "average product goal / 3" forecast is GONE (the spec removes it
+     * entirely). Each card now sells ONE product, chosen on the card, and its
+     * target is units x that product's price, with units suggested from the
+     * card's Revenue-score share of the product goal. The page computes the
+     * suggestion live (src/lib/planning/targets.ts) as cards are added,
+     * removed or change product; the build recomputes it server-side.
+     *
+     * Default product: the FIRST one listed on the products screen. The client
+     * rejected "largest goal" (people often lead with their smallest product)
+     * and has no entry-level flag yet.
+     */
+    const targetProducts = products
+      .filter((p) => str(p.name) && str(p.id))
+      .map((p) => ({
+        id: str(p.id) as string,
+        name: str(p.name) as string,
+        price: num(p.average_price),
+        goalUnits: num(p.units_in_period),
+      }));
+    const defaultProductId = targetProducts[0]?.id ?? null;
+    const benchmarkRevenue = {
+      perInitiative: 0,
+      productIds: defaultProductId ? [defaultProductId] : [],
+    };
 
     const toRecommendation = (entry: ExplainedInitiative): Recommendation => ({
       key: entry.initiative.key,
@@ -278,6 +325,7 @@ export async function POST() {
       fromBenchmarks: true,
       why: entry.explanation.whyFits || null,
       productIds: benchmarkRevenue.productIds,
+      revenueScore: entry.score.breakdown.R,
       score: {
         total: entry.score.total,
         weightedTotal: entry.score.weightedTotal,
@@ -317,6 +365,7 @@ export async function POST() {
         eligible: verdict.eligible,
         reason: verdict.reason,
         forecast: benchmarkRevenue.perInitiative,
+        revenueScore: score.breakdown.R,
         score: {
           total: score.total,
           weightedTotal: score.weightedTotal,
@@ -360,6 +409,9 @@ export async function POST() {
        */
       capacity,
       aiUnavailable,
+      /** What a card can sell: price and goal units, for units x price targets. */
+      products: targetProducts,
+      defaultProductId,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -521,46 +573,6 @@ function audience(
   if (input[unknownField] === true) return "they don't know";
   const value = num(input[field]);
   return value === null ? "not given" : String(value);
-}
-
-/* ------------------------------------------------------------------ *
- * Benchmark forecasting
- * ------------------------------------------------------------------ */
-
-/**
- * A benchmark revenue figure for a recommended initiative.
- *
- * Derived from the user's OWN product goals rather than from a generic
- * conversion model: the honest estimate of what one new initiative might
- * contribute is a share of what they are already trying to sell. Inventing an
- * audience and a conversion rate for a business we have no history on would
- * produce a confident number with nothing behind it.
- *
- * Deliberately conservative — a third of the average product goal — and flagged
- * `fromBenchmarks` so the card says where it came from (REQ-13.6).
- */
-async function benchmarkRevenuePerProduct(
-  products: readonly Record<string, unknown>[],
-  _horizonMonths: number
-): Promise<{ perInitiative: number; productIds: string[] }> {
-  const goals = products.map((product) => ({
-    id: str(product.id) ?? "",
-    goal: productGoal(num(product.average_price), num(product.units_in_period)),
-  }));
-
-  const total = goals.reduce((sum, g) => sum + g.goal, 0);
-  if (total === 0 || goals.length === 0) {
-    return { perInitiative: 0, productIds: goals.map((g) => g.id).filter(Boolean) };
-  }
-
-  // Attributed to the largest product, which is the one most in need of
-  // additional coverage (REQ-13.11).
-  const largest = goals.reduce((a, b) => (b.goal > a.goal ? b : a));
-
-  return {
-    perInitiative: Math.round((total / goals.length) / 3),
-    productIds: largest.id ? [largest.id] : [],
-  };
 }
 
 /* ------------------------------------------------------------------ *

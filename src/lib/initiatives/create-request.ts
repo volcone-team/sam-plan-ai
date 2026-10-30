@@ -61,6 +61,14 @@ export interface CreateInitiativeRequest {
   eventDatePrecision?: DatePrecision;
   /** The variable layers of the form. Always a plain object. */
   attrs?: Record<string, unknown>;
+  /** Migration 061, recurring only: YYYY-MM-DD of the last occurrence. */
+  lastOccurrenceDate?: string | null;
+  /** Migration 061, recurring only: Good for ONE occurrence. */
+  revenuePerOccurrence?: number | null;
+  /** Migration 061: units x price target. Units are per occurrence when recurring. */
+  unitsGoal?: number | null;
+  unitPriceAtSet?: number | null;
+  targetSource?: "suggested" | "edited" | null;
 }
 
 const AUDIENCE_SOURCES = ["own", "borrowed"] as const;
@@ -89,6 +97,11 @@ type NewFields = Pick<
   | "activationDatePrecision"
   | "eventDatePrecision"
   | "attrs"
+  | "lastOccurrenceDate"
+  | "revenuePerOccurrence"
+  | "unitsGoal"
+  | "unitPriceAtSet"
+  | "targetSource"
 >;
 
 /** Validate the 045 fields. Each is checked only when its key is present. */
@@ -138,6 +151,37 @@ function parseNewFields(body: Record<string, unknown>): { ok: true; value: NewFi
   if (body.attrs !== undefined) {
     if (!isPlainObject(body.attrs)) return { ok: false, error: "Invalid attributes." };
     out.attrs = body.attrs;
+  }
+  if (body.lastOccurrenceDate !== undefined) {
+    if (body.lastOccurrenceDate === null) out.lastOccurrenceDate = null;
+    else {
+      const d = validDate(body.lastOccurrenceDate);
+      if (!d) return { ok: false, error: "Enter a valid last occurrence date." };
+      out.lastOccurrenceDate = d;
+    }
+  }
+  if (body.revenuePerOccurrence !== undefined) {
+    const v = body.revenuePerOccurrence;
+    if (v === null) out.revenuePerOccurrence = null;
+    else if (typeof v === "number" && Number.isFinite(v) && v >= 0) out.revenuePerOccurrence = v;
+    else return { ok: false, error: "Invalid revenue per occurrence." };
+  }
+  if (body.unitsGoal !== undefined) {
+    const v = body.unitsGoal;
+    if (v === null) out.unitsGoal = null;
+    else if (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 1_000_000) out.unitsGoal = v;
+    else return { ok: false, error: "Enter the units as a whole number." };
+  }
+  if (body.unitPriceAtSet !== undefined) {
+    const v = body.unitPriceAtSet;
+    if (v === null) out.unitPriceAtSet = null;
+    else if (typeof v === "number" && Number.isFinite(v) && v >= 0) out.unitPriceAtSet = v;
+    else return { ok: false, error: "Invalid unit price." };
+  }
+  if (body.targetSource !== undefined) {
+    const v = body.targetSource;
+    if (v === null || v === "suggested" || v === "edited") out.targetSource = v;
+    else return { ok: false, error: "Invalid target source." };
   }
 
   return { ok: true, value: out };

@@ -27,6 +27,7 @@ import {
   type RepeatFrequency,
 } from "@/lib/intake-forecast";
 import type { InitiativeKind } from "@/types";
+import { autoBest, autoBetter } from "@/lib/intake-v3/revenue";
 
 /** The three scenarios `initiatives` stores. */
 export interface RevenueScenarios {
@@ -166,11 +167,14 @@ export function scenariosFor(forecast: number | null): RevenueScenarios {
     return { good: 0, better: 0, best: 0 };
   }
 
-  return {
-    good: Math.round(forecast * GOOD_MULTIPLIER),
-    better: Math.round(forecast),
-    best: Math.round(forecast * BEST_MULTIPLIER),
-  };
+  /*
+   * ONE TARGET: GOOD (target-setting spec, Oct 2026). The user's own funnel
+   * forecast IS the target, so it is Good; Better and Best are +10% / +20%
+   * exactly as on every form (revenue.ts). The old 0.7 / 1.0 / 1.3 spread
+   * made Good 70% of the user's own figure once dashboards read Good.
+   */
+  const good = Math.round(forecast);
+  return { good, better: autoBetter(good), best: autoBest(good) };
 }
 
 /**

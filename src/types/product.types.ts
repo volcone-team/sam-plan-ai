@@ -17,6 +17,8 @@ export interface Product {
   revenueType: RevenueType;
   /** Recurring products only; null for one-time. An unrecorded interval reads as 'month'. */
   recurringInterval: RecurringInterval | null;
+  /** Migration 061: units to sell in the plan; product goal = price x goalUnits. Null = no goal. */
+  goalUnits?: number | null;
   ticketTier: ProductTicketTier;
   isActive: boolean;
   displayOrder: number;

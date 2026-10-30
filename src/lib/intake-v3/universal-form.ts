@@ -56,6 +56,8 @@ import type { PickerItem } from "./picker";
 import { schemaAttrs, schemaErrors, schemaFor } from "./category-schemas";
 import { LEAD_GOAL_ATTR, LEAD_HANDOFF_ATTR } from "../initiatives/lead-handoff";
 import type { ScheduleFields } from "../initiatives/schedule";
+import { defaultLastOccurrence } from "../initiatives/occurrences";
+import { runDates } from "../planning/revenue-spread";
 
 /* ------------------------------------------------------------------ *
  * Shapes
@@ -167,6 +169,12 @@ export interface IntakeDraft {
     event: DraftDate;
     /** When it stops producing revenue (revenue_close_date). */
     close: DraftDate;
+    /**
+     * Recurring only: the LAST occurrence (last_occurrence_date, migration
+     * 061). Bounds the series; defaults to the plan-year end. Optional so a
+     * draft built before this existed still reads; absent is blank.
+     */
+    last?: DraftDate;
   };
   revenue: DraftRevenue;
   productId: string | null;
@@ -192,8 +200,6 @@ export interface IntakeDraft {
    * path, so it is not asked twice.
    */
   cart: { opens: DraftDate };
-  /** VIP block (attached by category). Price and capacity only count when offered. */
-  vip: { offered: boolean | null; price: DraftAmount; capacity: DraftAmount; included: string };
   /** Affiliate block (attached by category). All optional. */
   affiliate: { partnerCount: DraftAmount; recruitment: RecruitmentStatus | null; terms: string };
   /** "Their promo plan": revealed while PROMOTION_SOMEONE_ELSE is selected. */
@@ -297,7 +303,6 @@ export function initialDraft(item: PickerItem, config: LibraryRecordConfig): Int
     promotedBy: [],
     partner: { host: null, bookingStatus: null },
     cart: { opens: emptyDate() },
-    vip: { offered: null, price: null, capacity: null, included: "" },
     affiliate: { partnerCount: null, recruitment: null, terms: "" },
     promoPlan: { who: "", sending: [], sends: null },
     adPlatforms: [],
@@ -456,7 +461,69 @@ export function setDraftKind(
       next = { ...next, dates: { ...next.dates, close: emptyDate() } };
     }
   }
-  return withOngoingCloseDefault(next, config, planYear);
+  return withRecurringLastDefault(withOngoingCloseDefault(next, config, planYear), config, planYear);
+}
+
+/* ------------------------------------------------------------------ *
+ * Recurring: first and last occurrence, occurrences, per-occurrence revenue
+ * ------------------------------------------------------------------ */
+
+/** Is this draft a recurring series? */
+export function isRecurringDraft(draft: IntakeDraft, config: LibraryRecordConfig): boolean {
+  return layoutFor(draft, config).effectiveKind === "recurring";
+}
+
+/**
+ * Fill a blank last occurrence with the plan-year end while the draft is
+ * recurring (client: a monthly initiative is "12 in the plan"). Without a
+ * plan year, the end of the first occurrence's year.
+ */
+export function withRecurringLastDefault(
+  draft: IntakeDraft,
+  config: LibraryRecordConfig,
+  planYear: number | null | undefined
+): IntakeDraft {
+  if (!isRecurringDraft(draft, config)) return draft;
+  if (readDate(draft.dates.last ?? emptyDate()).status !== "empty") return draft;
+  const first = readDate(draft.dates.event);
+  const value =
+    defaultLastOccurrence(planYear) ??
+    (first.status === "ok" ? defaultLastOccurrence(Number(first.stored.slice(0, 4))) : null);
+  return value ? { ...draft, dates: { ...draft.dates, last: { value, precision: "day" } } } : draft;
+}
+
+/** The frequency the draft repeats at: the answer, or the record's only one. */
+function draftFrequency(draft: IntakeDraft, layout: FormLayout): RecurrenceFrequency | null {
+  if (layout.frequency.state === "rendered") return draft.frequency;
+  if (layout.frequency.state === "suppressed") return layout.frequency.value ?? null;
+  return null;
+}
+
+/**
+ * How many occurrences the draft's series has, first to last occurrence.
+ * 1 for anything that is not recurring; null while a recurring draft does not
+ * have the frequency and first occurrence to count from yet.
+ */
+export function draftOccurrences(draft: IntakeDraft, config: LibraryRecordConfig): number | null {
+  const layout = layoutFor(draft, config);
+  if (layout.effectiveKind !== "recurring") return 1;
+  const frequency = draftFrequency(draft, layout);
+  const first = layout.eventDate.state === "rendered" ? readDate(draft.dates.event) : EMPTY_READ;
+  const start = layout.activationDate.state === "rendered" ? readDate(draft.dates.activation) : EMPTY_READ;
+  const anchor = first.status === "ok" ? first.stored : start.status === "ok" ? start.stored : null;
+  if (!frequency || !anchor) return null;
+  const last = readDate(draft.dates.last ?? emptyDate());
+  const dates = runDates(
+    {
+      kind: "recurring",
+      repeatFrequency: frequency,
+      eventDate: anchor,
+      categoryId: draft.categoryId,
+      lastOccurrenceDate: last.status === "ok" ? last.stored : null,
+    },
+    null
+  );
+  return dates.length > 0 ? dates.length : null;
 }
 
 const asDraftDate = (v: unknown): DraftDate | null =>
@@ -566,10 +633,38 @@ export function revenueLineIds(config: Pick<LibraryRecordConfig, "revenueLines">
 }
 
 type RevenueRead =
-  | { ok: true; scenarios: ScenarioTriple; lines: Record<string, number> | null }
+  | {
+      ok: true;
+      /** The PLAN total: per occurrence x occurrences for a recurring draft. */
+      scenarios: ScenarioTriple;
+      lines: Record<string, number> | null;
+      /** Recurring only: the figures for ONE occurrence, as typed. */
+      perOccurrence?: ScenarioTriple | null;
+      occurrences?: number;
+    }
   | { ok: false; errors: Record<string, string> };
 
+/**
+ * The revenue read, with a recurring draft's figures taken as PER OCCURRENCE
+ * (client, Oct 2026: "$75,000 per webinar, not in total") and multiplied by
+ * the occurrences in the series. One-time and ongoing work is unchanged.
+ */
 function readRevenue(draft: IntakeDraft, config: LibraryRecordConfig, layout: FormLayout): RevenueRead {
+  const read = readRevenueOnce(draft, config, layout);
+  if (!read.ok || layout.effectiveKind !== "recurring") return read;
+  const n = draftOccurrences(draft, config) ?? 1;
+  const per = read.scenarios;
+  const times = (v: number) => Math.round(v * n * 100) / 100;
+  return {
+    ...read,
+    perOccurrence: per,
+    occurrences: n,
+    scenarios: { good: times(per.good), better: times(per.better), best: times(per.best) },
+  };
+}
+
+/** The figures as typed (one occurrence, for a recurring draft). */
+function readRevenueOnce(draft: IntakeDraft, config: LibraryRecordConfig, layout: FormLayout): RevenueRead {
   // The leads path earns nothing by definition (revenue.ts): no target to ask for.
   if (isLeadsPath(layout.effectivePath)) {
     return { ok: true, scenarios: { good: 0, better: 0, best: 0 }, lines: null };
@@ -723,15 +818,6 @@ function blockErrors(
     }
   }
 
-  if (attached.has("vip") && draft.vip.offered === true) {
-    const price = readNumber(draft.vip.price);
-    if (price.status === "empty") errors["vip.price"] = "Enter the VIP price.";
-    else if (price.status === "invalid" || price.value <= 0) errors["vip.price"] = "Enter a valid VIP price.";
-    if (readNumber(draft.vip.capacity, { whole: true }).status === "invalid") {
-      errors["vip.capacity"] = "Enter capacity as a whole number.";
-    }
-  }
-
   if (attached.has("affiliate") && readNumber(draft.affiliate.partnerCount, { whole: true }).status === "invalid") {
     errors["affiliate.partnerCount"] = "Enter the partner count as a whole number.";
   }
@@ -816,11 +902,28 @@ export function draftErrors(draft: IntakeDraft, config: LibraryRecordConfig): Dr
     errors["dates.close"] = closeCopy.beforeStart;
   }
 
-  if (event.status === "invalid") errors["dates.event"] = "Enter a valid event date.";
+  const recurring = layout.effectiveKind === "recurring";
+  if (event.status === "invalid") errors["dates.event"] = recurring ? "Enter a valid first occurrence date." : "Enter a valid event date.";
   else if (event.status === "empty" && eventAsked && layout.effectiveKind === "one-time") {
     errors["dates.event"] = "Enter the event date.";
+  } else if (event.status === "empty" && eventAsked && recurring) {
+    // The series is counted from it; without it there is nothing to repeat.
+    errors["dates.event"] = "Enter the first occurrence date.";
   } else if (event.status === "ok" && activation.status === "ok" && before(event, activation)) {
-    errors["dates.event"] = "The event can't be before the start date.";
+    errors["dates.event"] = recurring
+      ? "The first occurrence can't be before the start date."
+      : "The event can't be before the start date.";
+  }
+
+  // Recurring: the last occurrence bounds the series. Required (it defaults
+  // to the plan-year end, so a blank one was cleared on purpose).
+  if (recurring) {
+    const last = readDate(draft.dates.last ?? emptyDate());
+    if (last.status === "empty") errors["dates.last"] = "Enter the last occurrence date.";
+    else if (last.status === "invalid") errors["dates.last"] = "Enter a valid last occurrence date.";
+    else if (event.status === "ok" && before(last, event)) {
+      errors["dates.last"] = "The last occurrence can't be before the first.";
+    }
   }
 
   blockErrors(draft, config, layout, activation, close, errors);
@@ -1002,15 +1105,6 @@ export function buildCreateRequest(
       if (opens.precision === "month") attrs.cart_opens_precision = "month";
     }
   }
-  if (attached.has("vip") && draft.vip.offered !== null) {
-    const yes = draft.vip.offered === true;
-    attrs.vip = {
-      offered: yes,
-      price: yes ? numberOrNull(draft.vip.price) : null,
-      capacity: yes ? numberOrNull(draft.vip.capacity) : null,
-      included: yes ? textOrNull(draft.vip.included) : null,
-    };
-  }
   if (attached.has("affiliate")) {
     const affiliate = {
       partner_count: numberOrNull(draft.affiliate.partnerCount),
@@ -1097,5 +1191,11 @@ export function buildCreateRequest(
   };
   // Unset, not null, when undecided: "I don't know yet" is not a path.
   if (layout.effectivePath && !undecided) request.conversionPath = layout.effectivePath;
+  // Recurring: where the series ends, and what ONE occurrence earns.
+  if (kind === "recurring") {
+    const last = readDate(draft.dates.last ?? emptyDate());
+    if (last.status === "ok") request.lastOccurrenceDate = last.stored;
+    if (revenue.ok && revenue.perOccurrence) request.revenuePerOccurrence = revenue.perOccurrence.good;
+  }
   return request;
 }

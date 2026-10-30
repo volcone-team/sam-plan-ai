@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
-import { snapshotPlanYear, snapshotPlanTargets } from "@/lib/plan-snapshot-year";
+import {
+  initiativeRestoreYear,
+  snapshotPlanTargets,
+  snapshotPlanYear,
+  snapshotPlanYearsById,
+  snapshotTargetsForYear,
+} from "@/lib/plan-snapshot-year";
 import { snapshotProducts } from "@/lib/snapshot-products";
 import { LIMIT_KEYS } from "@/lib/billing/limits";
 import {
@@ -120,22 +126,45 @@ export async function POST(
      */
     const targetYear = snapshotPlanYear(data, new Date().getUTCFullYear());
 
-    const [{ data: existingPlan }, { data: currentProducts }] = await Promise.all([
+    const initiativesToRestore = onlyInitiativeId
+      ? snapInitiatives.filter((i) => i.id === onlyInitiativeId)
+      : snapInitiatives;
+
+    /*
+     * EVERY YEAR THIS RESTORE TOUCHES, AND ONLY THOSE (client, Oct 2026).
+     * A plan can span 2026 and 2027. Each initiative goes back under the plan
+     * year it came from, and a full restore clears and replaces only these
+     * years: it used to delete every not-started initiative in the company,
+     * which is how restoring a deleted 2026 plan wiped 2027.
+     */
+    const planYearsById = snapshotPlanYearsById(data);
+    const yearOf = (si: any) => initiativeRestoreYear(si, planYearsById, targetYear);
+    const snapshotYears = (Array.isArray(data.years) ? data.years : [])
+      .map((y: unknown) => Number(y))
+      .filter((y: number) => Number.isInteger(y) && y > 2000 && y < 3000);
+    const restoreYears: number[] = [
+      ...new Set<number>([
+        targetYear,
+        ...initiativesToRestore.map(yearOf),
+        ...(onlyInitiativeId ? [] : [...snapshotYears, ...planYearsById.values()]),
+      ]),
+    ].sort((a, b) => a - b);
+
+    const [{ data: existingPlans }, { data: currentProducts }] = await Promise.all([
       admin
         .from("annual_plans")
-        .select("id")
+        .select("id, year")
         .eq("company_id", companyId)
-        .eq("year", targetYear)
-        .maybeSingle(),
+        .in("year", restoreYears),
       admin
         .from("products")
         .select("id, name, is_active")
         .eq("company_id", companyId),
     ]);
-
-    const initiativesToRestore = onlyInitiativeId
-      ? snapInitiatives.filter((i) => i.id === onlyInitiativeId)
-      : snapInitiatives;
+    const planIdByYear = new Map<number, string>(
+      ((existingPlans ?? []) as { id: string; year: number }[]).map((p) => [Number(p.year), p.id])
+    );
+    const existingPlan = planIdByYear.has(targetYear) ? { id: planIdByYear.get(targetYear)! } : null;
 
     // Only meaningful for a SINGLE-initiative restore. A full restore of an
     // empty plan (a deleted year with no initiatives) is legitimate and must
@@ -151,28 +180,34 @@ export async function POST(
        * FULL restore first deletes every not-started ("planned") initiative,
        * so only started ones stay; a single restore keeps everything.
        */
-      let remaining = 0;
-      if (existingPlan?.id) {
-        let q = admin
-          .from("initiatives")
-          .select("id", { count: "exact", head: true })
-          .eq("company_id", companyId)
-          .eq("annual_plan_id", existingPlan.id);
-        if (!onlyInitiativeId) q = q.neq("status", "planned");
-        const { count, error: countErr } = await q;
-        if (countErr) {
-          return NextResponse.json(
-            { error: "Could not check your plan limits, so nothing was restored. Please try again." },
-            { status: 500 }
-          );
+      // Checked per plan year: max_initiatives is a per-year limit, and each
+      // initiative now goes back into its own year.
+      for (const year of restoreYears) {
+        const incoming = initiativesToRestore.filter((si) => yearOf(si) === year).length;
+        if (incoming === 0) continue;
+        let remaining = 0;
+        const planId = planIdByYear.get(year);
+        if (planId) {
+          let q = admin
+            .from("initiatives")
+            .select("id", { count: "exact", head: true })
+            .eq("company_id", companyId)
+            .eq("annual_plan_id", planId);
+          if (!onlyInitiativeId) q = q.neq("status", "planned");
+          const { count, error: countErr } = await q;
+          if (countErr) {
+            return NextResponse.json(
+              { error: "Could not check your plan limits, so nothing was restored. Please try again." },
+              { status: 500 }
+            );
+          }
+          remaining = count ?? 0;
         }
-        remaining = count ?? 0;
+        const initiativeLimit = evaluateLiveLimit(
+          limitCtx, LIMIT_KEYS.MAX_INITIATIVES, remaining, incoming, { year }
+        );
+        if (!initiativeLimit.ok) return liveLimitResponse(initiativeLimit);
       }
-      const initiativeLimit = evaluateLiveLimit(
-        limitCtx, LIMIT_KEYS.MAX_INITIATIVES, remaining, initiativesToRestore.length,
-        { year: targetYear }
-      );
-      if (!initiativeLimit.ok) return liveLimitResponse(initiativeLimit);
 
       /*
        * Products: snapshot products whose name matches nothing current are
@@ -206,15 +241,17 @@ export async function POST(
         { data: curProj },
         { data: curResults },
         { data: curExpenses },
-        { data: curAnnual },
+        { data: curAnnualPlans },
       ] = await Promise.all([
         admin.from("initiatives").select("*").eq("company_id", companyId),
         admin.from("tasks").select("*").eq("company_id", companyId),
         admin.from("projections").select("*").eq("company_id", companyId),
         admin.from("results").select("*").eq("company_id", companyId),
         admin.from("expenses").select("*").eq("company_id", companyId),
-        admin.from("annual_plans").select("*").eq("company_id", companyId).order("year", { ascending: false }).limit(1).single(),
+        admin.from("annual_plans").select("*").eq("company_id", companyId).order("year", { ascending: false }),
       ]);
+      // Every year's plan row, so restoring THIS snapshot puts each year back in its own year.
+      const curAnnual = (curAnnualPlans ?? [])[0] ?? null;
 
       if ((curInit?.length || 0) > 0) {
         const { count } = await admin
@@ -226,6 +263,8 @@ export async function POST(
           label: `Plan v${(count || 0) + 1} (before restore)`,
           snapshot: {
             annualPlan: curAnnual || null,
+            annualPlans: curAnnualPlans || [],
+            years: (curAnnualPlans || []).map((p: { year: number }) => p.year).sort((a: number, b: number) => a - b),
             initiatives: curInit || [],
             tasks: curTasks || [],
             projections: curProj || [],
@@ -260,46 +299,33 @@ export async function POST(
      * `snapshotPlanYear` answers this from the snapshot rather than from
      * whatever the database holds now.
      */
-    // `targetYear` and `existingPlan` were read in step 1b.
-    let annualPlan = existingPlan as { id: string } | null;
-
-    if (!annualPlan) {
-      /**
-       * Recreate the year, with the snapshot's own targets.
-       *
-       * `status: "active"` because a restored plan is one the customer intends
-       * to run — leaving it 'draft' would hide it from the views that filter on
-       * active plans, so the restore would appear to have done nothing.
-       */
+    // Every restore year needs a plan row; a missing one is recreated with
+    // the snapshot's own targets for that year.
+    for (const year of restoreYears) {
+      if (planIdByYear.has(year)) continue;
+      const targets = snapshotTargetsForYear(data, year) ?? (year === targetYear ? snapshotPlanTargets(data) : null);
       const { data: createdPlan, error: createPlanErr } = await admin
         .from("annual_plans")
         .insert({
           company_id: companyId,
-          year: targetYear,
-          ...snapshotPlanTargets(data),
+          year,
+          ...(targets ?? { baseline_revenue: 0, stretch_revenue: 0, operating_budget: 0 }),
           status: "active",
         })
         .select("id")
         .single();
-
       if (createPlanErr || !createdPlan) {
-        console.error(
-          "[plan/restore] Could not recreate the", targetYear, "plan:",
-          createPlanErr?.message
-        );
+        console.error("[plan/restore] Could not recreate the", year, "plan:", createPlanErr?.message);
         return NextResponse.json(
-          {
-            error:
-              `Could not recreate your ${targetYear} plan, so nothing was ` +
-              `restored. Please try again.`,
-          },
+          { error: `Could not recreate your ${year} plan, so nothing was restored. Please try again.` },
           { status: 500 }
         );
       }
-
-      annualPlan = createdPlan as { id: string };
-      console.log("[plan/restore] Recreated the", targetYear, "plan to restore into");
+      planIdByYear.set(year, createdPlan.id as string);
+      console.log("[plan/restore] Recreated the", year, "plan to restore into");
     }
+    const annualPlan = { id: planIdByYear.get(targetYear)! };
+    const restorePlanIds = restoreYears.map((y) => planIdByYear.get(y)!).filter(Boolean);
 
     // 4. Build a product-id map. Snapshot initiatives reference old product ids.
     //    Match current products by name; if missing, recreate from snapshot products.
@@ -401,10 +427,12 @@ export async function POST(
       // Clear every initiative that has not been started, regardless of date.
       // Filtering by future activation_date left past-dated "planned" rows in
       // place, so repeated restores accumulated duplicates.
+      // Only the years being restored; other years are not touched.
       const { data: current } = await admin
         .from("initiatives")
         .select("id, status")
-        .eq("company_id", companyId);
+        .eq("company_id", companyId)
+        .in("annual_plan_id", restorePlanIds);
       const clearIds = (current || [])
         .filter((i) => i.status === "planned")
         .map((i) => i.id);
@@ -428,7 +456,8 @@ export async function POST(
         .from("initiatives")
         .insert({
           company_id: companyId,
-          annual_plan_id: annualPlan.id,
+          // The plan year it came from, not one year for everything.
+          annual_plan_id: planIdByYear.get(yearOf(si)) ?? annualPlan.id,
           product_id: productId,
           initiative_type_id: si.initiative_type_id,
           name: si.name,
@@ -479,7 +508,13 @@ export async function POST(
     let targetsRestored = false;
     if (!onlyInitiativeId) {
       // 8a. Annual plan revenue targets (+ mirror onto the company record)
-      const snapPlan = data.annualPlan || null;
+      // Other years in the snapshot get their own targets back too.
+      for (const year of restoreYears) {
+        if (year === targetYear) continue;
+        const t = snapshotTargetsForYear(data, year);
+        if (t) await admin.from("annual_plans").update({ ...t, status: "active" }).eq("id", planIdByYear.get(year)!);
+      }
+      const snapPlan = snapshotTargetsForYear(data, targetYear) ? (data.annualPlans ?? []).find((p: any) => Number(p?.year) === targetYear) ?? data.annualPlan : data.annualPlan || null;
       if (snapPlan) {
         const planUpdates = {
           baseline_revenue: Number(snapPlan.baseline_revenue) || 0,
@@ -511,11 +546,13 @@ export async function POST(
       // 8b. Projections - replace current rows with the snapshot's
       const snapProjections: any[] = data.projections || [];
       if (snapProjections.length > 0) {
-        await admin.from("projections").delete().eq("company_id", companyId);
+        // Only the restored years' projections are replaced.
+        await admin.from("projections").delete().eq("company_id", companyId).in("annual_plan_id", restorePlanIds);
         for (const sp of snapProjections) {
+          const projYear = typeof sp.annual_plan_id === "string" ? planYearsById.get(sp.annual_plan_id) : undefined;
           const { error: prErr } = await admin.from("projections").insert({
             company_id: companyId,
-            annual_plan_id: annualPlan.id,
+            annual_plan_id: (projYear !== undefined ? planIdByYear.get(projYear) : undefined) ?? annualPlan.id,
             scenario: sp.scenario,
             period: sp.period || "monthly",
             by_product: sp.by_product || [],

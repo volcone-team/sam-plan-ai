@@ -32,12 +32,28 @@ describe('runDates', () => {
     expect(runs).toEqual(['2026-12-22', '2026-12-29', '2027-01-05', '2027-01-12']);
   });
 
-  it('stops at an earlier revenue close date', () => {
+  it('stops at the last occurrence', () => {
     const i = {
       kind: 'recurring', repeatFrequency: 'monthly', activationDate: '2027-01-01', eventDate: '2027-01-15',
-      revenueCloseDate: '2027-03-20', categoryId: 'x',
+      lastOccurrenceDate: '2027-03-20', categoryId: 'x',
     };
     expect(runDates(i, '2027-12-31')).toEqual(['2027-01-15', '2027-02-15', '2027-03-15']);
+  });
+
+  it('reads the last occurrence from attrs before migration 061', () => {
+    const i = {
+      kind: 'recurring', repeatFrequency: 'monthly', eventDate: '2027-01-15',
+      attrs: { last_occurrence_date: '2027-02-28' }, categoryId: 'x',
+    };
+    expect(runDates(i, '2027-12-31')).toEqual(['2027-01-15', '2027-02-15']);
+  });
+
+  it('is NOT ended by the revenue (cart) close date (client, Oct 2026)', () => {
+    const i = {
+      kind: 'recurring', repeatFrequency: 'monthly', eventDate: '2027-01-15',
+      revenueCloseDate: '2027-01-18', categoryId: 'x',
+    };
+    expect(runDates(i, '2027-12-31')).toHaveLength(12);
   });
 
   it('defaults to twelve months from the first run without a plan end', () => {

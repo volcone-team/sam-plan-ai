@@ -47,7 +47,7 @@ export function PaceCard({
       </p>
       <p className="mt-1.5 text-2xl font-bold tracking-tight">{formatCurrency(actual)}</p>
       <p className="mt-1 flex items-center gap-1 text-sm text-[hsl(var(--foreground-muted))]">
-        Expected: {formatCurrency(expected)}
+        Good target: {formatCurrency(expected)}
         <span title="Based on the initiatives scheduled to have launched by now.">
           <Info className="h-3 w-3 text-[hsl(var(--foreground-subtle))]" />
         </span>
@@ -121,7 +121,8 @@ export function PaceCards({ companyId, asOf }: { companyId: string; asOf?: Date 
               const d = parseDateOnly(launch);
               return d >= from && d <= cutoff;
             })
-            .reduce((sum, i) => sum + (i.revenueScenarios?.better || 0), 0);
+            // One target per initiative: Good (target-setting spec, Oct 2026).
+            .reduce((sum, i) => sum + (i.revenueScenarios?.good || 0), 0);
 
         setStats({
           mtd: { actual: sumActual(monthStart), expected: sumExpected(monthStart) },

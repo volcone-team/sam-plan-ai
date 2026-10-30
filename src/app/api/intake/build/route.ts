@@ -23,11 +23,13 @@ import {
   planTargets,
   initiativeKindForCadence,
   toFrequency,
+  toCadence,
+  toFunnelStages,
   scaleToFittingRuns,
   type RevenueScenarios,
 } from "@/lib/intake/build-forecast";
 import type { RepeatFrequency } from "@/lib/intake-forecast";
-import { runsInPeriod } from "@/lib/intake-forecast";
+import { forecastPerRun, runsInPeriod } from "@/lib/intake-forecast";
 import { horizonEnd, monthShares, runDates } from "@/lib/planning/revenue-spread";
 import type { InitiativeKind } from "@/types";
 import { productGoal } from "@/lib/intake-forecast";
@@ -63,6 +65,10 @@ import { getOrCreateAnnualPlan } from "@/lib/plans/annual-plan-store";
 import { snapshotProducts } from "@/lib/snapshot-products";
 import { enqueueMilestoneEvent } from "@/lib/ghl/producers/milestone";
 import { initiativeFrequencyFallback, withFrequencyFallback } from "@/lib/initiatives/frequency-fallback";
+import { withOccurrenceFallback } from "@/lib/initiatives/occurrences";
+import { cardTargets } from "@/lib/intake/recommend-targets";
+import { targetFromUnits, usablePrice } from "@/lib/planning/targets";
+import { isMissingColumnError } from "@/lib/supabase/missing-column";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -123,6 +129,30 @@ interface BuildBody {
    * key and an index would break if the draft were re-read in another order.
    */
   droppedOwnIds?: unknown;
+  /**
+   * Target setting: per accepted key, the product its card sells (an
+   * intake_products id) and the units kept or typed. UNTRUSTED: only these two
+   * choices are read; every figure is recomputed (parsePicks, cardTargets).
+   */
+  picks?: unknown;
+  /** The user's own initiatives: { id, productId, units } (per occurrence). Untrusted, as picks. */
+  ownPicks?: unknown;
+}
+
+/** `body.picks`, validated: key -> { productId, units }. Anything malformed is ignored. */
+function parsePicks(raw: unknown): Map<string, { productId: string | null; units: number | null }> {
+  const out = new Map<string, { productId: string | null; units: number | null }>();
+  if (!Array.isArray(raw)) return out;
+  for (const p of raw.slice(0, 50)) {
+    if (typeof p !== "object" || p === null) continue;
+    const r = p as Record<string, unknown>;
+    if (typeof r.key !== "string" || r.key === "") continue;
+    const units = typeof r.units === "number" && Number.isFinite(r.units) && r.units >= 0 && r.units <= 1_000_000
+      ? Math.floor(r.units)
+      : null;
+    out.set(r.key, { productId: typeof r.productId === "string" ? r.productId : null, units });
+  }
+  return out;
 }
 
 export async function POST(request: NextRequest) {
@@ -340,6 +370,8 @@ export async function POST(request: NextRequest) {
       kind: InitiativeKind;
       /** One of the seven RepeatFrequency values, or null when it does not repeat. */
       repeatFrequency: RepeatFrequency | null;
+      /** Recommendations only (migration 061): units x price, and where the units came from. */
+      unitTarget?: { units: number; price: number; source: "suggested" | "edited" } | null;
     }[] = [];
 
     // The horizon the funnel figures are projected over. Defaults to 12 so a
@@ -349,9 +381,47 @@ export async function POST(request: NextRequest) {
       ? savedHorizon
       : DEFAULT_PLANNING_PERIOD;
 
+    /*
+     * TARGET SETTING for the user's OWN initiatives (recommendations page,
+     * "What you're already planning"): the product chosen there and the units
+     * per occurrence. Price comes from the intake product; Good = units x
+     * price x runs. Without a valid pick the funnel forecast stands, as before.
+     */
+    const ownPicks = parsePicks(
+      Array.isArray(body.ownPicks)
+        ? (body.ownPicks as unknown[]).map((p) =>
+            typeof p === "object" && p !== null ? { ...(p as Record<string, unknown>), key: (p as Record<string, unknown>).id } : p
+          )
+        : []
+    );
+    const priceByIntakeId = new Map(
+      intakeProducts.map((p) => [str(p.id) ?? "", num(p.average_price)] as const)
+    );
+
     for (const [index, initiative] of plannedInitiatives.entries()) {
       const key = str(initiative.initiative_key);
       if (!key) continue;
+      const pick = ownPicks.get(str(initiative.id) ?? "");
+      const pickedProduct = pick?.productId && namedIntakeIds.has(pick.productId) ? pick.productId : null;
+      const pickedPrice = pickedProduct ? usablePrice(priceByIntakeId.get(pickedProduct)) : null;
+      const runs = Math.max(1, runsInPeriod(toCadence(initiative.cadence), toFrequency(initiative.repeat_frequency), horizonMonths));
+      const unitTarget =
+        pick && pickedPrice !== null && pick.units !== null
+          ? (() => {
+              const perRun = forecastPerRun({
+                audienceReached: num(initiative.audience_reached),
+                stages: toFunnelStages(initiative.funnel_stages),
+                averagePrice: num(initiative.average_price),
+              });
+              const suggested = perRun !== null && perRun > 0 ? Math.max(1, Math.round(perRun / pickedPrice)) : null;
+              return {
+                units: pick.units,
+                price: pickedPrice,
+                source: (suggested !== null && suggested === pick.units ? "suggested" : "edited") as "suggested" | "edited",
+                scenarios: targetFromUnits({ units: pick.units, price: pickedPrice, occurrences: runs }),
+              };
+            })()
+          : null;
 
       /**
        * Product chips are stored as `intake_products` ids, translated to the
@@ -367,8 +437,9 @@ export async function POST(request: NextRequest) {
         namedIntakeIds.has(id)
       );
 
-      const intakeProductIds =
-        mapped.length > 0
+      const intakeProductIds = pickedProduct
+        ? [pickedProduct]
+        : mapped.length > 0
           ? mapped
           : largestIntakeId
             ? [largestIntakeId]
@@ -390,9 +461,10 @@ export async function POST(request: NextRequest) {
          * recomputed from the same stored funnel. Without this the initiative
          * is created with no revenue and the dashboard reads $0 everywhere.
          */
-        revenue: scenariosFor(
-          forecastForStoredInitiative(initiative, horizonMonths)
-        ),
+        revenue: unitTarget
+          ? { good: unitTarget.scenarios.good, better: unitTarget.scenarios.better, best: unitTarget.scenarios.best }
+          : scenariosFor(forecastForStoredInitiative(initiative, horizonMonths)),
+        unitTarget: unitTarget ? { units: unitTarget.units, price: unitTarget.price, source: unitTarget.source } : null,
         /**
          * The cadence the user chose, carried through instead of discarded.
          *
@@ -407,27 +479,70 @@ export async function POST(request: NextRequest) {
     }
 
     /**
-     * A recommendation has no funnel of its own — the user never ran it — so
-     * its forecast comes from the same benchmark the recommendations screen
-     * used: a conservative third of the average product goal.
+     * TARGET SETTING (client spec, Oct 2026). A recommendation sells ONE
+     * product, chosen on its card, and its target is units x that product's
+     * price. The "third of the average product goal" benchmark is gone.
      *
-     * Recomputed here rather than accepted from the client, which could send
-     * any figure it liked.
+     * Only the CHOICES come from the client: which product, and the units.
+     * Price, the suggestion and Good are recomputed here from the intake with
+     * the same module the page used (cardTargets), so a client cannot post a
+     * revenue figure of its own. A product that is not one of this intake's
+     * named products falls back to the default (the first listed).
      */
-    const benchmarkRevenue = benchmarkPerInitiative(intakeProducts);
+    const firstIntakeId =
+      intakeProducts.map((p) => str(p.id)).find((id): id is string => !!id && namedIntakeIds.has(id)) ?? null;
+    const picksByKey = parsePicks(body.picks);
+    const productByKey = new Map<string, string | null>(
+      acceptedKeys.map((key) => {
+        const chosen = picksByKey.get(key)?.productId ?? null;
+        return [key, chosen && namedIntakeIds.has(chosen) ? chosen : firstIntakeId];
+      })
+    );
+    const recommendedTargets = cardTargets({
+      selected: acceptedKeys,
+      shown: [],
+      revenueScoreByKey: new Map(acceptedKeys.map((key) => [key, libraryByKey.get(key)?.revenueScore ?? null])),
+      productByKey,
+      unitsByKey: new Map(
+        acceptedKeys.flatMap((key) => {
+          const units = picksByKey.get(key)?.units;
+          return units === null || units === undefined ? [] : [[key, String(units)] as const];
+        })
+      ),
+      products: intakeProducts
+        .filter((p) => namedIntakeIds.has(str(p.id) ?? ""))
+        .map((p) => ({
+          id: str(p.id) as string,
+          price: num(p.average_price),
+          goalUnits: num(p.units_in_period),
+        })),
+      planGoal: num(input.revenue_goal),
+    });
 
     // Accepted recommendations start a month apart as an opening intent;
     // sequencing below then spaces them by their real preparation windows.
     for (const [offset, key] of acceptedKeys.entries()) {
+      const target = recommendedTargets.get(key);
+      const productId = productByKey.get(key) ?? null;
       pending.push({
         libraryKey: key,
         // The library's name, not the raw key: this used to write "webinar"
         // as the initiative's name on the customer's plan.
         name: libraryByKey.get(key)?.name ?? key,
         desiredEvent: addMonths(planStart, offset),
-        intakeProductIds: largestIntakeId ? [largestIntakeId] : [],
+        intakeProductIds: productId ? [productId] : [],
         displayOrder: plannedInitiatives.length + offset,
-        revenue: scenariosFor(benchmarkRevenue),
+        revenue: target
+          ? { good: target.good, better: target.better, best: target.best }
+          : { good: 0, better: 0, best: 0 },
+        unitTarget:
+          target && target.units !== null && target.price !== null
+            ? {
+                units: target.units,
+                price: target.price,
+                source: target.edited ? "edited" : "suggested",
+              }
+            : null,
         /**
          * A RECOMMENDATION STARTS AS ONE-TIME, and that is honest rather than
          * lazy: the user has never run it and was never asked how often they
@@ -685,6 +800,8 @@ export async function POST(request: NextRequest) {
         // The intake's "per month / per year" answer (migration 055).
         recurring_interval: intervalFor(toRevenueType(product.payment_type), product.recurring_interval),
         ticket_tier: toTicketTier(product.price_level),
+        // Migration 061: the product goal (price x goal_units) manual add shares.
+        goal_units: wholeUnitsOrNull(product.units_in_period),
         display_order: index,
         is_active: true,
       };
@@ -696,8 +813,10 @@ export async function POST(request: NextRequest) {
         const update = (payload: Record<string, unknown>) =>
           db.from("products").update(payload).eq("id", existingId).eq("company_id", companyId);
         let { error } = await update(fields);
+        // Migration 061 not applied: keep the product without its goal units.
+        if (isMissingGoalUnitsColumn(error)) ({ error } = await update(withoutGoalUnits(fields)));
         // Migration 055 not applied yet: keep the product without the interval.
-        if (isMissingIntervalColumn(error)) ({ error } = await update(withoutInterval(fields) ?? fields));
+        if (isMissingIntervalColumn(error)) ({ error } = await update(withoutInterval(withoutGoalUnits(fields)) ?? fields));
 
         if (error) {
           console.error("[intake/build] product update failed:", error.message);
@@ -711,7 +830,8 @@ export async function POST(request: NextRequest) {
         const insert = (payload: Record<string, unknown>) =>
           db.from("products").insert({ company_id: companyId, ...payload }).select("id").single();
         let { data: created, error } = await insert(fields);
-        if (isMissingIntervalColumn(error)) ({ data: created, error } = await insert(withoutInterval(fields) ?? fields));
+        if (isMissingGoalUnitsColumn(error)) ({ data: created, error } = await insert(withoutGoalUnits(fields)));
+        if (isMissingIntervalColumn(error)) ({ data: created, error } = await insert(withoutInterval(withoutGoalUnits(fields)) ?? fields));
 
         if (error || !created) {
           console.error("[intake/build] product insert failed:", error?.message);
@@ -772,6 +892,16 @@ export async function POST(request: NextRequest) {
               )
             : item.revenue;
 
+      /*
+       * Recurring: what ONE occurrence earns (client: "$75,000 per webinar"),
+       * recorded beside the total so the overview and the Edit form show the
+       * figure the user's own funnel gives for one run.
+       */
+      const occurrenceCount =
+        item.kind === "recurring" && item.repeatFrequency ? runDates(placed, planEnd).length : 0;
+      const revenuePerOccurrence =
+        occurrenceCount > 0 ? Math.round((revenue.good / occurrenceCount) * 100) / 100 : null;
+
       const ok = await insertInitiative(db, {
         companyId,
         libraryKey: item.libraryKey,
@@ -781,6 +911,8 @@ export async function POST(request: NextRequest) {
         productIds: liveProductIds(item.intakeProductIds),
         displayOrder: item.displayOrder,
         revenue,
+        revenuePerOccurrence,
+        unitTarget: item.unitTarget ?? null,
         kind: item.kind,
         repeatFrequency: item.repeatFrequency,
         typeSource: typeSourceFor(item.libraryKey),
@@ -1111,6 +1243,10 @@ async function insertInitiative(
     productIds: readonly string[];
     displayOrder: number;
     revenue: RevenueScenarios;
+    /** Recurring only: Good for one occurrence (migration 061, attrs before it). */
+    revenuePerOccurrence?: number | null;
+    /** Recommendations: units x price (migration 061). One product row only. */
+    unitTarget?: { units: number; price: number; source: "suggested" | "edited" } | null;
     tasks: readonly MaterialisedTask[];
     /** one-time / recurring / evergreen, from the user's cadence answer. */
     kind: InitiativeKind;
@@ -1208,6 +1344,18 @@ async function insertInitiative(
         revenue_good: share(args.revenue.good, args.productIds.length),
         revenue_better: share(args.revenue.better, args.productIds.length),
         revenue_best: share(args.revenue.best, args.productIds.length),
+        // Split the same way, so per occurrence x occurrences matches each row.
+        ...(typeof args.revenuePerOccurrence === "number"
+          ? { revenue_per_occurrence: share(args.revenuePerOccurrence, args.productIds.length) }
+          : {}),
+        // Units x price. A recommendation sells one product, so it is never split.
+        ...(args.unitTarget && args.productIds.length === 1
+          ? {
+              units_goal: args.unitTarget.units,
+              unit_price_at_set: args.unitTarget.price,
+              target_source: args.unitTarget.source,
+            }
+          : {}),
         planned_budget: 0,
         actual_spend: 0,
         display_order: args.displayOrder * 10 + index,
@@ -1217,7 +1365,13 @@ async function insertInitiative(
       (row) =>
         withFrequencyFallback(
           row,
-          (r) => db.from("initiatives").insert(r).select("id").single(),
+          // Migration 061 not applied: revenue_per_occurrence goes in attrs.
+          (r) =>
+            withOccurrenceFallback(
+              r,
+              (p) => db.from("initiatives").insert(p).select("id").single(),
+              "[intake/build]"
+            ),
           (r) => initiativeFrequencyFallback(r),
           "[intake/build]"
         ),
@@ -1310,27 +1464,22 @@ function share(amount: number, rows: number): number {
   return Math.round(amount / rows);
 }
 
-/**
- * Benchmark revenue for one recommended initiative.
- *
- * Mirrors `benchmarkRevenuePerProduct` in `/api/intake/recommend` so the figure
- * stored matches the figure the user was shown when they accepted it. A third
- * of the average product goal: deliberately conservative, since we have no
- * history for an initiative the business has never run.
- */
-function benchmarkPerInitiative(
-  intakeProducts: readonly Record<string, unknown>[]
-): number {
-  if (intakeProducts.length === 0) return 0;
+/** A whole, non-negative unit count, or null. */
+function wholeUnitsOrNull(v: unknown): number | null {
+  const n = num(v);
+  return n !== null && n >= 0 ? Math.floor(n) : null;
+}
 
-  const total = intakeProducts.reduce(
-    (sum, product) =>
-      sum + productGoal(num(product.average_price), num(product.units_in_period)),
-    0
-  );
+/** Migration 061's products.goal_units does not exist yet. */
+function isMissingGoalUnitsColumn(error: { code?: string | null; message?: string | null } | null): boolean {
+  return isMissingColumnError(error) && String(error?.message ?? "").includes("goal_units");
+}
 
-  if (total <= 0) return 0;
-  return Math.round(total / intakeProducts.length / 3);
+/** A product payload without goal_units. */
+function withoutGoalUnits<T extends Record<string, unknown>>(row: T): T {
+  const { goal_units: _drop, ...rest } = row;
+  void _drop;
+  return rest as T;
 }
 
 /** Add whole months to a `YYYY-MM-DD`, in UTC so no offset shifts the month. */

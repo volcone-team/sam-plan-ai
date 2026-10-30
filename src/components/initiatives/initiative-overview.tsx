@@ -17,10 +17,13 @@ import { usePermission } from '@/hooks/use-permission';
 import { formatNumber, formatMoney } from '@/lib/format-money';
 import { autoBest, autoBetter } from '@/lib/intake-v3/revenue';
 import { planService } from '@/services/plan.service';
-import { horizonEnd, perRun } from '@/lib/planning/revenue-spread';
+import { horizonEnd, perRun, runDates } from '@/lib/planning/revenue-spread';
+import { OCCURRENCE_COPY, lastOccurrenceOf, totalForOccurrences } from '@/lib/initiatives/occurrences';
+import { occurrenceCards } from '@/lib/initiatives/occurrence-cards';
 import { REPEAT_FREQUENCY_LABELS, REPEAT_RUNS_PER_YEAR, type RepeatFrequency } from '@/lib/intake-forecast';
 import type { DateOnly } from '@/lib/plan-dates';
 import { editLayout } from '@/lib/initiatives/edit-layout';
+import { submitBlockedNotice } from './intake-form-view';
 import type { LibraryRecordConfig } from '@/lib/intake-v3/library-config';
 import type { InitiativeKind } from '@/types';
 
@@ -51,7 +54,14 @@ const kindLabels: Record<string, string> = {
   evergreen: 'Evergreen',
 };
 
-type EditErrors = { name?: string; activationDate?: string; eventDate?: string; closeDate?: string; frequency?: string };
+type EditErrors = {
+  name?: string;
+  activationDate?: string;
+  eventDate?: string;
+  closeDate?: string;
+  frequency?: string;
+  lastDate?: string;
+};
 
 const inputClass =
   'w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-[hsl(var(--primary))] placeholder:text-[hsl(var(--foreground-muted))]';
@@ -160,14 +170,81 @@ export function InitiativeOverview({
     ? REPEAT_FREQUENCY_LABELS[frequency as RepeatFrequency] ?? frequency
     : null;
   const runFigures = frequency ? perRun(initiative, planEnd) : null;
+  const storedLast = lastOccurrenceOf(initiative);
+  /** Every occurrence of a recurring series, for the list under Date Range. */
+  const occurrences = occurrenceCards(initiative, planEnd, toDateOnly(new Date()));
+
+  /**
+   * Moving ONE occurrence (client, Oct 2026). Keyed by the occurrence's
+   * scheduled date; the others keep their calculated dates.
+   */
+  const [moving, setMoving] = useState<{ scheduled: DateOnly; value: string } | null>(null);
+  const [moveSaving, setMoveSaving] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const saveMove = async (scheduled: DateOnly, to: DateOnly | null) => {
+    if (to !== null && to !== scheduled && occurrences.some(o => o.scheduled !== scheduled && o.date === to)) {
+      setMoveError('Another occurrence is already on that date.');
+      return;
+    }
+    setMoveSaving(true);
+    setMoveError(null);
+    try {
+      const updated = await initiativeService.moveOccurrence(initiative.id, scheduled, to);
+      onSaved(updated);
+      setMoving(null);
+    } catch (err) {
+      setMoveError(err instanceof Error ? err.message : 'Could not save the date.');
+    } finally {
+      setMoveSaving(false);
+    }
+  };
+
+  /**
+   * RECURRING IS EDITED PER OCCURRENCE (client, Oct 2026). The revenue fields
+   * hold one occurrence's figures while the kind is recurring; the save
+   * multiplies them by the occurrences first -> last. Switching a one-time
+   * initiative to recurring therefore reads its figure as per occurrence
+   * rather than dividing it.
+   */
+  const [lastDate, setLastDate] = useState(storedLast ?? '');
+  const editingRecurring = kindValue === 'recurring';
+  const defaultLast = (first: string): string =>
+    planEnd ?? (/^\d{4}/.test(first) ? `${first.slice(0, 4)}-12-31` : '');
+  useEffect(() => {
+    if (editing && editingRecurring && !lastDate) setLastDate(defaultLast(eventDate || activationDate));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, editingRecurring]);
+  /** Occurrences the series has as currently edited (first -> last). */
+  const editOccurrences = (frequency: string | null): number => {
+    if (!editingRecurring || !frequency) return 1;
+    const n = runDates(
+      {
+        kind: 'recurring',
+        repeatFrequency: frequency,
+        eventDate: eventDate || activationDate || null,
+        categoryId: initiative.categoryId ?? null,
+        lastOccurrenceDate: lastDate || null,
+      },
+      planEnd
+    ).length;
+    return n > 0 ? n : 1;
+  };
+  /** The revenue fields' starting values: per occurrence for a recurring row. */
+  const startingFigures = () => {
+    const t = initiative.revenueScenarios;
+    if (initiative.kind === 'recurring' && runFigures) {
+      return { good: Math.round(runFigures.good), better: Math.round(runFigures.better), best: Math.round(runFigures.best) };
+    }
+    return { good: t?.good, better: t?.better, best: t?.best };
+  };
   const monthlyBetter =
     runFigures && frequency && MONTHLY_OR_FASTER.has(frequency)
-      ? (runFigures.better * REPEAT_RUNS_PER_YEAR[frequency as RepeatFrequency]) / 12
+      ? (runFigures.good * REPEAT_RUNS_PER_YEAR[frequency as RepeatFrequency]) / 12
       : null;
 
-  const [revenueGood, setRevenueGood] = useState(numberToInputValue(initiative.revenueScenarios?.good));
-  const [revenueBetter, setRevenueBetter] = useState(numberToInputValue(initiative.revenueScenarios?.better));
-  const [revenueBest, setRevenueBest] = useState(numberToInputValue(initiative.revenueScenarios?.best));
+  const [revenueGood, setRevenueGood] = useState(numberToInputValue(startingFigures().good));
+  const [revenueBetter, setRevenueBetter] = useState(numberToInputValue(startingFigures().better));
+  const [revenueBest, setRevenueBest] = useState(numberToInputValue(startingFigures().best));
   /**
    * Better and Best follow Good (+10% / +20%) until the user types in them.
    * Once touched in this edit they keep the typed figure; Good no longer moves them.
@@ -196,9 +273,11 @@ export function InitiativeOverview({
     setFrequencyValue(initiative.repeatFrequency ?? '');
     setTrafficInput(numberToInputValue(initiative.trafficInput));
     setPlannedBudget(numberToInputValue(initiative.plannedBudget));
-    setRevenueGood(numberToInputValue(initiative.revenueScenarios?.good));
-    setRevenueBetter(numberToInputValue(initiative.revenueScenarios?.better));
-    setRevenueBest(numberToInputValue(initiative.revenueScenarios?.best));
+    const start = startingFigures();
+    setRevenueGood(numberToInputValue(start.good));
+    setRevenueBetter(numberToInputValue(start.better));
+    setRevenueBest(numberToInputValue(start.best));
+    setLastDate(storedLast ?? '');
     setBetterTouched(false);
     setBestTouched(false);
     setFieldErrors({});
@@ -232,6 +311,11 @@ export function InitiativeOverview({
       errors.closeDate = "This can't be before the start date.";
     }
     if (layout.frequency.shown && !frequencyValue) errors.frequency = 'Choose how often it happens.';
+    if (editingRecurring) {
+      if (layout.event.shown && !eventDate) errors.eventDate = 'Enter the first occurrence date.';
+      if (!lastDate) errors.lastDate = 'Enter the last occurrence date.';
+      else if (eventDate && lastDate < eventDate) errors.lastDate = "The last occurrence can't be before the first.";
+    }
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
       setSaveError(null);
@@ -258,6 +342,7 @@ export function InitiativeOverview({
     const closeChanged = layout.close.shown && closeDate !== toDateInputValue(initiative.revenueCloseDate);
     const frequencyToSave =
       kindValue !== 'recurring' ? null : layout.frequency.shown ? frequencyValue || null : layout.silentFrequency ?? (initiative.repeatFrequency ?? null);
+    const occurrencesToSave = editOccurrences(frequencyToSave);
 
     const dto: UpdateInitiativeDTO = {
       name: name.trim(),
@@ -283,11 +368,29 @@ export function InitiativeOverview({
         : {}),
       trafficInput: trafficInput === '' ? undefined : toNumber(trafficInput),
       plannedBudget: toNumber(plannedBudget),
+      // Recurring: the fields are ONE occurrence; the plan total multiplies.
       revenueScenarios: {
-        good: toNumber(revenueGood),
-        better: toNumber(revenueBetter),
-        best: toNumber(revenueBest),
+        good: totalForOccurrences(toNumber(revenueGood), occurrencesToSave),
+        better: totalForOccurrences(toNumber(revenueBetter), occurrencesToSave),
+        best: totalForOccurrences(toNumber(revenueBest), occurrencesToSave),
       },
+      // Units x price: a target set in units keeps its price; editing Good
+      // re-derives the units at that price and marks the target edited.
+      ...(initiative.unitPriceAtSet && toNumber(revenueGood) !== Number(startingFigures().good)
+        ? {
+            unitsGoal: Math.round(toNumber(revenueGood) / initiative.unitPriceAtSet),
+            targetSource: 'edited' as const,
+          }
+        : {}),
+      ...(editingRecurring
+        ? {
+            revenuePerOccurrence: toNumber(revenueGood),
+            lastOccurrenceDate: lastDate ? parseDateOnly(lastDate) : null,
+          }
+        : initiative.kind === 'recurring'
+          ? // No longer recurring: nothing repeats, so nothing is per occurrence.
+            { revenuePerOccurrence: null, lastOccurrenceDate: null }
+          : {}),
     };
 
     setSaving(true);
@@ -505,7 +608,8 @@ export function InitiativeOverview({
             {layout.event.shown && (
               <div className="space-y-1.5">
                 <label htmlFor="overview-edit-event-date" className={labelClass}>
-                  Event date {layout.event.required && <span className="text-red-500">*</span>}
+                  {editingRecurring ? OCCURRENCE_COPY.first : 'Event date'}{' '}
+                  {(layout.event.required || editingRecurring) && <span className="text-red-500">*</span>}
                 </label>
                 <DateInput
                   id="overview-edit-event-date"
@@ -514,9 +618,28 @@ export function InitiativeOverview({
                   aria-invalid={fieldErrors.eventDate ? true : undefined}
                   error={!!fieldErrors.eventDate}
                 />
-                {kindValue === 'recurring' && <p className={helperClass}>The first occurrence. Later occurrences follow the frequency.</p>}
-                {!layout.event.required && kindValue !== 'recurring' && <p className={helperClass}>Leave empty to clear it.</p>}
+                {editingRecurring && <p className={helperClass}>{OCCURRENCE_COPY.firstHint}</p>}
+                {!layout.event.required && !editingRecurring && <p className={helperClass}>Leave empty to clear it.</p>}
                 {fieldErrors.eventDate && <p className={fieldErrorClass}>{fieldErrors.eventDate}</p>}
+              </div>
+            )}
+            {editingRecurring && (
+              <div className="space-y-1.5">
+                <label htmlFor="overview-edit-last-date" className={labelClass}>
+                  {OCCURRENCE_COPY.last} <span className="text-red-500">*</span>
+                </label>
+                <DateInput
+                  id="overview-edit-last-date"
+                  value={lastDate}
+                  onValueChange={setLastDate}
+                  aria-invalid={fieldErrors.lastDate ? true : undefined}
+                  error={!!fieldErrors.lastDate}
+                />
+                <p className={helperClass}>
+                  {OCCURRENCE_COPY.lastHint} That gives {editOccurrences(frequencyValue || layout.silentFrequency || initiative.repeatFrequency || null)}{' '}
+                  occurrence(s).
+                </p>
+                {fieldErrors.lastDate && <p className={fieldErrorClass}>{fieldErrors.lastDate}</p>}
               </div>
             )}
             {layout.close.shown && (
@@ -531,6 +654,7 @@ export function InitiativeOverview({
                   aria-invalid={fieldErrors.closeDate ? true : undefined}
                   error={!!fieldErrors.closeDate}
                 />
+                {editingRecurring && <p className={helperClass}>{OCCURRENCE_COPY.closeHint}</p>}
                 {fieldErrors.closeDate && <p className={fieldErrorClass}>{fieldErrors.closeDate}</p>}
               </div>
             )}
@@ -576,10 +700,17 @@ export function InitiativeOverview({
 
           {/* Revenue scenarios */}
           <fieldset className="space-y-3">
-            <legend className={labelClass}>Revenue scenarios ($)</legend>
+            <legend className={labelClass}>
+              Revenue scenarios ($){editingRecurring ? ` ${OCCURRENCE_COPY.perOccurrence}` : ''}
+            </legend>
             <p className={helperClass}>
               Better and Best fill in from Good (+10% and +20%). You can change them.
-              {initiative.kind === 'recurring' && ' For a recurring initiative these are the total across all its occurrences in the plan.'}
+              {editingRecurring &&
+                (() => {
+                  const n = editOccurrences(frequencyValue || layout.silentFrequency || initiative.repeatFrequency || null);
+                  const good = Number(revenueGood) || 0;
+                  return ` These are for ONE occurrence: ${n} occurrence${n === 1 ? '' : 's'} × ${formatMoney(good)} = ${formatMoney(totalForOccurrences(good, n))} Good for the plan.`;
+                })()}
             </p>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-1.5">
@@ -620,6 +751,16 @@ export function InitiativeOverview({
               </div>
             </div>
           </fieldset>
+
+          {/* Beside the button too: the field errors may be scrolled out of view. */}
+          {(submitBlockedNotice(Object.keys(fieldErrors).length) || saveError) && (
+            <div
+              role="status"
+              className="rounded-[var(--radius-md)] border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
+            >
+              {submitBlockedNotice(Object.keys(fieldErrors).length) ?? saveError}
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
@@ -678,24 +819,20 @@ export function InitiativeOverview({
               </span>
             </div>
 
-            {/* Revenue: the plan total, and for recurring work what each run earns */}
+            {/* Target: the plan total (Good), and for recurring work what each occurrence earns */}
             <div className="flex items-start justify-between gap-4">
               <span className="text-sm text-[hsl(var(--foreground-muted))]">
-                Revenue goal{runFigures ? ' (all occurrences)' : ''}
+                Target{runFigures ? ' (all occurrences)' : ''}
               </span>
               <span className="text-right text-sm font-medium text-[hsl(var(--foreground))]">
-                {formatMoney(initiative.revenueScenarios?.better ?? 0)}
-                <span className="block text-xs font-normal text-[hsl(var(--foreground-muted))]">
-                  Better · Good {formatMoney(initiative.revenueScenarios?.good ?? 0)} · Best{' '}
-                  {formatMoney(initiative.revenueScenarios?.best ?? 0)}
-                </span>
+                {formatMoney(initiative.revenueScenarios?.good ?? 0)}
               </span>
             </div>
             {runFigures && (
               <div className="flex items-start justify-between gap-4">
                 <span className="text-sm text-[hsl(var(--foreground-muted))]">Per occurrence</span>
                 <span className="text-right text-sm font-medium text-[hsl(var(--foreground))]">
-                  {formatMoney(Math.round(runFigures.better))}
+                  {formatMoney(Math.round(runFigures.good))}
                   <span className="block text-xs font-normal text-[hsl(var(--foreground-muted))]">
                     {runFigures.runs} occurrence{runFigures.runs !== 1 ? 's' : ''} in the plan
                     {monthlyBetter !== null && ` · ≈ ${formatMoney(Math.round(monthlyBetter))} a month`}
@@ -728,15 +865,26 @@ export function InitiativeOverview({
               </span>
             </div>
 
-            {/* Event date */}
+            {/* Event date: "First occurrence" for a recurring series, as on the Add and Edit forms */}
             {initiative.eventDate && (
               <div className="flex items-center justify-between">
                 <span className="text-sm text-[hsl(var(--foreground-muted))] flex items-center gap-2">
                   <Calendar className="h-3.5 w-3.5" />
-                  Event Date
+                  {initiative.kind === 'recurring' ? OCCURRENCE_COPY.first : 'Event date'}
                 </span>
                 <span className="text-sm font-medium text-[hsl(var(--foreground))]">
                   {formatScheduleDate(initiative.eventDate, initiative.eventDatePrecision)}
+                </span>
+              </div>
+            )}
+            {initiative.kind === 'recurring' && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-[hsl(var(--foreground-muted))] flex items-center gap-2">
+                  <Calendar className="h-3.5 w-3.5" />
+                  {OCCURRENCE_COPY.last}
+                </span>
+                <span className="text-sm font-medium text-[hsl(var(--foreground))]">
+                  {storedLast ? formatScheduleDate(storedLast, 'day') : planEnd ? `${formatScheduleDate(planEnd, 'day')} (plan end)` : 'End of plan'}
                 </span>
               </div>
             )}
@@ -745,7 +893,7 @@ export function InitiativeOverview({
               <div className="flex items-center justify-between">
                 <span className="text-sm text-[hsl(var(--foreground-muted))] flex items-center gap-2">
                   <Calendar className="h-3.5 w-3.5" />
-                  Revenue closes
+                  {initiative.kind === 'recurring' ? 'Closes (first occurrence)' : 'Revenue closes'}
                 </span>
                 <span className="text-sm font-medium text-[hsl(var(--foreground))]">
                   {formatDate(initiative.revenueCloseDate)}
@@ -790,6 +938,97 @@ export function InitiativeOverview({
                 )}
               </div>
             </div>
+
+            {/* Recurring: every occurrence in the plan, past ones included (client, Oct 2026). */}
+            {occurrences.length > 0 && (
+              <div className="mt-4 border-t border-border pt-4">
+                <h3 className="mb-2 text-sm font-semibold text-[hsl(var(--foreground))]">
+                  Occurrences ({occurrences.length})
+                </h3>
+                {canEdit && (
+                  <p className="mb-2 text-xs text-[hsl(var(--foreground-muted))]">
+                    Dates are worked out from the first occurrence. Change one date here to move just that occurrence.
+                  </p>
+                )}
+                {moveError && (
+                  <p role="alert" className="mb-2 text-xs text-red-600 dark:text-red-400">{moveError}</p>
+                )}
+                <ul className="max-h-72 space-y-1 overflow-y-auto text-sm">
+                  {occurrences.map(o => {
+                    const isMoving = moving?.scheduled === o.scheduled;
+                    const smallButton =
+                      'rounded-[var(--radius-md)] border border-border bg-card px-2 py-0.5 text-xs font-medium text-[hsl(var(--foreground))] transition-colors hover:border-[hsl(var(--primary))] hover:text-[hsl(var(--primary))] disabled:opacity-50';
+                    return (
+                      <li key={o.scheduled} className="rounded-[var(--radius-md)] px-2 py-1 hover:bg-[hsl(var(--background-muted))]">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className={o.past ? 'text-[hsl(var(--foreground-subtle))]' : 'text-[hsl(var(--foreground))]'}>
+                            {o.index}. {formatScheduleDate(o.date, 'day')}
+                            {o.past && <span className="ml-1.5 text-[10px] uppercase tracking-wider">past</span>}
+                            {o.moved && (
+                              <span className="ml-1.5 text-xs text-[hsl(var(--foreground-muted))]">
+                                (moved from {formatScheduleDate(o.scheduled, 'day')})
+                              </span>
+                            )}
+                          </span>
+                          <span className="flex items-center gap-2">
+                            <span className="tabular-nums text-[hsl(var(--foreground-muted))]">
+                              {formatMoney(Math.round(o.scenarios.good))} Good
+                            </span>
+                            {canEdit && !isMoving && (
+                              <button
+                                type="button"
+                                className={smallButton}
+                                aria-label={`Change the date of occurrence ${o.index}`}
+                                onClick={() => { setMoveError(null); setMoving({ scheduled: o.scheduled, value: o.date }); }}
+                              >
+                                Change date
+                              </button>
+                            )}
+                          </span>
+                        </div>
+                        {isMoving && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <div className="w-44">
+                              <DateInput
+                                aria-label={`New date for occurrence ${o.index}`}
+                                value={moving.value}
+                                onValueChange={v => setMoving({ scheduled: o.scheduled, value: v })}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              className={smallButton}
+                              disabled={moveSaving || !moving.value}
+                              onClick={() => saveMove(o.scheduled, moving.value as DateOnly)}
+                            >
+                              {moveSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Save'}
+                            </button>
+                            {o.moved && (
+                              <button
+                                type="button"
+                                className={smallButton}
+                                disabled={moveSaving}
+                                onClick={() => saveMove(o.scheduled, null)}
+                              >
+                                Reset to {formatScheduleDate(o.scheduled, 'day')}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="text-xs text-[hsl(var(--foreground-muted))] hover:underline"
+                              disabled={moveSaving}
+                              onClick={() => { setMoving(null); setMoveError(null); }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -19,6 +19,7 @@ import { parseMetricsCell, type ParsedMetrics } from "@/lib/metrics/parse-metric
 import { metricsWarnings } from "@/lib/workbook/ingest-messages";
 
 export type WarningGroupId =
+  | "taskTabs"
   | "headings"
   | "duplicates"
   | "sharedIds"
@@ -66,6 +67,7 @@ export interface WarningGroup {
 }
 
 export const WARNING_GROUP_HEADINGS: Record<WarningGroupId, string> = {
+  taskTabs: "Task tabs to fix: same initiative name on two tabs (kept separate, not merged)",
   headings: "Skipped headings and banners",
   duplicates: "Duplicate names and how each was resolved",
   sharedIds: "IDs shared by different initiatives",
@@ -76,7 +78,7 @@ export const WARNING_GROUP_HEADINGS: Record<WarningGroupId, string> = {
 };
 
 const GROUP_ORDER: WarningGroupId[] = [
-  "headings", "duplicates", "sharedIds", "scores", "metrics", "orphans", "other",
+  "taskTabs", "headings", "duplicates", "sharedIds", "scores", "metrics", "orphans", "other",
 ];
 
 export interface PreviewRow {
@@ -146,6 +148,11 @@ interface Classified {
  */
 export function classifyWarning(message: string): Classified {
   let m: RegExpExecArray | null;
+
+  // ---- Task tabs sharing a column-A name (parse.ts: kept separate) ----
+  if (/has the same initiative name \(".*"\) as ".*"\. It was kept separate as/.test(message)) {
+    return { group: "taskTabs", detail: null };
+  }
 
   // ---- Skipped headings and banners ----
   if ((m = /^Initiative Library: "(.*)" has no ID and no other data — treated as a section heading/.exec(message))) {

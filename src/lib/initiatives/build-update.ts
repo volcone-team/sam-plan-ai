@@ -63,6 +63,20 @@ export function buildInitiativeUpdate(dto: UpdateInitiativeDTO): Record<string, 
   // Nullable (036 / 045): blank clears.
   if (d.repeatFrequency !== undefined) row.repeat_frequency = blankToNull(d.repeatFrequency);
   if (d.revenueCloseDate !== undefined) row.revenue_close_date = dateOrNull(d.revenueCloseDate as DateValue);
+  // Migration 061; moved into attrs by withOccurrenceFallback when absent.
+  if (d.lastOccurrenceDate !== undefined) row.last_occurrence_date = dateOrNull(d.lastOccurrenceDate as DateValue);
+  if (d.unitsGoal !== undefined) {
+    const n = Number(d.unitsGoal);
+    row.units_goal = d.unitsGoal === null || !Number.isInteger(n) || n < 0 ? null : n;
+  }
+  if (d.targetSource !== undefined) {
+    row.target_source =
+      d.targetSource === 'suggested' || d.targetSource === 'edited' || d.targetSource === 'migrated' ? d.targetSource : null;
+  }
+  if (d.revenuePerOccurrence !== undefined) {
+    const n = Number(d.revenuePerOccurrence);
+    row.revenue_per_occurrence = d.revenuePerOccurrence === null || !Number.isFinite(n) || n < 0 ? null : n;
+  }
 
   if (d.trafficInput !== undefined) row.traffic_input = d.trafficInput;
   if (d.plannedBudget !== undefined) row.planned_budget = d.plannedBudget;

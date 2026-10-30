@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { BrandLogo } from "@/components/brand-logo";
 import { cn } from "@/lib/utils";
 import { formatMoney } from "@/lib/format-money";
+import { cardTargets, type CardTarget } from "@/lib/intake/recommend-targets";
 import { goalGap, type GoalGap } from "@/lib/intake-forecast";
 import { MAX_RECOMMENDED_INITIATIVES } from "@/lib/recommend/sizing";
 import { outputHeadline, outputVariantFor, type PlanPath } from "@/lib/intake/flow";
@@ -21,6 +22,7 @@ import { FormError } from "@/components/intake/fields/field";
 import { GapBar } from "@/components/intake/recommendations/gap-bar";
 import {
   RecommendationCard,
+  CardTargetArea,
   type CardScore,
   type RecommendationCardData,
 } from "@/components/intake/recommendations/initiative-recommendation-card";
@@ -56,6 +58,8 @@ interface ApiRecommendation {
   fromBenchmarks: boolean;
   why: string | null;
   productIds: string[];
+  /** SCORE Revenue 1-5: the card's weight in its product's share. */
+  revenueScore?: number;
   /** Optional, like the fields below, so an older response still renders. */
   ownOrOps?: string | null;
   score?: CardScore;
@@ -74,6 +78,10 @@ interface RecommendResponse {
     name: string;
     forecast: number | null;
     productIds: string[];
+    /** One run's revenue from the user's own funnel; null when incomplete. */
+    perRun?: number | null;
+    /** Runs (occurrences) in the plan period. */
+    runs?: number;
   }[];
   recommended: ApiRecommendation[];
   alternatives: ApiRecommendation[];
@@ -90,7 +98,18 @@ interface RecommendResponse {
   /** The most initiatives this plan may hold in total, counting the user's own. */
   capacity: number;
   aiUnavailable: string | null;
+  /** What a card can sell (target setting). Optional for an older response. */
+  products?: TargetProductOption[];
+  defaultProductId?: string | null;
   error?: string;
+}
+
+/** An intake product a card can sell: its price and goal units. */
+interface TargetProductOption {
+  id: string;
+  name: string;
+  price: number | null;
+  goalUnits: number | null;
 }
 
 export function RecommendationsPage() {
@@ -107,6 +126,13 @@ export function RecommendationsPage() {
 
   const [accepted, setAccepted] = React.useState<Set<string>>(new Set());
   const [dismissed, setDismissed] = React.useState<Set<string>>(new Set());
+  /**
+   * Target setting: the product each card sells (its dropdown) and the units
+   * the user typed. Absent = the default product / the suggestion. Changing a
+   * card's product drops its typed units (spec: the suggestion overwrites).
+   */
+  const [productByKeyEdits, setProductByKeyEdits] = React.useState<Map<string, string>>(new Map());
+  const [unitsByKey, setUnitsByKey] = React.useState<Map<string, string>>(new Map());
   /**
    * The user's OWN initiatives they have switched off, by row id.
    *
@@ -268,15 +294,77 @@ export function RecommendationsPage() {
     [accepted, dismissed, ownKeys]
   );
 
-  /** Benchmark forecast per key, from whichever list the key came from. */
-  const forecastByKey = React.useMemo(() => {
-    const map = new Map<string, number>();
-    for (const option of data?.library ?? []) map.set(option.key, option.forecast);
+  /**
+   * Units x price targets for every card and list row (target setting). The
+   * share is re-run on every change, so the suggestions for a product always
+   * add up to its goal.
+   */
+  const targetProducts = data?.products ?? [];
+  const revenueScoreByKey = React.useMemo(() => {
+    const map = new Map<string, number | undefined>();
+    for (const option of data?.library ?? []) map.set(option.key, option.revenueScore);
     for (const r of [...(data?.recommended ?? []), ...(data?.alternatives ?? [])]) {
-      map.set(r.key, r.forecast);
+      map.set(r.key, r.revenueScore ?? r.score?.breakdown?.R);
     }
     return map;
   }, [data]);
+  const allKeys = React.useMemo(
+    () => [...new Set([...revenueScoreByKey.keys()])],
+    [revenueScoreByKey]
+  );
+  /** The user's own initiatives, keyed apart from library keys (two can share one). */
+  const ownKeyOf = (id: string) => `own:${id}`;
+  const keptOwn = React.useMemo(
+    () => (data?.yours ?? []).filter((y) => !droppedOwn.has(y.id)),
+    [data, droppedOwn]
+  );
+  const productByKey = React.useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const key of allKeys) map.set(key, productByKeyEdits.get(key) ?? data?.defaultProductId ?? null);
+    // An own initiative defaults to the product it was entered against.
+    const known = new Set((data?.products ?? []).map((p) => p.id));
+    for (const y of data?.yours ?? []) {
+      const own = y.productIds.find((id) => known.has(id)) ?? data?.defaultProductId ?? null;
+      map.set(ownKeyOf(y.id), productByKeyEdits.get(ownKeyOf(y.id)) ?? own);
+    }
+    return map;
+  }, [allKeys, productByKeyEdits, data]);
+  const targets = React.useMemo(
+    () =>
+      cardTargets({
+        // The user's own come first: their funnel fixes their units, and
+        // what they commit comes off the goal the recommendations share.
+        selected: [...keptOwn.map((y) => ownKeyOf(y.id)), ...selectedKeys],
+        shown: allKeys,
+        revenueScoreByKey,
+        productByKey,
+        unitsByKey,
+        products: targetProducts,
+        planGoal: data?.goal ?? null,
+        occurrencesByKey: new Map(keptOwn.map((y) => [ownKeyOf(y.id), y.runs ?? 1])),
+        fixed: keptOwn
+          .filter((y) => typeof y.perRun === "number" && y.perRun > 0)
+          .map((y) => ({ key: ownKeyOf(y.id), perRun: y.perRun as number })),
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedKeys, keptOwn, allKeys, revenueScoreByKey, productByKey, unitsByKey, data]
+  );
+  const forecastByKey = React.useMemo(() => {
+    const map = new Map<string, number>();
+    for (const [key, t] of targets) map.set(key, t.good);
+    return map;
+  }, [targets]);
+  const setCardProduct = (key: string, productId: string) => {
+    setProductByKeyEdits((prev) => new Map(prev).set(key, productId));
+    setUnitsByKey((prev) => {
+      const next = new Map(prev);
+      next.delete(key);
+      return next;
+    });
+  };
+  const setCardUnits = (key: string, value: string) => {
+    setUnitsByKey((prev) => new Map(prev).set(key, value));
+  };
 
   /**
    * Every card that can appear, swaps included, so two same-name variants get
@@ -293,7 +381,10 @@ export function RecommendationsPage() {
       goal: data.goal,
       // Only the ones they are keeping contribute — a deselected initiative is
       // not in the plan, so counting its revenue would overstate the forecast.
-      yours: data.yours.filter((y) => !droppedOwn.has(y.id)).map((y) => y.forecast),
+      // Units x price when the plan has priced products; the funnel figure otherwise.
+      yours: data.yours
+        .filter((y) => !droppedOwn.has(y.id))
+        .map((y) => targets.get(ownKeyOf(y.id))?.price != null ? targets.get(ownKeyOf(y.id))!.good : y.forecast),
       recommended: [...selectedKeys].map((key) => forecastByKey.get(key) ?? 0),
     });
   }, [data, selectedKeys, forecastByKey, droppedOwn]);
@@ -493,6 +584,15 @@ export function RecommendationsPage() {
     try {
       // Cards and the full list alike; the server re-checks each is active.
       const acceptedKeys = [...selectedKeys];
+      /**
+       * Target setting: which product each pick sells and the units the user
+       * kept or typed. The server re-derives price, suggestion and Good itself
+       * from the intake; only these two choices are taken from the client.
+       */
+      const picks = acceptedKeys.map((key) => {
+        const t: CardTarget | undefined = targets.get(key);
+        return { key, productId: t?.productId ?? null, units: t?.units ?? null };
+      });
 
       const response = await fetch("/api/intake/build", {
         method: "POST",
@@ -500,7 +600,16 @@ export function RecommendationsPage() {
         // The dropped set travels too: the build reads the user's own
         // initiatives straight from the draft, so without it a deselected one
         // would silently reappear in the plan.
-        body: JSON.stringify({ acceptedKeys, droppedOwnIds: [...droppedOwn] }),
+        body: JSON.stringify({
+          acceptedKeys,
+          picks,
+          // The user's own initiatives: the product each sells and its units (per occurrence).
+          ownPicks: keptOwn.map((y) => {
+            const t = targets.get(ownKeyOf(y.id));
+            return { id: y.id, productId: t?.productId ?? null, units: t?.units ?? null };
+          }),
+          droppedOwnIds: [...droppedOwn],
+        }),
       });
 
       const body = (await response.json()) as { error?: string };
@@ -670,13 +779,28 @@ export function RecommendationsPage() {
                       </span>
                     </span>
                     <span className="shrink-0 text-sm tabular-nums text-[hsl(var(--foreground-muted))]">
-                      {initiative.forecast === null
+                      {kept && targets.get(ownKeyOf(initiative.id))?.price != null
+                        ? formatMoney(targets.get(ownKeyOf(initiative.id))!.good)
+                        : initiative.forecast === null
                         ? // Null is not zero: an unforecast initiative has
                           // incomplete inputs, not no value.
                           "No forecast yet"
                         : formatMoney(initiative.forecast)}
                     </span>
                   </label>
+                  {kept && targetProducts.length > 0 && targets.get(ownKeyOf(initiative.id)) && (
+                    <div className="mt-2 flex justify-end px-4">
+                      <CardTargetArea
+                        cardKey={ownKeyOf(initiative.id)}
+                        target={targets.get(ownKeyOf(initiative.id))!}
+                        products={targetProducts}
+                        accepted
+                        unitsLabel={(initiative.runs ?? 1) > 1 ? `Units × ${initiative.runs}` : undefined}
+                        onProductChange={(productId) => setCardProduct(ownKeyOf(initiative.id), productId)}
+                        onUnitsChange={(units) => setCardUnits(ownKeyOf(initiative.id), units)}
+                      />
+                    </div>
+                  )}
                 </li>
               );
             })}
@@ -717,6 +841,10 @@ export function RecommendationsPage() {
                 onDismiss={() => dismiss(recommendation.key)}
                 onRestore={() => restore(recommendation.key)}
                 onSwap={() => swapSlot(slotIndex)}
+                target={targetProducts.length > 0 ? targets.get(recommendation.key) : undefined}
+                products={targetProducts}
+                onProductChange={(productId) => setCardProduct(recommendation.key, productId)}
+                onUnitsChange={(units) => setCardUnits(recommendation.key, units)}
               />
             ))}
           </div>
@@ -734,6 +862,18 @@ export function RecommendationsPage() {
         ownKeys={ownKeys}
         atCapacity={atCapacity}
         onToggle={(key) => toggleAccept(key, "browse")}
+        renderTarget={(key) =>
+          targetProducts.length > 0 && targets.get(key) && !shortlist.some((r) => r.key === key) ? (
+            <CardTargetArea
+              cardKey={key}
+              target={targets.get(key)!}
+              products={targetProducts}
+              accepted
+              onProductChange={(productId) => setCardProduct(key, productId)}
+              onUnitsChange={(units) => setCardUnits(key, units)}
+            />
+          ) : null
+        }
         notice={
           capacityNotice && noticeAt === "browse" ? (
             <p

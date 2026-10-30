@@ -64,6 +64,26 @@ export interface SubscriptionState {
    * this function stops honouring it. See the pause branch below.
    */
   pauseResumesAt?: string | null;
+  /**
+   * Registered and never paid: no Stripe subscription was ever created. The
+   * signup trigger writes such a row as 'cancelled', which read as "your
+   * subscription has ended" to someone who never had one. See neverPaid().
+   */
+  neverPaid?: boolean;
+}
+
+/**
+ * Did this company ever have a paid subscription? False for an abandoned
+ * signup: no Stripe subscription id, no billing period, no comp.
+ */
+export function neverPaid(row: {
+  stripe_subscription_id?: string | null;
+  current_period_end?: string | null;
+  comped_until?: string | null;
+  is_comped?: boolean | null;
+} | null | undefined): boolean {
+  if (!row) return false;
+  return !row.stripe_subscription_id && !row.current_period_end && !row.comped_until && !row.is_comped;
 }
 
 export type AccessReason =
@@ -132,6 +152,15 @@ export function evaluateAccess(
    */
   if ((sub.status as string | null) === "cancelled") {
     sub = { ...sub, status: "canceled" };
+  }
+  /*
+   * An abandoned signup (registered, never paid) is not a cancellation: the
+   * signup trigger wrote 'cancelled' on a row that never had a subscription.
+   * It reads as no subscription ("choose a plan to get started"), and admin
+   * shows it as an abandoned cart, not "cancelled" (client, Oct 2026).
+   */
+  if (sub.neverPaid && sub.status === "canceled" && !sub.isPaused) {
+    return { allowed: false, reason: "no_subscription", warn: false, daysRemaining: null };
   }
 
   /**

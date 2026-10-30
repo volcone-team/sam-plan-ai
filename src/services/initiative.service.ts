@@ -16,6 +16,7 @@ import { isSupabaseConfigured, getSupabase } from '@/lib/supabase/db';
 import { toDateOnly, parseDateOnly } from '@/lib/plan-dates';
 import { readMetricSet } from '@/lib/metrics/metric-set';
 import { overlapsPeriod } from '@/lib/initiatives/schedule';
+import { withOccurrenceFallback, withOccurrenceOverride } from '@/lib/initiatives/occurrences';
 import { isRepeatFrequency } from '@/lib/intake-forecast';
 
 /** repeat_frequency column, else attrs.repeat_frequency; null when neither is a known slug. */
@@ -312,8 +313,18 @@ export class InitiativeService {
         // Never "" into a uuid/date column; see build-update.ts.
         const updateData = buildInitiativeUpdate(dto);
 
+        const currentAttrs = async () => {
+          const { data: current } = await supabase.from('initiatives').select('attrs').eq('id', id).maybeSingle();
+          return (current?.attrs as Record<string, unknown> | null) ?? null;
+        };
+        // Migration 061 not applied: keep last occurrence / per occurrence in attrs.
         const run = (payload: Record<string, unknown>) =>
-          supabase.from('initiatives').update(payload).eq('id', id).select().single();
+          withOccurrenceFallback(
+            payload,
+            (p) => supabase.from('initiatives').update(p).eq('id', id).select().single(),
+            '[initiative update]',
+            currentAttrs
+          );
         let { data, error } = await run(updateData);
         // A frequency the CHECK does not accept yet (migration 051 not applied):
         // keep it in attrs instead, merged over the row's current attrs.
@@ -334,6 +345,31 @@ export class InitiativeService {
     // Mock data removed - return empty
     console.log("[initiative] No data in Supabase, returning empty");
     throw new Error("Not found");
+  }
+
+  /**
+   * Move ONE occurrence of a recurring initiative to `to`, or put it back on
+   * its scheduled date (`to` = null). Writes attrs.occurrence_overrides only,
+   * merged over the row's attrs as they are now, so other attrs and other
+   * moves are never lost. The schedule (first occurrence + frequency) is
+   * untouched, so every other occurrence keeps its calculated date.
+   */
+  async moveOccurrence(id: string, scheduled: string, to: string | null): Promise<Initiative> {
+    if (!isSupabaseConfigured()) throw new Error("Not found");
+    const supabase = getSupabase();
+    const { data: current, error: readError } = await supabase
+      .from('initiatives')
+      .select('attrs')
+      .eq('id', id)
+      .maybeSingle();
+    if (readError || !current) throw new Error(readError?.message ?? "Not found");
+    const attrs = withOccurrenceOverride(current.attrs as Record<string, unknown> | null, scheduled, to);
+    const { data, error } = await supabase.from('initiatives').update({ attrs }).eq('id', id).select().single();
+    if (error || !data) {
+      console.error("[Supabase initiatives] moveOccurrence", error?.message);
+      throw new Error(error?.message ?? "Could not save the date");
+    }
+    return this.mapRowToInitiative(data);
   }
 
   async updateInitiativeStatus(id: string, status: InitiativeStatus): Promise<Initiative> {
@@ -446,6 +482,20 @@ export class InitiativeService {
       // Migration 036 column first, then attrs (where POST /api/initiatives
       // writes it) — the same order as frequencyOf in recurring-state.ts.
       repeatFrequency: readRepeatFrequency(row),
+      // Migration 061 columns; before 061 the values sit in attrs and are read
+      // through lastOccurrenceOf / perOccurrenceOf (occurrences.ts).
+      lastOccurrenceDate: row.last_occurrence_date ? parseDateOnly(row.last_occurrence_date as string) : null,
+      revenuePerOccurrence:
+        row.revenue_per_occurrence === null || row.revenue_per_occurrence === undefined
+          ? null
+          : Number(row.revenue_per_occurrence),
+      unitsGoal: row.units_goal === null || row.units_goal === undefined ? null : Number(row.units_goal),
+      unitPriceAtSet:
+        row.unit_price_at_set === null || row.unit_price_at_set === undefined ? null : Number(row.unit_price_at_set),
+      targetSource:
+        row.target_source === 'suggested' || row.target_source === 'edited' || row.target_source === 'migrated'
+          ? row.target_source
+          : null,
       trafficInput: row.traffic_input as number | undefined,
       revenueScenarios: {
         good: Number(row.revenue_good) || 0,

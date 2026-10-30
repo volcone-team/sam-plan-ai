@@ -1,4 +1,5 @@
 'use client';
+import { horizonEnd } from '@/lib/planning/revenue-spread';
 import { useCompanyId } from '@/hooks/use-auth';
 import { cacheInvalidatePrefix, CacheKeys } from '@/lib/client-cache';
 import { usePermissions } from '@/hooks/use-permission';
@@ -58,7 +59,22 @@ export default function InitiativesPage() {
   const [annualPlanId, setAnnualPlanId] = useState<string | null>(null);
   /** That plan's year, for the intake form's ongoing close-date default. */
   const [planYear, setPlanYear] = useState<number | null>(null);
-  const [products, setProducts] = useState<Array<{ id: string; name: string }>>([]);
+  const [products, setProducts] = useState<
+    Array<{ id: string; name: string; price: number | null; goalUnits: number | null }>
+  >([]);
+  /** The plan year's Good target (baseline), for the units suggestion's goal fallback. */
+  const [planGoal, setPlanGoal] = useState<number | null>(null);
+  /** Last day of the plan horizon: where a recurring series' occurrence cards stop. */
+  const [planEnd, setPlanEnd] = useState<string | null>(null);
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    planService
+      .getPlanHorizon(companyId)
+      .then(h => { if (!cancelled) setPlanEnd(horizonEnd(h?.planStartMonth, h?.horizonMonths)); })
+      .catch(() => { /* no horizon: twelve months from the first occurrence */ });
+    return () => { cancelled = true; };
+  }, [companyId]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [addPanelOpen, setAddPanelOpen] = useState(false);
@@ -89,6 +105,7 @@ export default function InitiativesPage() {
         }
         setAnnualPlanId(plan?.id ?? null);
         setPlanYear(plan?.year ?? null);
+        setPlanGoal(plan?.baselineRevenue ?? null);
 
         // Questionnaire fallback for the top-performers band. Best effort: it
         // only feeds an empty state, so a failure here must not break the page.
@@ -122,6 +139,9 @@ export default function InitiativesPage() {
           productsData.map(p => ({
             id: p.id,
             name: p.name,
+            // Target setting: Good = units x price; the goal is price x goalUnits.
+            price: p.price,
+            goalUnits: p.goalUnits ?? null,
           }))
         );
 
@@ -283,6 +303,7 @@ export default function InitiativesPage() {
         lastYearRanking={lastYearRanking}
         onInitiativeClick={handleInitiativeClick}
         onRemoveInitiative={canDelete ? handleRemoveInitiative : undefined}
+        planEnd={planEnd}
       />
 
       <AddInitiativePanel
@@ -292,6 +313,7 @@ export default function InitiativesPage() {
         products={products}
         annualPlanId={annualPlanId ?? ''}
         planYear={planYear}
+        planGoal={planGoal}
         handoffTargets={initiatives}
       />
     </PageContainer>

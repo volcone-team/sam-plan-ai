@@ -79,6 +79,8 @@ function filled(d: IntakeDraft, over: Partial<IntakeDraft> = {}): IntakeDraft {
       activation: { value: "2026-03-01", precision: "day" },
       event: { value: "2026-03-20", precision: "day" },
       close: { value: "2026-03-31", precision: "day" },
+      // Recurring drafts only (migration 061): where the series ends.
+      last: { value: "2026-12-31", precision: "day" },
     },
     revenue: { mode: "goal", goal: 1000, lines: {} },
     promotedBy: ["email-list"],
@@ -344,7 +346,7 @@ describe("buildCreateRequest", () => {
     const cfg = config({
       revenueLines: [
         { id: "main", priceSource: "product.price", windowOpens: "cart_opens", windowCloses: "cart_closes" },
-        { id: "vip", priceSource: "vip_price", windowOpens: "cart_opens", windowCloses: "cart_closes" },
+        { id: "vip", priceSource: "attrs.entry_price", windowOpens: "cart_opens", windowCloses: "cart_closes" },
       ],
     });
     const d = filled(initialDraft(item("webinars"), cfg), { revenue: { mode: "lines", goal: null, lines: { main: 800, vip: "200" } } });
@@ -397,21 +399,21 @@ const funnelDraft = (over: Partial<IntakeDraft> = {}) =>
   filled(initialDraft(item("funnels-launches-promotions"), FUNNEL), { conversionPath: "offer", ...over });
 
 describe("block gating comes from layout.blocks", () => {
-  it("attaches cart on offer only, VIP and affiliate by category", () => {
+  it("attaches cart on offer only, and affiliate by category (VIP deleted)", () => {
     const offer = attachedBlockIds(layoutFor(funnelDraft(), FUNNEL));
-    expect([...offer].filter((b) => ["cart", "vip", "affiliate"].includes(b)).sort()).toEqual(["affiliate", "cart", "vip"]);
+    expect([...offer].filter((b) => ["cart", "vip", "affiliate"].includes(b)).sort()).toEqual(["affiliate", "cart"]);
     expect(attachedBlockIds(layoutFor(funnelDraft({ conversionPath: "calls" }), FUNNEL)).has("cart")).toBe(false);
     const ads = attachedBlockIds(layoutFor(filled(initialDraft(item("paid-ads"), config())), config()));
     expect(ads.has("vip") || ads.has("affiliate")).toBe(false);
     const web = attachedBlockIds(layoutFor(filled(initialDraft(item("webinars"), config())), config()));
-    expect(web.has("vip")).toBe(true);
+    // The VIP block was deleted (client, Oct 2026).
+    expect(web.has("vip")).toBe(false);
     expect(web.has("affiliate")).toBe(false);
   });
 
   it("starts every block unanswered", () => {
     const d = initialDraft(item("funnels-launches-promotions"), FUNNEL);
     expect(d.cart.opens.value).toBeNull();
-    expect(d.vip.offered).toBeNull();
     expect(d.commission.offered).toBeNull();
     expect(d.funnels).toEqual({ optin: null, sales: null });
   });
@@ -439,32 +441,11 @@ describe("cart block", () => {
   });
 });
 
-describe("VIP block", () => {
-  const vip = (v: Partial<IntakeDraft["vip"]>) =>
-    funnelDraft({ vip: { offered: true, price: null, capacity: null, included: "", ...v } });
-
-  it("requires a price only when offered", () => {
-    expect(draftErrors(vip({}), FUNNEL)["vip.price"]).toMatch(/Enter the VIP price/);
-    expect(draftErrors(vip({ price: "0" }), FUNNEL)["vip.price"]).toMatch(/valid/);
-    expect(draftErrors(vip({ offered: false }), FUNNEL)["vip.price"]).toBeUndefined();
-    expect(draftErrors(vip({ price: 500, capacity: "2.5" }), FUNNEL)["vip.capacity"]).toMatch(/whole/);
-  });
-
-  it("writes attrs.vip with the four keys", () => {
-    const req = buildCreateRequest(vip({ price: "497", capacity: "20", included: " Q&A call " }), FUNNEL, PLAN);
-    expect(req.attrs?.vip).toEqual({ offered: true, price: 497, capacity: 20, included: "Q&A call" });
-    const no = buildCreateRequest(vip({ offered: false, price: 497 }), FUNNEL, PLAN);
-    expect(no.attrs?.vip).toEqual({ offered: false, price: null, capacity: null, included: null });
-    expect(buildCreateRequest(funnelDraft(), FUNNEL, PLAN).attrs).not.toHaveProperty("vip");
-  });
-
-  it("drops VIP answers where the block is detached (and ignores them for errors)", () => {
-    const d = filled(initialDraft(item("paid-ads"), config()), {
-      vip: { offered: true, price: null, capacity: null, included: "x" },
-      attrs: { vip: { offered: true } },
-    });
-    expect(draftErrors(d, config())).toEqual({});
-    expect(buildCreateRequest(d, config(), PLAN).attrs).not.toHaveProperty("vip");
+describe("VIP (deleted, client Oct 2026)", () => {
+  it("is never asked and never written, even with a stale attrs.vip", () => {
+    const d = filled(initialDraft(item("funnels-launches-promotions"), FUNNEL), { attrs: { vip: { offered: true } } });
+    expect(attachedBlockIds(layoutFor(d, FUNNEL)).has("vip")).toBe(false);
+    expect(buildCreateRequest(d, FUNNEL, PLAN).attrs).not.toHaveProperty("vip");
   });
 });
 
@@ -618,7 +599,6 @@ describe("block answers in extras cannot be smuggled", () => {
       plannedBudget: 900,
       adPlatforms: ["google"],
       promoPlan: { who: "Acme", sending: ["dont-know"], sends: 2 },
-      vip: { offered: true, price: 997, capacity: null, included: "" },
       affiliate: { partnerCount: 4, recruitment: "confirmed", terms: "" },
       funnels: { optin: false, sales: true },
       commission: { offered: true, basis: "percent", rate: 20 },

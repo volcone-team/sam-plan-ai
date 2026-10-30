@@ -7,8 +7,6 @@ import {
   initiativeKindForCadence,
   scenariosFor,
   planTargets,
-  GOOD_MULTIPLIER,
-  BEST_MULTIPLIER,
 } from "./build-forecast";
 import { CADENCE_OPTIONS } from "./schema";
 
@@ -137,15 +135,14 @@ describe("forecastForStoredInitiative", () => {
 });
 
 describe("scenariosFor", () => {
-  it("uses the forecast itself as the better case", () => {
-    // "Better assumes they land as planned" — the user's own funnel figures.
-    expect(scenariosFor(10000).better).toBe(10000);
+  it("uses the forecast itself as the Good target (one target, spec Oct 2026)", () => {
+    expect(scenariosFor(10000).good).toBe(10000);
   });
 
-  it("brackets it at the same spread the generator uses", () => {
+  it("derives Better and Best at +10% / +20%, as every form does", () => {
     const s = scenariosFor(10000);
-    expect(s.good).toBe(10000 * GOOD_MULTIPLIER);
-    expect(s.best).toBe(10000 * BEST_MULTIPLIER);
+    expect(s.better).toBe(11000);
+    expect(s.best).toBe(12000);
   });
 
   it("keeps good below better below best", () => {

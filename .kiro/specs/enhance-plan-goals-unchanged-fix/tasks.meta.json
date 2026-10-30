@@ -1,0 +1,209 @@
+{
+  "pbtResults": {
+    "1. Write bug condition exploration test": {
+      "status": "passed",
+      "failingExample": "Fails on unfixed code as expected (4/4): applySuggestion target_change {baselineRevenue:\"5910344\"} → annual_plans.update({baseline_revenue:5910344}) on newest plan \"plan-newest\" + companies.update({baseline_revenue:5910344}) (all 50 generated rows wrote both tables); buildSuggestionRows stored target_change rows (run 0: proposed {baselineRevenue:0} and {baselineRevenue:\"174121\"}); toClientSuggestions returned pending target_change \"sugg-0\"; ENHANCE_SYSTEM_PROMPT contains \"target_change\".",
+      "lastRunTimestamp": 1793374028807
+    },
+    "2. Write preservation property tests (BEFORE implementing fix)": {
+      "status": "passed",
+      "lastRunTimestamp": 1793374251574
+    },
+    "3.7 Verify bug condition exploration test now passes": {
+      "status": "passed",
+      "lastRunTimestamp": 1793374632960
+    },
+    "3.8 Verify preservation tests still pass": {
+      "status": "passed",
+      "lastRunTimestamp": 1793374633625
+    }
+  },
+  "executionHistory": {
+    "0. Create testable seams (behaviour-neutral moves, no fix yet)": [
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373743283
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373765805
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373959485
+      }
+    ],
+    "1. Write bug condition exploration test": [
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373743403
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373960337
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793374065225
+      }
+    ],
+    "2. Write preservation property tests (BEFORE implementing fix)": [
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373743449
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793374066618
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793374281532
+      }
+    ],
+    "3.1 Add the policy module": [
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373743501
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793374290118
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793374480930
+      }
+    ],
+    "3.2 Stop asking for and storing goal changes": [
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373743566
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793374481280
+      }
+    ],
+    "3.3 Hide stored goal change suggestions": [
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373743643
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793374482255
+      }
+    ],
+    "3.4 Refuse goal change accepts on the server": [
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373743794
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793374483050
+      }
+    ],
+    "3.5 Update the Enhance Plan page": [
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373743860
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793374484638
+      }
+    ],
+    "3.6 Read-only affected-companies report": [
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373743933
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793374485413
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793374578367
+      }
+    ],
+    "3.7 Verify bug condition exploration test now passes": [
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373743981
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793374579862
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793375191361
+      }
+    ],
+    "3.8 Verify preservation tests still pass": [
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373744057
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793374580483
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793375192529
+      }
+    ],
+    "4. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793373744108
+      },
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793375193198
+      }
+    ],
+    "3. Fix for Enhance Plan changing baseline and stretch goals": [
+      {
+        "executionId": "b5330168-16bb-4998-b9fb-efbdbb237764",
+        "chatSessionId": "sess_e4118b93-0f60-4d28-9313-b229ee6feb29",
+        "timestamp": 1793375192638
+      }
+    ]
+  }
+}

@@ -16,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { cacheClearAll } from "@/lib/client-cache";
 import { pickMoneyFormatter } from "@/lib/results-tab-totals";
+import { ChangePlanButton } from "./change-plan-dialog";
 
 interface CompanyDetail {
   company: {
@@ -207,6 +208,9 @@ export function CompanyDetail({ companyId }: { companyId: string }) {
           </div>
         </div>
         <div className="flex flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2">
+          {/* Super admins only: the route refuses everyone else. */}
+          <ChangePlanButton companyId={companyId} companyName={company.name} />
           <button
             onClick={startImpersonation}
             disabled={impersonating}
@@ -219,6 +223,7 @@ export function CompanyDetail({ companyId }: { companyId: string }) {
             )}
             {impersonating ? "Signing in…" : "View Dashboard"}
           </button>
+          </div>
           {impersonateError && (
             <p role="alert" className="max-w-xs text-right text-xs text-red-600 dark:text-red-400">
               {impersonateError}

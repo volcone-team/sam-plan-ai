@@ -82,7 +82,6 @@ export const AUDIENCE_LABEL: Readonly<Record<RecordAudienceSource, string>> = Ob
 export const PRICE_SOURCE_LABEL: Readonly<Record<PriceSource, string>> = Object.freeze({
   "product.price": "Linked product's price",
   "attrs.entry_price": "Entry price (answered on the initiative)",
-  vip_price: "VIP price",
   host_fee: "Host fee",
 });
 

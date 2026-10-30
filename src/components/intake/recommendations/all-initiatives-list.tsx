@@ -18,6 +18,8 @@ export interface LibraryOption {
   eligible: boolean;
   reason: string | null;
   forecast: number;
+  /** SCORE Revenue 1-5: the weight in its product's share (target setting). */
+  revenueScore?: number;
   /** SCORE for display. Optional so an older response still renders. */
   score?: {
     total: number;
@@ -41,6 +43,8 @@ export interface AllInitiativesListProps {
   onToggle: (key: string) => void;
   /** The refusal notice, rendered here too so it is seen where the click was. */
   notice?: React.ReactNode;
+  /** Target setting: the product + units editor for a selected row. */
+  renderTarget?: (key: string) => React.ReactNode;
 }
 
 /**
@@ -60,6 +64,7 @@ export function AllInitiativesList({
   atCapacity,
   onToggle,
   notice,
+  renderTarget,
 }: AllInitiativesListProps) {
   const [search, setSearch] = React.useState("");
   const [hideNotFit, setHideNotFit] = React.useState(false);
@@ -229,6 +234,9 @@ export function AllInitiativesList({
                             )}
                           </span>
                         </button>
+                      )}
+                      {!own && selected && renderTarget && (
+                        <div className="flex justify-end px-3 pb-2.5">{renderTarget(option.key)}</div>
                       )}
                     </li>
                   );

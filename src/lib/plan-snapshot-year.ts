@@ -110,3 +110,70 @@ export function snapshotPlanTargets(snapshot: SnapshotYearSource | null | undefi
     operating_budget: num(plan.operating_budget),
   };
 }
+
+/* ------------------------------------------------------------------ *
+ * Multi-year snapshots (client, Oct 2026)
+ * ------------------------------------------------------------------ */
+
+/**
+ * A plan can span two calendar years (a 12-month plan from September), and
+ * deleting one year then restoring it used to wipe the other. Snapshots now
+ * carry EVERY year they touch:
+ *
+ *   annualPlans  every plan row the snapshot covers (id, year, targets)
+ *   years        those years, ascending
+ *
+ * Older snapshots carry only `annualPlan`; they still resolve, year by year,
+ * from the plan row and then the initiative's own dates.
+ */
+export interface MultiYearSnapshot extends SnapshotYearSource {
+  annualPlans?: { id?: unknown; year?: unknown }[] | null;
+  years?: unknown[] | null;
+}
+
+/** Snapshot plan row id -> its year, from annualPlans and annualPlan. */
+export function snapshotPlanYearsById(snapshot: MultiYearSnapshot | null | undefined): Map<string, number> {
+  const out = new Map<string, number>();
+  const rows = [...(snapshot?.annualPlans ?? []), ...(snapshot?.annualPlan ? [snapshot.annualPlan as { id?: unknown; year?: unknown }] : [])];
+  for (const row of rows) {
+    const year = toYear(row?.year);
+    if (typeof row?.id === "string" && year !== null) out.set(row.id, year);
+  }
+  return out;
+}
+
+/**
+ * The year ONE snapshot initiative is restored into: the year of the plan row
+ * it belonged to, else its own event / activation date, else `fallbackYear`.
+ * So a 2027 initiative of a 2026 plan goes back to 2026's plan, and a
+ * company-wide "before restore" snapshot puts each year's work back in its
+ * own year instead of filing everything under one.
+ */
+export function initiativeRestoreYear(
+  initiative: { annual_plan_id?: unknown; event_date?: unknown; activation_date?: unknown },
+  planYearsById: ReadonlyMap<string, number>,
+  fallbackYear: number
+): number {
+  if (typeof initiative.annual_plan_id === "string") {
+    const year = planYearsById.get(initiative.annual_plan_id);
+    if (year !== undefined) return year;
+  }
+  return toYear(initiative.event_date) ?? toYear(initiative.activation_date) ?? fallbackYear;
+}
+
+/** The targets a snapshot holds for one year, or null when it has none for it. */
+export function snapshotTargetsForYear(
+  snapshot: MultiYearSnapshot | null | undefined,
+  year: number
+): { baseline_revenue: number; stretch_revenue: number; operating_budget: number } | null {
+  const rows = [...(snapshot?.annualPlans ?? []), ...(snapshot?.annualPlan ? [snapshot.annualPlan] : [])];
+  const row = rows.find((r) => toYear((r as { year?: unknown })?.year) === year);
+  return row ? snapshotPlanTargets({ annualPlan: row as { year?: unknown } }) : null;
+}
+
+/** "2026" or "2026–2027" for a snapshot label. */
+export function yearsLabel(years: readonly number[]): string {
+  const sorted = [...new Set(years)].sort((a, b) => a - b);
+  if (sorted.length === 0) return "";
+  return sorted.length === 1 ? String(sorted[0]) : `${sorted[0]}–${sorted[sorted.length - 1]}`;
+}

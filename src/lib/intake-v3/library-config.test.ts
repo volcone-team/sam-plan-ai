@@ -1172,26 +1172,23 @@ describe("resolveFormLayout: conditional blocks", () => {
     ).not.toContain("affiliate");
   });
 
-  it("attaches the VIP block on launches, webinars and own events", () => {
+  it("never attaches a VIP block (client, Oct 2026: VIP deleted)", () => {
     for (const id of [
       "webinars",
       "funnels-launches-promotions",
       "your-own-event-in-person",
       "your-own-event-virtual",
+      "paid-ads",
     ] as const) {
-      expect(attachedBlocks(resolveFormLayout({ config: config(), category: cat(id) })), id).toContain(
-        "vip"
-      );
+      expect(attachedBlocks(resolveFormLayout({ config: config(), category: cat(id) })), id).not.toContain("vip");
     }
-    expect(
-      attachedBlocks(resolveFormLayout({ config: config(), category: cat("paid-ads") }))
-    ).not.toContain("vip");
   });
 
   it("reports every block either way, with a reason, not just the attached ones", () => {
     // The admin editor and the renderer both need to say WHY a block is absent.
     const layout = resolveFormLayout({ config: config(), category: cat("webinars") });
-    expect(layout.blocks).toHaveLength(6);
+    // Five since the VIP block was deleted (client, Oct 2026).
+    expect(layout.blocks).toHaveLength(5);
     for (const block of layout.blocks) expect(block.reason).not.toBe("");
   });
 });
@@ -1244,7 +1241,7 @@ describe("validateLibraryConfig", () => {
         allowedFrequencies: ["monthly", "quarterly"],
         revenueLines: [
           { id: "core", priceSource: "product.price", windowOpens: "cart_opens", windowCloses: "cart_closes" },
-          { id: "vip", priceSource: "vip_price", windowOpens: "cart_opens", windowCloses: "event_date" },
+          { id: "upsell", priceSource: "attrs.entry_price", windowOpens: "cart_opens", windowCloses: "event_date" },
         ],
         fieldExtras: [
           { key: "seats", label: "Seats", readBy: "forecast" },
@@ -1491,7 +1488,7 @@ describe("validateLibraryConfig", () => {
             allowedPaths: ["offer"],
             revenueLines: [
               { id: "core", priceSource: "product.price", windowOpens: "cart_opens", windowCloses: "cart_closes" },
-              { id: "core", priceSource: "vip_price", windowOpens: "cart_opens", windowCloses: "cart_closes" },
+              { id: "core", priceSource: "attrs.entry_price", windowOpens: "cart_opens", windowCloses: "cart_closes" },
             ],
           }),
           cat("webinars")

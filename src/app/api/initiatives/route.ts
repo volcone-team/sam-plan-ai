@@ -21,6 +21,8 @@ import { isInitiativeId } from "@/lib/initiatives/recurring-request";
 import { planYearForInitiative } from "@/lib/intake/plan-years";
 import { findAnnualPlan, getOrCreateAnnualPlan } from "@/lib/plans/annual-plan-store";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { withOccurrenceFallback } from "@/lib/initiatives/occurrences";
+import { answersFromInitiative, type TaskAnswers } from "@/lib/workbook/task-rules";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -237,9 +239,21 @@ export async function POST(request: NextRequest) {
         ...(req.activationDatePrecision !== undefined ? { activation_date_precision: req.activationDatePrecision } : {}),
         ...(req.eventDatePrecision !== undefined ? { event_date_precision: req.eventDatePrecision } : {}),
         ...(req.attrs !== undefined ? { attrs: req.attrs } : {}),
+        // Migration 061, recurring only. Kept in attrs when 061 is not applied.
+        ...(req.lastOccurrenceDate !== undefined ? { last_occurrence_date: req.lastOccurrenceDate } : {}),
+        ...(req.revenuePerOccurrence !== undefined ? { revenue_per_occurrence: req.revenuePerOccurrence } : {}),
+        // Migration 061: units x price (units per occurrence when recurring).
+        ...(req.unitsGoal !== undefined ? { units_goal: req.unitsGoal } : {}),
+        ...(req.unitPriceAtSet !== undefined ? { unit_price_at_set: req.unitPriceAtSet } : {}),
+        ...(req.targetSource !== undefined ? { target_source: req.targetSource } : {}),
       },
       req.libraryKey,
-      (row) => db.from("initiatives").insert(row).select("id").single(),
+      (row) =>
+        withOccurrenceFallback(
+          row,
+          (r) => db.from("initiatives").insert(r).select("id").single(),
+          "[initiatives/create]"
+        ),
       metricSet
     );
 
@@ -279,6 +293,13 @@ export async function POST(request: NextRequest) {
         // Both dates may be unset on a new-form request; today is the anchor then.
         eventDate: taskAnchorDate(req, todayDateOnly()),
         userId,
+        // The form's answers choose the task sections (client, Oct 2026).
+        answers: answersFromInitiative({
+          conversionPath: req.conversionPath ?? null,
+          format: req.format ?? null,
+          categoryId: req.categoryId ?? null,
+          attrs: req.attrs ?? null,
+        }),
       });
     }
 
@@ -305,12 +326,13 @@ async function attachTasks(
     libraryKey: string;
     eventDate: string;
     userId: string | null;
+    answers?: TaskAnswers;
   }
 ): Promise<number> {
   try {
     const resolved = await resolveTasks(
       db,
-      [{ libraryKey: args.libraryKey, eventDate: args.eventDate, floor: todayDateOnly() }],
+      [{ libraryKey: args.libraryKey, eventDate: args.eventDate, floor: todayDateOnly(), answers: args.answers }],
       { companyId: args.companyId, userId: args.userId, logLabel: "[initiatives/create]" }
     );
     const entry = resolved.get(args.libraryKey);

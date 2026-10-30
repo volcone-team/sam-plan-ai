@@ -62,7 +62,9 @@ describe('normalizeKey / canonicalKey', () => {
     expect(canonicalKey('Evergreen Webinar')).toBe('evergreen-webinars');
   });
   it('leaves an unaliased name as its normalised form', () => {
-    expect(canonicalKey('Referral')).toBe('referral');
+    expect(canonicalKey('Webinar Funnel')).toBe('webinar-funnel');
+    // Referral is aliased to the library's "Referrals" (Oct 2026 workbook).
+    expect(canonicalKey('Referral')).toBe('referrals');
   });
 
   /**

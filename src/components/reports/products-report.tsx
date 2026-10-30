@@ -5,7 +5,6 @@ import { useCompanyId } from '@/hooks/use-auth';
 import { useState, useEffect, useMemo } from 'react';
 import { Package, TrendingUp, Crown, BarChart3 } from 'lucide-react';
 import { productService } from '@/services/product.service';
-import { projectionService } from '@/services/projection.service';
 import { resultService } from '@/services/result.service';
 import { initiativeService } from '@/services/initiative.service';
 import type { Product, Result, Initiative } from '@/types';
@@ -60,19 +59,28 @@ export function ProductsReport() {
     async function loadData() {
       setLoading(true);
       try {
-        const [productsData, resultsData, initiativesData, projData] = await Promise.all([
+        const [productsData, resultsData, initiativesData] = await Promise.all([
           productService.getProductsByCompany(companyId),
           resultService.getResultsByDateRange(
             new Date(`${CURRENT_YEAR}-01-01`),
             new Date(`${CURRENT_YEAR}-12-31`)
           ),
           initiativeService.getInitiativesByCompany(companyId),
-          projectionService.getProjectedRevenueByProduct(companyId, 'better'),
         ]);
         setProducts(productsData);
         setResults(resultsData);
         setInitiatives(initiativesData);
-        setProjectedByProduct(projData);
+        /*
+         * Product progress = the sum of Good across the initiatives selling it
+         * (target-setting spec, Oct 2026). It used to read the `projections`
+         * table, which the intake build never writes, so it showed $0.
+         */
+        const goodByProduct = new Map<string, number>();
+        for (const i of initiativesData) {
+          if (!i.productId) continue;
+          goodByProduct.set(i.productId, (goodByProduct.get(i.productId) ?? 0) + (i.revenueScenarios?.good || 0));
+        }
+        setProjectedByProduct([...goodByProduct].map(([productId, revenue]) => ({ productId, revenue })));
       } catch (err) {
         console.error('Failed to load products report data:', err);
       } finally {

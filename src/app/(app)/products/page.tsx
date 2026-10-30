@@ -299,7 +299,7 @@ export default function ProductsPage() {
             </div>
             <div>
               <label htmlFor="add-product-price" className="mb-1 block text-xs font-medium text-[hsl(var(--foreground-muted))]">
-                Price
+                Price (average per customer per year for subscriptions)
               </label>
               <NumberInputRaw
                 id="add-product-price"
@@ -457,7 +457,7 @@ export default function ProductsPage() {
                     </div>
                     <div>
                       <label htmlFor="edit-product-price" className="mb-1 block text-xs font-medium text-[hsl(var(--foreground-muted))]">
-                        Price
+                        Price (average per customer per year for subscriptions)
                       </label>
                       <NumberInputRaw
                         id="edit-product-price"

@@ -32,7 +32,9 @@ export interface AddInitiativePanelProps {
   onClose: () => void;
   /** Posted to POST /api/initiatives by the caller. */
   onSubmit: (request: CreateInitiativeRequest) => Promise<void>;
-  products: Array<{ id: string; name: string }>;
+  products: Array<{ id: string; name: string; price?: number | null; goalUnits?: number | null }>;
+  /** The plan's Good target, for the units suggestion when a product has no goal. */
+  planGoal?: number | null;
   annualPlanId: string;
   /** The year of `annualPlanId`'s plan. The intake form defaults an ongoing close date to its end. */
   planYear?: number | null;
@@ -68,6 +70,7 @@ export function AddInitiativePanel({
   products,
   annualPlanId,
   planYear = null,
+  planGoal = null,
   handoffTargets,
 }: AddInitiativePanelProps) {
   const [step, setStep] = useState<PanelStep>('pick-type');
@@ -344,11 +347,13 @@ export function AddInitiativePanel({
                   products={products}
                   annualPlanId={annualPlanId}
                   planYear={planYear}
+                  planGoal={planGoal}
                   onBack={handleIntakeBack}
                   onSubmit={handleIntakeSubmit}
                   submitting={submitting}
                   error={submitError}
                   handoffTargets={handoffTargets}
+                  planInitiatives={handoffTargets}
                 />
               </div>
             ) : (
