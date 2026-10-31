@@ -37,6 +37,8 @@ export interface Option<V extends string = string> {
   label: string;
   /** Second line on card-style selects. */
   subLabel?: string;
+  /** Pills only: put the sub-label UNDER the label instead of beside it. */
+  subLabelBelow?: boolean;
 }
 
 /** Values only, for validation and for asserting against the DB constraints. */
@@ -309,9 +311,9 @@ export const DELIVERY_OPTIONS: readonly Option<
 
 /** Values match `intake_initiatives.cadence`. */
 export const CADENCE_OPTIONS: readonly Option<"once" | "repeat" | "always_on">[] = [
-  { value: "once", label: "Once", subLabel: "a launch or event" },
-  { value: "repeat", label: "On repeat" },
-  { value: "always_on", label: "Always on", subLabel: "evergreen" },
+  { value: "once", label: "Once", subLabel: "a launch or event", subLabelBelow: true },
+  { value: "repeat", label: "Regular intervals" },
+  { value: "always_on", label: "Evergreen", subLabel: "(Always on)", subLabelBelow: true },
 ];
 
 /** Revealed by "On repeat". Matches `intake_initiatives.repeat_frequency`. */
@@ -497,9 +499,15 @@ export const REQUIRED_PRODUCT_FIELDS = [
 /** Required on each planned-initiative card (REQ-8.1, REQ-8.5). */
 export const REQUIRED_INITIATIVE_FIELDS = ["initiative_key", "product_ids"] as const;
 
-/** Screen 3 needs at least one product; screen 5 at least one initiative. */
+/**
+ * Screen 3 needs at least one product. Screen 5 may be left with NO
+ * initiative (client, Oct 2026: "cancel or X out without choosing an
+ * initiative"); we then recommend them all, as on Path C. It still opens with
+ * one card to fill in (STARTING_PLANNED_INITIATIVES).
+ */
 export const MIN_PRODUCTS = 1;
-export const MIN_PLANNED_INITIATIVES = 1;
+export const MIN_PLANNED_INITIATIVES = 0;
+export const STARTING_PLANNED_INITIATIVES = 1;
 
 export function isRequired(screen: ScreenId, field: string): boolean {
   return REQUIRED_FIELDS[screen].includes(field);
@@ -677,7 +685,7 @@ export const FIELD_COPY: Record<
   // Screen 5
   initiative_key: { label: "What is it?" },
   product_ids: { label: "What does it sell?" },
-  cadence: { label: "How often does it run?" },
+  cadence: { label: "How often does this initiative occur?" },
   start_month: {
     label: "When does it start?",
     helper: "Optional. You can set dates on the calendar later.",

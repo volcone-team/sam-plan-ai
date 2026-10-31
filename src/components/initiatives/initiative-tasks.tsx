@@ -583,10 +583,10 @@ function TaskForm({ initialData, members, currentUserId, onSubmit, onCancel, tit
         </label>
         <textarea
           id="task-desc"
-          rows={2}
+          rows={6}
           value={formData.description}
           onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))}
-          className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-[hsl(var(--primary))] transition-colors resize-none"
+          className="w-full min-h-[9rem] max-h-[24rem] rounded-[var(--radius-md)] border border-border bg-background px-3 py-2.5 text-sm leading-relaxed outline-none focus:border-[hsl(var(--primary))] transition-colors resize-y"
           placeholder="Describe the task..."
         />
       </div>

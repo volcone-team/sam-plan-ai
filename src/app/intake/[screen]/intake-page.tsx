@@ -22,7 +22,7 @@ import {
   validateScreen,
   type ValidationResult,
 } from "@/lib/intake/validation";
-import { MIN_PRODUCTS, MIN_PLANNED_INITIATIVES } from "@/lib/intake/schema";
+import { MIN_PRODUCTS, STARTING_PLANNED_INITIATIVES } from "@/lib/intake/schema";
 import { productScreenDefaults } from "@/lib/intake/defaults";
 import { pathSelected, trackIntakeEvent } from "@/lib/intake/events";
 import type { PlanPath } from "@/lib/intake/flow";
@@ -95,6 +95,8 @@ export function IntakePage({ screen }: { screen: ScreenId }) {
    * Seeded here rather than in the initial draft state so a user who never
    * reaches the screen does not get an empty product row saved against them.
    */
+  /** Screen 5's starting card is added once per visit (see below). */
+  const seededInitiatives = React.useRef(false);
   React.useEffect(() => {
     if (draft.loading) return;
 
@@ -103,15 +105,16 @@ export function IntakePage({ screen }: { screen: ScreenId }) {
       return;
     }
 
-    // Screen 5 needs one card to fill in. Filtered on source because drafts
-    // saved before screen 6 became free text can still hold legacy 'worked' and
-    // 'failed' rows in the same array, and those must not count towards the
-    // planned minimum.
-    if (screen === "initiatives") {
+    // Screen 5 opens with one card to fill in, ONCE per visit: the user may
+    // remove it and continue with none, and it must not reappear. Filtered on
+    // source because drafts saved before screen 6 became free text can still
+    // hold legacy 'worked' and 'failed' rows in the same array.
+    if (screen === "initiatives" && !seededInitiatives.current) {
+      seededInitiatives.current = true;
       const planned = state.initiatives.filter(
         (i) => (i.source ?? "planned") === "planned"
       );
-      if (planned.length < MIN_PLANNED_INITIATIVES) {
+      if (planned.length < STARTING_PLANNED_INITIATIVES) {
         draft.setInitiatives([...state.initiatives, { source: "planned" }]);
       }
     }

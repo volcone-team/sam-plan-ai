@@ -226,7 +226,9 @@ export function MonthlyPlanner() {
 
   const targetRevenue = monthTarget;
   const moderateProjection = projections.better;
-  const progressPct = moderateProjection > 0 ? Math.min((actualRevenue / moderateProjection) * 100, 100) : 0;
+  // The label shows the real figure (e.g. 302%); only the bar stops at full.
+  const actualPct = moderateProjection > 0 ? (actualRevenue / moderateProjection) * 100 : 0;
+  const progressPct = Math.min(actualPct, 100);
 
   return (
     <div className="space-y-6">
@@ -287,7 +289,7 @@ export function MonthlyPlanner() {
             <span className="text-[hsl(var(--foreground-muted))]">
               Progress: Actual vs Projected (Better)
             </span>
-            <span className="font-medium">{progressPct.toFixed(1)}%</span>
+            <span className="font-medium">{actualPct.toFixed(1)}%</span>
           </div>
           <div className="h-3 bg-[hsl(var(--muted))] rounded-full overflow-hidden">
             <div

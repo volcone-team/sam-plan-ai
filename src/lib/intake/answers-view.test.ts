@@ -441,7 +441,7 @@ describe("toAnswerSections — planned initiatives", () => {
     expect(recordValue(webinar, FIELD_COPY.product_ids.label)).toBe(
       "Group coaching, Inner Circle"
     );
-    expect(recordValue(webinar, FIELD_COPY.cadence.label)).toBe("On repeat");
+    expect(recordValue(webinar, FIELD_COPY.cadence.label)).toBe("Regular intervals");
     expect(recordValue(webinar, "How often?")).toBe("Monthly");
     expect(recordValue(webinar, FIELD_COPY.start_month.label)).toBe("April 2027");
     expect(recordValue(webinar, FIELD_COPY.has_run_before.label)).toBe("Yes");

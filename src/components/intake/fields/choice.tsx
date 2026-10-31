@@ -158,6 +158,9 @@ export function PillSelect<V extends string>({
   error,
   compact,
 }: PillSelectProps<V>) {
+  /** Any option with its sub-label below: the whole row uses the two-line tile shape. */
+  const stackedRow = options.some((o) => o.subLabel && o.subLabelBelow);
+
   return (
     <div
       role="radiogroup"
@@ -176,10 +179,15 @@ export function PillSelect<V extends string>({
             key={option.value}
             htmlFor={id}
             title={option.subLabel}
+            data-stacked={stackedRow || undefined}
             className={cn(
               // Centred because the pills are now wider than their text, and
               // left-aligned labels in equal columns look accidental.
-              "flex cursor-pointer items-center justify-center gap-1.5 rounded-full border px-3.5 py-2 text-center text-sm",
+              // A sub-label sits UNDER the label (client, Oct 2026), so those
+              // options are a two-line tile rather than a one-line pill.
+              stackedRow
+                ? "flex cursor-pointer flex-col items-center justify-center gap-0.5 rounded-2xl border px-3.5 py-2 text-center text-sm leading-tight"
+                : "flex cursor-pointer items-center justify-center gap-1.5 rounded-full border px-3.5 py-2 text-center text-sm",
               !compact && fillTrailingItem(index, options.length),
               "transition-colors duration-[var(--duration-default)]",
               "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2",

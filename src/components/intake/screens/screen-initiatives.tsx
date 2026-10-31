@@ -79,9 +79,18 @@ export function ScreenInitiatives({
             onRemove={() =>
               setInitiatives(initiatives.filter((_, i) => i !== index))
             }
-            canRemove={planned.length > 1}
+            canRemove
           />
         ))}
+
+        {planned.length === 0 && (
+          <div className="rounded-[var(--radius-lg)] border border-dashed border-border px-4 py-6 text-center">
+            <p className="text-sm font-medium text-foreground">No initiatives added</p>
+            <p className="mt-1 text-sm text-[hsl(var(--foreground-muted))]">
+              That&apos;s fine. Continue and we&apos;ll recommend initiatives for you, or add one you already have in mind.
+            </p>
+          </div>
+        )}
 
         <FormError message={formError} />
 
@@ -92,7 +101,7 @@ export function ScreenInitiatives({
           className="w-full"
         >
           <Plus className="h-4 w-4" />
-          Add another initiative
+          {planned.length === 0 ? "Add an initiative" : "Add another initiative"}
         </Button>
       </div>
     </>

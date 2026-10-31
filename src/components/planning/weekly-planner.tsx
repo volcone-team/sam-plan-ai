@@ -280,8 +280,32 @@ export function WeeklyPlanner() {
     }
   };
 
+  /**
+   * A result for the whole company (no initiative) is confirmed first
+   * (client, Oct 2026): revenue an initiative already tracks would be counted
+   * twice. Holds the pending save while the dialog is open.
+   */
+  const [confirmCompanyResult, setConfirmCompanyResult] = useState(false);
+  useEffect(() => {
+    if (!confirmCompanyResult) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setConfirmCompanyResult(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [confirmCompanyResult]);
+
   const handleResultSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!resultInitiativeId) {
+      // Nothing to save yet: no dialog for an empty form.
+      if ((parseFloat(resultRevenue) || 0) === 0 && (parseFloat(resultSpend) || 0) === 0) return;
+      setConfirmCompanyResult(true);
+      return;
+    }
+    await saveResult();
+  };
+
+  const saveResult = async () => {
+    setConfirmCompanyResult(false);
     const revenue = parseFloat(resultRevenue) || 0;
     const spend = parseFloat(resultSpend) || 0;
     // Metrics only for a result logged against an initiative with a metric set.
@@ -352,7 +376,9 @@ export function WeeklyPlanner() {
   }
 
   const targetRevenue = weekTargetRevenue;
-  const progressPct = targetRevenue > 0 ? Math.min((actualRevenue / targetRevenue) * 100, 100) : 0;
+  // The label shows the real figure (e.g. 302%); only the bar stops at full.
+  const actualPct = targetRevenue > 0 ? (actualRevenue / targetRevenue) * 100 : 0;
+  const progressPct = Math.min(actualPct, 100);
   const isCurrentWeek = getWeekStart(new Date()).getTime() === weekStart.getTime();
 
   return (
@@ -397,6 +423,111 @@ export function WeeklyPlanner() {
         )}
       </div>
 
+      {/* Quick Result Entry: at the top, under the week selector (client, Oct 2026) */}
+      <div className="rounded-[var(--radius-lg)] border border-border bg-card p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <PlusCircle className="h-5 w-5 text-[hsl(var(--foreground-muted))]" />
+          <h3 className="text-lg font-semibold">Quick Result Entry</h3>
+        </div>
+
+        {resultSaved && (
+          <div className="rounded-[var(--radius-lg)] bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-700">
+            Result saved successfully!
+          </div>
+        )}
+
+        {!showResultForm ? (
+          <button
+            onClick={() => setShowResultForm(true)}
+            className="w-full py-4 rounded-[var(--radius-lg)] border-2 border-dashed border-border hover:border-[hsl(var(--primary))]/50 hover:bg-[hsl(var(--muted))]/30 transition-colors text-center"
+          >
+            <p className="text-sm font-medium text-[hsl(var(--foreground-muted))]">
+              Enter this week&apos;s results
+            </p>
+            <p className="text-xs text-[hsl(var(--foreground-muted))] mt-1">
+              Record revenue and spend to track progress
+            </p>
+          </button>
+        ) : (
+          <form onSubmit={handleResultSubmit} className="space-y-4">
+            {/* Only offered when there is something to attribute it to. */}
+            {initiatives.length > 0 && (
+              <div className="space-y-1.5">
+                <label htmlFor="result-initiative" className="text-sm font-medium">
+                  Initiative
+                </label>
+                <select
+                  id="result-initiative"
+                  value={resultInitiativeId}
+                  onChange={e => { setResultInitiativeId(e.target.value); setResultMetrics({}); }}
+                  className="w-full px-3 py-2 rounded-[var(--radius-lg)] border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/50"
+                >
+                  <option value="">Whole company (not a specific initiative)</option>
+                  {initiatives.map(init => (
+                    <option key={init.id} value={init.id}>{init.name}</option>
+                  ))}
+                </select>
+                {!resultInitiativeId && (
+                  <p className="text-xs text-[hsl(var(--foreground-muted))]">
+                    Only for results not tracked to an initiative. Results for a specific initiative go on its Results tab.
+                  </p>
+                )}
+              </div>
+            )}
+            {resultError && (
+              <p role="alert" className="text-sm text-[hsl(var(--destructive))]">{resultError}</p>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label htmlFor="result-revenue" className="text-sm font-medium">
+                  Revenue ($)
+                </label>
+                <NumberInputRaw
+                  id="result-revenue"
+                  value={resultRevenue}
+                  onValueChange={setResultRevenue}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2 rounded-[var(--radius-lg)] border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/50"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="result-spend" className="text-sm font-medium">
+                  Spend ($)
+                </label>
+                <NumberInputRaw
+                  id="result-spend"
+                  value={resultSpend}
+                  onValueChange={setResultSpend}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2 rounded-[var(--radius-lg)] border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/50"
+                />
+              </div>
+            </div>
+            {(() => {
+              const set = initiatives.find(i => i.id === resultInitiativeId)?.metricSet;
+              return set ? (
+                <MetricInputs set={set} values={resultMetrics} onChange={setResultMetrics} idPrefix="planner-result" />
+              ) : null;
+            })()}
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-[var(--radius-lg)] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-sm font-medium hover:opacity-90 transition-opacity"
+              >
+                Save Result
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowResultForm(false)}
+                className="px-4 py-2 rounded-[var(--radius-lg)] bg-[hsl(var(--muted))] text-sm font-medium hover:opacity-80 transition-opacity"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+
       {/* Weekly Revenue */}
       <div className="rounded-[var(--radius-lg)] border border-border bg-card p-6 space-y-4">
         <div className="flex items-center gap-2">
@@ -428,7 +559,7 @@ export function WeeklyPlanner() {
           <div className="space-y-2">
             <div className="flex items-center justify-between text-sm">
               <span className="text-[hsl(var(--foreground-muted))]">Progress vs Target</span>
-              <span className="font-medium">{progressPct.toFixed(0)}%</span>
+              <span className="font-medium">{actualPct.toFixed(0)}%</span>
             </div>
             <div className="h-3 bg-[hsl(var(--muted))] rounded-full overflow-hidden">
               <div
@@ -609,105 +740,57 @@ export function WeeklyPlanner() {
         )}
       </div>
 
-      {/* Quick Result Entry */}
-      <div className="rounded-[var(--radius-lg)] border border-border bg-card p-6 space-y-4">
-        <div className="flex items-center gap-2">
-          <PlusCircle className="h-5 w-5 text-[hsl(var(--foreground-muted))]" />
-          <h3 className="text-lg font-semibold">Quick Result Entry</h3>
-        </div>
-
-        {resultSaved && (
-          <div className="rounded-[var(--radius-lg)] bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-700">
-            Result saved successfully!
-          </div>
-        )}
-
-        {!showResultForm ? (
-          <button
-            onClick={() => setShowResultForm(true)}
-            className="w-full py-4 rounded-[var(--radius-lg)] border-2 border-dashed border-border hover:border-[hsl(var(--primary))]/50 hover:bg-[hsl(var(--muted))]/30 transition-colors text-center"
+      {/* Company-level result: confirm it is not already tracked to an initiative. */}
+      {confirmCompanyResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" aria-hidden="true" onClick={() => setConfirmCompanyResult(false)} />
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="company-result-title"
+            aria-describedby="company-result-body"
+            className="relative w-full max-w-md space-y-4 rounded-[var(--radius-lg)] border border-border bg-card p-6 shadow-lg"
           >
-            <p className="text-sm font-medium text-[hsl(var(--foreground-muted))]">
-              Enter this week&apos;s results
-            </p>
-            <p className="text-xs text-[hsl(var(--foreground-muted))] mt-1">
-              Record revenue and spend to track progress
-            </p>
-          </button>
-        ) : (
-          <form onSubmit={handleResultSubmit} className="space-y-4">
-            {/* Only offered when there is something to attribute it to. */}
-            {initiatives.length > 0 && (
-              <div className="space-y-1.5">
-                <label htmlFor="result-initiative" className="text-sm font-medium">
-                  Initiative
-                </label>
-                <select
-                  id="result-initiative"
-                  value={resultInitiativeId}
-                  onChange={e => { setResultInitiativeId(e.target.value); setResultMetrics({}); }}
-                  className="w-full px-3 py-2 rounded-[var(--radius-lg)] border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/50"
-                >
-                  <option value="">Whole company (not a specific initiative)</option>
-                  {initiatives.map(init => (
-                    <option key={init.id} value={init.id}>{init.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            {resultError && (
-              <p role="alert" className="text-sm text-[hsl(var(--destructive))]">{resultError}</p>
-            )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label htmlFor="result-revenue" className="text-sm font-medium">
-                  Revenue ($)
-                </label>
-                <NumberInputRaw
-                  id="result-revenue"
-                  value={resultRevenue}
-                  onValueChange={setResultRevenue}
-                  placeholder="0.00"
-                  className="w-full px-3 py-2 rounded-[var(--radius-lg)] border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/50"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="result-spend" className="text-sm font-medium">
-                  Spend ($)
-                </label>
-                <NumberInputRaw
-                  id="result-spend"
-                  value={resultSpend}
-                  onValueChange={setResultSpend}
-                  placeholder="0.00"
-                  className="w-full px-3 py-2 rounded-[var(--radius-lg)] border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/50"
-                />
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" aria-hidden="true" />
+              <div className="space-y-2">
+                <h2 id="company-result-title" className="text-base font-semibold">
+                  Is this result tracked to an initiative?
+                </h2>
+                <p id="company-result-body" className="text-sm leading-relaxed text-[hsl(var(--foreground-muted))]">
+                  Only add revenue here in the Quick Results that is not being tracked to an initiative or you
+                  will double count your results. If you want to enter revenue or other results from specific
+                  initiatives, please visit the initiative tab.
+                </p>
               </div>
             </div>
-            {(() => {
-              const set = initiatives.find(i => i.id === resultInitiativeId)?.metricSet;
-              return set ? (
-                <MetricInputs set={set} values={resultMetrics} onChange={setResultMetrics} idPrefix="planner-result" />
-              ) : null;
-            })()}
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
               <button
-                type="submit"
-                className="px-4 py-2 rounded-[var(--radius-lg)] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-sm font-medium hover:opacity-90 transition-opacity"
+                type="button"
+                onClick={() => { setConfirmCompanyResult(false); router.push('/initiatives'); }}
+                className="px-4 py-2 rounded-[var(--radius-lg)] border border-border text-sm font-medium hover:bg-[hsl(var(--muted))] transition-colors"
               >
-                Save Result
+                Go to Initiatives
               </button>
               <button
                 type="button"
-                onClick={() => setShowResultForm(false)}
+                autoFocus
+                onClick={() => setConfirmCompanyResult(false)}
                 className="px-4 py-2 rounded-[var(--radius-lg)] bg-[hsl(var(--muted))] text-sm font-medium hover:opacity-80 transition-opacity"
               >
                 Cancel
               </button>
+              <button
+                type="button"
+                onClick={() => void saveResult()}
+                className="px-4 py-2 rounded-[var(--radius-lg)] bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] text-sm font-medium hover:opacity-90 transition-opacity"
+              >
+                Save anyway
+              </button>
             </div>
-          </form>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
 
       {/* Weekly Notes */}
       {weeklyPlan?.notes && (

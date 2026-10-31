@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Trash2 } from "lucide-react";
+import { X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { DateInput } from "@/components/ui/date-input";
 import {
@@ -126,7 +126,7 @@ export function InitiativeCard({
             onClick={onRemove}
             className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] px-2 py-1 text-xs text-[hsl(var(--foreground-muted))] transition-colors hover:bg-[hsl(var(--destructive)_/_0.1)] hover:text-[hsl(var(--destructive))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
             Remove
           </button>
         )}

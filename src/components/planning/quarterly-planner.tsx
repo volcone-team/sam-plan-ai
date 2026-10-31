@@ -181,7 +181,9 @@ export function QuarterlyPlanner() {
   }
 
   const targetRevenue = quarterTarget;
-  const progressPct = targetRevenue > 0 ? Math.min((actualRevenue / targetRevenue) * 100, 100) : 0;
+  // The label shows the real figure (e.g. 302%); only the bar stops at full.
+  const actualPct = targetRevenue > 0 ? (actualRevenue / targetRevenue) * 100 : 0;
+  const progressPct = Math.min(actualPct, 100);
 
   return (
     <div className="space-y-6">
@@ -234,7 +236,7 @@ export function QuarterlyPlanner() {
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
             <span className="text-[hsl(var(--foreground-muted))]">Progress: Actual vs Target</span>
-            <span className="font-medium">{progressPct.toFixed(1)}%</span>
+            <span className="font-medium">{actualPct.toFixed(1)}%</span>
           </div>
           <div className="h-3 bg-[hsl(var(--muted))] rounded-full overflow-hidden">
             <div
